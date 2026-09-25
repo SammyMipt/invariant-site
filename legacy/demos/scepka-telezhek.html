@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сцепка тележек и центр масс</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-03/">&larr; Неделя 03</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=scepka-telezhek"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блоки главы `centr-mass` и `teorema-o-centre-mass`. Две тележки на
+   дорожке связаны пружиной; пружину сжимают и отпускают, тележки дёргаются
+   навстречу и врозь, а центр масс идёт по прямой с постоянной скоростью.
+   В обеих живых лекциях это было картинкой, здесь считается.
+
+   ЧИСЛА ИЗ ГЛАВЫ. Массы 1 кг и 3 кг, длина пружины без нагрузки 1 м: в
+   этом положении центр масс лежит в 3/4 м от лёгкой тележки и в 1/4 м от
+   тяжёлой, произведение массы на плечо у обеих одно, 1·0,75 = 3·0,25.
+   Жёсткость 20 Н/м, начальное сжатие 0,2 м, обе тележки на старте идут
+   с 0,2 м/с, то есть центр масс со старта имеет эту скорость.
+   Отсюда, для сверки: приведённая масса 3/4 кг, частота колебаний
+   √(20/0,75) = 5,164 рад/с, период 1,217 с; размах лёгкой тележки
+   относительно центра масс 0,15 м, тяжёлой 0,05 м; энергия пружины на
+   старте 0,4 Дж, энергия хода центра масс 0,08 Дж, всего 0,48 Дж.
+
+   УРАВНЕНИЯ. Сила пружины на первую тележку F = k(x₂ − x₁ − L₀), на
+   вторую −F: третий закон в коде выглядит как одна переменная с двумя
+   знаками. Наклон дорожки на угол α даёт обеим тележкам одно и то же
+   ускорение a = g·sin α вдоль дорожки; ползунок задаёт a, угол
+   пересчитывается только для рисунка.
+
+       v₁ += (F/m₁ + a)·h,    v₂ += (−F/m₂ + a)·h,
+       x₁ += v₁·h,            x₂ += v₂·h.
+
+   Это схема главы chislennoe-integrirovanie с обновлением скорости первой,
+   шаг h = 1/2400 с. За шаг импульс m₁v₁ + m₂v₂ меняется ровно на M·a·h:
+   слагаемые с F гасятся, потому что F одна и та же. Значит центр масс,
+   посчитанный из положений по определению (m₁x₁ + m₂x₂)/(m₁ + m₂),
+   проходит схему как одна точка с ускорением a, и при a = 0 его запись
+   прямая с точностью до округления. Ни прямая, ни парабола отдельно не
+   рисуются: обе выходят из счёта.
+
+   ЧТО МЕРЯЕТСЯ. Положения записываются 60 раз в секунду модельного
+   времени. Ускорение снимается с записи второй разностью по трём точкам
+   через Δ = 0,25 с: (x(t) − 2x(t − Δ) + x(t − 2Δ))/Δ². Для тележек это
+   число гуляет вместе с пружиной, для центра масс обязано совпасть с
+   Fвнеш/M = a; при нулевом наклоне это ноль в пределах счёта, порядок
+   10⁻¹³ м/с². Рядом печатается a по теореме: суммарная внешняя сила
+   (m₁ + m₂)·a на полную массу. Энергия K + U пружины − M·a·x_ц.м. лежит в
+   __demoState как контроль: у схемы с обновлением скорости первой она не
+   уплывает, а качается около начального значения на долю процента,
+   порядок ω·h.
+
+   Запись останавливается, когда центр масс доходит до отметки 2,5 м: на
+   дорожке в 3 м это 1,5 м хода, 7,5 с при нулевом наклоне и 1,54 с при
+   a = 1 м/с². Ось времени графика заранее рассчитана на это время. */
+
+var M1 = 1, M2 = 3, M = M1 + M2;     /* кг */
+var K = 20;                          /* Н/м */
+var L0 = 1;                          /* м, пружина без нагрузки */
+var SZH = 0.2;                       /* м, начальное сжатие */
+var VCM0 = 0.2;                      /* м/с, центр масс на старте */
+var XCM0 = 1.0;                      /* м, где центр масс на старте */
+var XSTOP = 2.5;                     /* м, отметка остановки записи */
+var DLINA = 3;                       /* м, длина дорожки */
+var G = 9.81;                        /* м/с², только для угла на рисунке */
+var H = 1 / 2400;                    /* с, шаг схемы */
+var REC = 40;                        /* шагов между засечками: 60 засечек в секунду */
+var TS = REC * H;                    /* с, интервал записи */
+var DB = 15;                         /* засечек в плече второй разности: 0,25 с */
+
+/* Начальное состояние: пружина сжата на SZH, обе тележки идут с VCM0,
+   центр масс стоит в XCM0. Положения выведены из определения центра
+   масс: лёгкая тележка на 3/4 длины пружины левее него, тяжёлая на 1/4
+   правее. Первая засечка записи делается сразу, при t = 0. */
+function sozdat() {
+  var s = L0 - SZH;
+  var st = { n: 0, t: 0,
+             x1: XCM0 - M2 / M * s, x2: XCM0 + M1 / M * s,
+             v1: VCM0, v2: VCM0,
+             zap: { x1: [], x2: [], xc: [] } };
+  zasech(st);
+  return st;
+}
+
+function centrMass(st) { return (M1 * st.x1 + M2 * st.x2) / M; }
+function skorostCM(st) { return (M1 * st.v1 + M2 * st.v2) / M; }
+
+function zasech(st) {
+  st.zap.x1.push(st.x1);
+  st.zap.x2.push(st.x2);
+  st.zap.xc.push(centrMass(st));
+}
+
+/* Один шаг схемы. Сила пружины считается один раз и входит в оба
+   уравнения с разными знаками: так третий закон выполнен точно, а не
+   с точностью до округления. */
+function shag(st, a) {
+  var F = K * (st.x2 - st.x1 - L0);
+  st.v1 += (F / M1 + a) * H;
+  st.v2 += (-F / M2 + a) * H;
+  st.x1 += st.v1 * H;
+  st.x2 += st.v2 * H;
+  st.n++;
+  st.t = st.n * H;
+  if (st.n % REC === 0) zasech(st);
+}
+
+/* Продвинуть модель на k шагов. Возвращает true, когда центр масс дошёл
+   до отметки; проверка стоит на засечке, чтобы запись кончалась ровно
+   на своей сетке и вторая разность брала равноотстоящие точки. */
+function prognat(st, a, k) {
+  for (var i = 0; i < k; i++) {
+    shag(st, a);
+    if (st.n % REC === 0 && centrMass(st) >= XSTOP) return true;
+  }
+  return false;
+}
+
+/* Полная энергия с потенциалом наклона: тяжесть вдоль дорожки даёт
+   каждой тележке −m·a·x, и сумма сохраняется при любом наклоне. */
+function energiya(st, a) {
+  var d = st.x2 - st.x1 - L0;
+  return 0.5 * M1 * st.v1 * st.v1 + 0.5 * M2 * st.v2 * st.v2 + 0.5 * K * d * d
+         - a * (M1 * st.x1 + M2 * st.x2);
+}
+
+/* Вторая разность по записи: три засечки через d интервалов, последняя
+   текущая. Пока записи меньше, чем на три точки, показания нет. */
+function vtorayaRaznost(arr, d) {
+  var j = arr.length - 1;
+  if (j < 2 * d) return null;
+  var dt = d * TS;
+  return (arr[j] - 2 * arr[j - d] + arr[j - 2 * d]) / (dt * dt);
+}
+
+/* Предел оси времени: когда центр масс, идущий как обещает теорема,
+   дойдёт до отметки. Сам прогон останавливает посчитанный центр масс, и
+   нарушься теорема в счёте, запись вылезла бы за ось. */
+function osVremeni(a) {
+  var L = XSTOP - XCM0;
+  if (a < 1e-9) return L / VCM0;
+  return (-VCM0 + Math.sqrt(VCM0 * VCM0 + 2 * a * L)) / a;
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Сверху дорожка, под ней график x(t), у которого время идёт вниз, а
+   положение отложено по горизонтали в том же масштабе, что на дорожке:
+   след каждой тележки висит прямо под ней, и линия центра масс начинается
+   под его маркером. Обычная ориентация, время вправо, здесь проигрывает:
+   ход центра масс за запись полтора метра, размах колебаний 0,15 м, и
+   при высоте графика в двести пикселей колебания ужались бы до десятка.
+
+   Дорожка при наклоне поворачивается вокруг середины на настоящий угол,
+   asin(a/g): при a = 1 м/с² это 5,9°, и видно, какая малость нужна,
+   чтобы прямая стала параболой. График не поворачивается, и положения на
+   нём отличаются от положений на повёрнутом рельсе множителем cos α, на
+   краях дорожки это два пикселя.
+
+   Шкала времени графика рассчитана на всю запись: при нулевом наклоне
+   7,5 с, при a = 1 м/с² 1,54 с, и деления ставятся через секунду или
+   полсекунды, смотря что помещается. */
+
+var W = 1000, HGT = 460;
+var SC = 220;                        /* px на метр, общий для дорожки и графика */
+var GX0 = 60;                        /* экранный x нуля дорожки */
+var TXM = GX0 + DLINA / 2 * SC;      /* середина дорожки, ось поворота при наклоне */
+var Y_TR = 96;                       /* рельс */
+var GY0 = 180, GY1 = 428;            /* график: t = 0 и предел оси времени */
+var RXC = 972, RXL = 850;            /* правые края столбца показаний и его левой половины */
+var Y_PRUZH = -23;                   /* высота пружины над рельсом: середина лёгкой тележки */
+var TAU = 6.2832;
+
+/* Цвета данных от темы не зависят: бирюза и охра, как у векторов в
+   рисунках главы. Центр масс идёт чернилами темы, он здесь главный. */
+var TEL = [
+  { rgb: '77,182,198', w: 36, h: 26, capt: '1 КГ', imya: '1 кг' },
+  { rgb: '224,138,82', w: 54, h: 36, capt: '3 КГ', imya: '3 кг' }
+];
+
+/* Русская запятая и настоящий минус; остатки счёта в последних знаках
+   печатались бы как «−0,000», а ноль есть ноль. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* Ускорения печатаются со знаком: знак говорит, куда вдоль дорожки. */
+function znak(v, d) {
+  var s = num(v, d);
+  return (v > 0 && s !== num(0, d)) ? '+' + s : s;
+}
+function ugol(a) { return Math.asin(a / G) * 180 / Math.PI; }
+
+function Scepka() {
+  /* До «Пуска» опыт стоит: тележки в исходном положении, пружина сжата,
+     запись пуста. Так же ведут себя остальные демки недели (решение
+     автора 11.09). */
+  var ref0 = useRef(null);
+  if (!ref0.current) {
+    ref0.current = { m: sozdat(), naklon: 0, run: false, done: false,
+                     predelOsi: osVremeni(0), E0: 0 };
+    ref0.current.E0 = energiya(ref0.current.m, 0);
+  }
+  var S = ref0.current;
+  /* Пара берётся из одного вызова useState: два отдельных дают два
+     независимых состояния, и рейка перестаёт отзываться на ползунок. */
+  var pair = useState({ run: false, naklon: 0, done: false });
+  var ui = pair[0], setUi = pair[1];
+
+  /* Показания пишутся из шага, а не из отрисовки компонента: автопроверка
+     двигает модель через __demoTick, рендера при этом нет. Объект S живёт
+     весь сеанс и правится на месте. */
+  function pokazaniya() {
+    var m = S.m, a = S.naklon;
+    S.t = m.t; S.x1 = m.x1; S.x2 = m.x2; S.v1 = m.v1; S.v2 = m.v2;
+    S.xcm = centrMass(m);
+    S.vcm = skorostCM(m);
+    S.aPoTeoreme = (M1 * a + M2 * a) / M;      /* сумма внешних сил на полную массу */
+    S.aPoGrafiku = vtorayaRaznost(m.zap.xc, DB);
+    S.a1PoGrafiku = vtorayaRaznost(m.zap.x1, DB);
+    S.a2PoGrafiku = vtorayaRaznost(m.zap.x2, DB);
+    S.E = energiya(m, a);
+    S.zasechek = m.zap.xc.length;
+  }
+  if (!window.__demoState) { pokazaniya(); window.__demoState = S; }
+
+  /* Кадр: целое число шагов схемы на пришедшее время. При 60 кадрах в
+     секунду это ровно сорок шагов, и модельное время идёт в реальном темпе. */
+  function step(dt) {
+    if (!S.run || S.done) return;
+    var k = Math.round(dt / H);
+    if (prognat(S.m, S.naklon, k)) {
+      S.done = true; S.run = false;
+      setUi({ run: false, naklon: S.naklon, done: true });
+    }
+    pokazaniya();
+  }
+
+  /* ── примитивы дорожки: координаты вдоль рельса, y вверх отрицателен ── */
+
+  function telezhka(ctx, x, T) {
+    ctx.fillStyle = 'rgba(' + T.rgb + ',.7)';
+    [-1, 1].forEach(function (s) {
+      ctx.beginPath(); ctx.arc(x + s * (T.w / 2 - 8), -5, 5, 0, TAU); ctx.fill();
+    });
+    C.roundRect(ctx, x - T.w / 2, -10 - T.h, T.w, T.h, 5);
+    ctx.fillStyle = 'rgba(' + T.rgb + ',.92)'; ctx.fill();
+    C.label(ctx, x, -T.h - 20, T.imya, 17, 'rgb(' + T.rgb + ')');
+  }
+
+  /* Пружина между торцами тележек: зигзаг на девять витков, растягивается
+     и сжимается вместе с расстоянием. */
+  function pruzhina(ctx, xa, xb, y, ink) {
+    var seg = 18, amp = 7, lead = 7;
+    var len = xb - xa - 2 * lead;
+    ctx.strokeStyle = 'rgba(' + ink + ',.8)'; ctx.lineWidth = 2;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(xa, y); ctx.lineTo(xa + lead, y);
+    for (var i = 1; i < seg; i++) {
+      ctx.lineTo(xa + lead + len * i / seg, y + (i % 2 ? -amp : amp));
+    }
+    ctx.lineTo(xb - lead, y); ctx.lineTo(xb, y);
+    ctx.stroke();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    var ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var m = S.m, a = S.naklon;
+    var alpha = Math.asin(a / G);
+    var xc = centrMass(m);
+    var i, x, t;
+
+    function lx(v) { return (v - DLINA / 2) * SC; }   /* вдоль рельса от середины */
+    function sx(v) { return GX0 + v * SC; }           /* на графике */
+    function ty(v) { return GY0 + v / S.predelOsi * (GY1 - GY0); }
+
+    /* ── дорожка, повёрнутая на угол наклона ── */
+    ctx.save();
+    ctx.translate(TXM, Y_TR);
+    ctx.rotate(alpha);
+
+    ctx.strokeStyle = 'rgba(' + ink + ',.55)'; ctx.lineWidth = 4; ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(lx(0), 0); ctx.lineTo(lx(DLINA), 0);
+    ctx.moveTo(lx(0), 0); ctx.lineTo(lx(0), -22);             /* упоры на концах */
+    ctx.moveTo(lx(DLINA), 0); ctx.lineTo(lx(DLINA), -22);
+    ctx.stroke();
+
+    /* Линейка под рельсом: риски через полметра, подписи через метр. */
+    ctx.strokeStyle = 'rgba(' + muted + ',.7)'; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (x = 0; x <= DLINA + 1e-9; x += 0.5) {
+      var big = Math.abs(x - Math.round(x)) < 1e-9;
+      ctx.moveTo(lx(x), 2); ctx.lineTo(lx(x), big ? 12 : 8);
+    }
+    ctx.stroke();
+    for (i = 0; i <= DLINA; i++) {
+      C.label(ctx, lx(i), 30, i ? i + ' м' : '0', 17, 'rgba(' + muted + ',.95)');
+    }
+
+    /* Отметка остановки записи: центр масс доходит до неё, и время встаёт.
+       Подпись стоит внизу графика, под линией остановки: в ряду линейки она
+       на финише ложилась впритык над подписью центра масс. */
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = 'rgba(' + acc + ',.9)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(lx(XSTOP), -16); ctx.lineTo(lx(XSTOP), 16); ctx.stroke();
+    ctx.restore();
+
+    pruzhina(ctx, lx(m.x1) + TEL[0].w / 2, lx(m.x2) - TEL[1].w / 2, Y_PRUZH, ink);
+    telezhka(ctx, lx(m.x1), TEL[0]);
+    telezhka(ctx, lx(m.x2), TEL[1]);
+
+    /* Маркер центра масс на рельсе: точка, посчитанная из положений
+       тележек, и ничего кроме. */
+    var cx = lx(xc);
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(cx, 0, 6.5, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(' + ink + ',.5)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(cx, 0, 11, 0, TAU); ctx.stroke();
+    C.label(ctx, cx, 52, 'центр масс', 17, 'rgb(' + ink + ')');
+    ctx.restore();
+
+    /* ── график: время вниз, положение по горизонтали ── */
+
+    /* Метровые линии продолжают линейку дорожки сквозь график. */
+    ctx.strokeStyle = 'rgba(' + ink + ',.10)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (x = 0; x <= DLINA + 1e-9; x += 1) { ctx.moveTo(sx(x), GY0); ctx.lineTo(sx(x), GY1); }
+    ctx.stroke();
+
+    /* Линия остановки сквозь график: след центра масс кончается ровно на ней. */
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = 'rgba(' + acc + ',.55)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(sx(XSTOP), GY0); ctx.lineTo(sx(XSTOP), GY1); ctx.stroke();
+    ctx.restore();
+    C.label(ctx, sx(XSTOP), GY1 + 22, 'стоп', 17, 'rgb(' + acc + ')');
+
+    var tick = S.predelOsi >= 4 ? 1 : 0.5;
+    ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(GX0, GY0); ctx.lineTo(GX0, GY1); ctx.stroke();
+    for (t = 0; t <= S.predelOsi + 1e-9; t += tick) {
+      var y = ty(t);
+      ctx.strokeStyle = 'rgba(' + muted + ',.6)';
+      ctx.beginPath(); ctx.moveTo(GX0 - 6, y); ctx.lineTo(GX0, y); ctx.stroke();
+      ctx.strokeStyle = 'rgba(' + ink + ',.07)';
+      ctx.beginPath(); ctx.moveTo(GX0, y); ctx.lineTo(sx(DLINA), y); ctx.stroke();
+      C.label(ctx, GX0 - 11, y + 6, t ? num(t, tick < 1 ? 1 : 0) + ' с' : '0', 17,
+              'rgba(' + muted + ',.95)', 'right');
+    }
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(GX0, GY0 - 2, sx(DLINA) - GX0 + 2, GY1 - GY0 + 4); ctx.clip();
+
+    function sled(arr, col, w) {
+      ctx.strokeStyle = col; ctx.lineWidth = w;
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (var j = 0; j < arr.length; j++) {
+        var px = sx(arr[j]), py = ty(j * TS);
+        if (j) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+      }
+      ctx.stroke();
+    }
+    sled(m.zap.x1, 'rgb(' + TEL[0].rgb + ')', 2.4);
+    sled(m.zap.x2, 'rgb(' + TEL[1].rgb + ')', 2.4);
+    sled(m.zap.xc, 'rgb(' + ink + ')', 3);
+
+    /* Строка «сейчас»: последняя засечка записи, концы всех трёх следов. */
+    var j = m.zap.xc.length - 1, yn = ty(j * TS);
+    ctx.setLineDash([4, 6]);
+    ctx.strokeStyle = 'rgba(' + muted + ',.55)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(GX0, yn); ctx.lineTo(sx(DLINA), yn); ctx.stroke();
+    ctx.setLineDash([]);
+    [[m.zap.x1[j], TEL[0].rgb], [m.zap.x2[j], TEL[1].rgb], [m.zap.xc[j], ink]].forEach(function (p) {
+      ctx.fillStyle = 'rgb(' + p[1] + ')';
+      ctx.beginPath(); ctx.arc(sx(p[0]), yn, 4.5, 0, TAU); ctx.fill();
+    });
+    ctx.restore();
+
+    /* Отвес от маркера центра масс к концу его следа. Маркер сидит на
+       повёрнутом рельсе, поэтому его место на экране считается через угол. */
+    var mx = TXM + cx * Math.cos(alpha) - 60 * Math.sin(alpha);
+    var my = Y_TR + cx * Math.sin(alpha) + 60 * Math.cos(alpha);
+    ctx.save();
+    ctx.setLineDash([3, 5]);
+    ctx.strokeStyle = 'rgba(' + ink + ',.35)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(sx(m.zap.xc[j]), yn - 6); ctx.stroke();
+    ctx.restore();
+
+    /* ── показания ── */
+    var mut = 'rgba(' + muted + ',.95)';
+    var tire = '—';
+    C.label(ctx, RXC, 50, 'ускорение центра масс, м/с²', 17, mut, 'right');
+    C.readout(ctx, RXC, 78, 'ПО ГРАФИКУ',
+              S.aPoGrafiku == null ? tire : znak(S.aPoGrafiku, 3), 'rgb(' + acc + ')');
+    C.readout(ctx, RXC, 150, 'ПО ТЕОРЕМЕ', znak(S.aPoTeoreme, 3), 'rgb(' + ink + ')');
+
+    C.label(ctx, RXC, 238, 'тележки по графику, м/с²', 17, mut, 'right');
+    C.readout(ctx, RXL, 266, TEL[0].capt,
+              S.a1PoGrafiku == null ? tire : znak(S.a1PoGrafiku, 2), 'rgb(' + TEL[0].rgb + ')');
+    C.readout(ctx, RXC, 266, TEL[1].capt,
+              S.a2PoGrafiku == null ? tire : znak(S.a2PoGrafiku, 2), 'rgb(' + TEL[1].rgb + ')');
+
+    C.label(ctx, RXC, 354, 'скорость центра масс, м/с', 17, mut, 'right');
+    C.readout(ctx, RXC, 382, 'ИМПУЛЬС / МАССА', num(S.vcm, 3), 'rgb(' + ink + ')');
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Чистые функции модели наружу: по ним автопроверка гоняет схему без
+     кадров и сверяет то же, что печатает сцена. */
+  window.__demoModel = { sozdat: sozdat, shag: shag, prognat: prognat, centrMass: centrMass,
+                         skorostCM: skorostCM, energiya: energiya, vtorayaRaznost: vtorayaRaznost,
+                         osVremeni: osVremeni, H: H, TS: TS, DB: DB };
+
+  function sbros() {
+    S.m = sozdat();
+    S.done = false;
+    S.predelOsi = osVremeni(S.naklon);
+    S.E0 = energiya(S.m, S.naklon);
+    pokazaniya();
+  }
+  /* «Пуск» отпускает пружину; после остановки записи он же повторяет опыт
+     с исходного положения. */
+  function pusk() {
+    if (S.done) { sbros(); S.run = true; }
+    else S.run = !S.run;
+    setUi({ run: S.run, naklon: S.naklon, done: S.done });
+  }
+  /* «Сброс» ставит тележки на старт и ждёт «Пуска». */
+  function naStart() {
+    sbros(); S.run = false;
+    setUi({ run: false, naklon: S.naklon, done: false });
+  }
+  /* Смена наклона тоже возвращает на старт: запись с изломом посередине
+     читалась бы как две записи, а ось времени рассчитана на одну. */
+  function naklonit(v) {
+    S.naklon = Math.round(v * 20) / 20;
+    naStart();
+  }
+
+  function slova() {
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var s;
+    if (S.zasechek <= 1 && !ui.run) {
+      return 'Пружина сжата на ' + A('0,2 м') + ' и удерживается защёлкой, центр масс стоит в ' +
+        'трёх четвертях пути от лёгкой тележки к тяжёлой. «Пуск» отпускает защёлку, и обе ' +
+        'тележки уходят со старта с ' + A('0,2 м/с') +
+        (S.naklon < 1e-9 ? '; дорожка горизонтальна.' :
+          '; дорожка наклонена, вдоль неё тянет тяжесть с ускорением ' +
+          A(num(S.naklon, 2) + ' м/с²') + '.');
+    }
+    if (S.naklon < 1e-9) {
+      s = 'Пружина гонит тележки навстречу и врозь, а точка, взвешенная массами ' +
+          '(три четверти пути от лёгкой к тяжёлой), идёт по прямой с постоянной скоростью ' +
+          A('0,2 м/с') + '. Внешних сил вдоль дорожки нет, силы пружины на две тележки ' +
+          'равны и противоположны, и ускорение центра масс, снятое с графика по трём ' +
+          'точкам, равно нулю.';
+    } else {
+      s = 'Дорожка наклонена, и тяжесть тянет обе тележки вдоль неё с ускорением ' +
+          A(num(S.naklon, 2) + ' м/с²') + '. Колебания те же, а линия центра масс стала ' +
+          'параболой: его ускорение по графику совпадает с внешней силой, делённой на ' +
+          'полную массу.';
+    }
+    if (ui.done) s += ' Центр масс дошёл до отметки, запись остановлена: «Пуск» повторяет ' +
+                      'опыт, «Сброс» возвращает на старт.';
+    return s;
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${naStart}>Сброс<//>
+        <//>
+        <${C.Slider} label="Наклон дорожки:" min=${0} max=${1} step=${0.05}
+                     value=${ui.naklon} onChange=${naklonit}
+                     display=${num(ui.naklon, 2) + ' м/с² · ' + num(ugol(ui.naklon), 1) + '°'} />
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(Scepka);
+</script>
+</body>
+</html>

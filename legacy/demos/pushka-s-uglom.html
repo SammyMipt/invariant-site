@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Орудие на гладкой площадке</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-03/">&larr; Неделя 03</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=pushka-s-uglom"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `integralnaya-forma`: орудие стоит на гладкой горизонтальной
+   площадке и стреляет под углом. Уравнение dp/dt = F_внеш векторное, и
+   вдоль каждой оси оно живёт своей жизнью. По горизонтали внешних сил нет,
+   и горизонтальный импульс системы «орудие плюс снаряд» до и после
+   выстрела один. По вертикали импульс не сохраняется, и мешает этому не
+   тяжесть, а опора: площадка не даёт орудию уйти вниз и за время выстрела
+   сообщает системе импульс вверх, равный вертикальному импульсу снаряда.
+
+   Числа брифа: M = 500 кг, m = 5 кг, u = 200 м/с относительно орудия.
+
+   ВЫСТРЕЛ мгновенный. Снаряд покидает ствол со скоростью u относительно
+   орудия, а орудие к этому мгновению уже откатывается со скоростью V.
+   Относительно земли снаряд идёт на (u cos α − V, u sin α). Горизонтальный
+   импульс системы сохраняется:
+
+       m (u cos α − V) − M V = 0,     откуда     V = m u cos α / (M + m).
+
+   Вертикальная скорость орудия остаётся нулём, площадка держит. Значит
+   вертикальный импульс системы прыгает от нуля до m u sin α, и ровно
+   столько за выстрел передала площадка. Импульс тяжести за мгновенный
+   выстрел нулевой: тяжесть ограничена, а время стремится к нулю, тот же
+   довод, что в главе про мяч у стены и ракету на осколки.
+
+   Проверочные числа брифа при α = 45°: V = 5·200·0,707/505 ≈ 1,40 м/с,
+   вертикальный импульс снаряда 5·200·0,707 ≈ 707 кг·м/с.
+
+   ПОЛЁТ. После выстрела снаряд летит под тяжестью g = 9,81 м/с² с высоты
+   дула, орудие катится назад с постоянной V: трения нет, тормозить его
+   нечему. Снаряд двигается шагами, точными для постоянного ускорения:
+
+       x += vx h,     y += vy h − g h²/2,     vy −= g h,
+
+   а формула параболы считается рядом и лежит в __demoState для сверки:
+   расхождение с шагами обязано быть на уровне округления. Момент падения
+   берётся из формулы, иначе последний шаг обрезал бы полёт на миллисекунды.
+
+   Геометрия орудия — оформление, в главе её нет. На дальность она почти не
+   влияет: дуло в трёх метрах над площадкой прибавляет к четырём километрам
+   при 45° около трёх метров. Считается всё равно честно, от дула. */
+
+var M_OR = 500;             /* масса орудия, кг */
+var M_SN = 5;               /* масса снаряда, кг */
+var U = 200;                /* скорость снаряда относительно орудия, м/с */
+var G = 9.81;               /* тяжесть, м/с² */
+var OS = 1.2;               /* ось ствола над площадкой, м */
+var STVOL = 3.0;            /* длина ствола, м */
+var SUB = 8;                /* подшагов на кадр */
+
+/* Всё, что выстрел определяет сразу: скорости, импульсы, время до земли. */
+function vystrel(alfa){
+  var a = alfa * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+  var V = M_SN * U * ca / (M_OR + M_SN);
+  var vx = U * ca - V, vy = U * sa;
+  var x0 = STVOL * ca, y0 = OS + STVOL * sa;         /* дуло относительно оси ствола на старте */
+  var T = (vy + Math.sqrt(vy * vy + 2 * G * y0)) / G; /* корень y(T) = 0 */
+  return {
+    alfa: alfa, V: V, vx: vx, vy: vy, x0: x0, y0: y0,
+    px_posle: M_SN * vx - M_OR * V,                   /* обязан быть нулём */
+    py_posle: M_SN * vy,
+    opora: M_SN * vy,                                 /* импульс от площадки, вертикальный */
+    T: T,
+    dalnost: x0 + vx * T,
+    vysota: y0 + vy * vy / (2 * G)
+  };
+}
+
+/* Парабола по формуле: положение снаряда через t секунд после выстрела. */
+function parabola(v, t){
+  return { x: v.x0 + v.vx * t, y: v.y0 + v.vy * t - G * t * t / 2 };
+}
+
+/* Русский разделитель и настоящий минус. Целые без «−0»: горизонтальный
+   импульс после выстрела равен нулю с точностью округления, а −1e-13
+   печатался бы как «−0» и выглядел бы находкой. */
+function num(x, d){ return x.toFixed(d).replace('.', ',').replace('-', '−'); }
+function cel(x){ var r = Math.round(x); return r === 0 ? '0' : String(r).replace('-', '−'); }
+
+/* ══════════════════ сцена ══════════════════
+
+   Две панели: слева площадка в метрах, справа полёт в километрах. Один
+   масштаб на обе невозможен: откат за весь полёт сорок метров, дальность
+   четыре километра, и в одном кадре орудие стояло бы на месте.
+
+   Слева камера едет за орудием: само оно остаётся посреди панели, а
+   метровые риски площадки ползут вправо. Иначе при 1,4 м/с орудие уходило
+   бы за край панели через несколько секунд, а полёт длится полминуты.
+   Там же стрелки импульсов сразу после выстрела и таблица сохранения.
+
+   Справа масштаб подбирается под угол так, чтобы парабола влезла целиком,
+   по обеим осям одинаковый (иначе парабола врала бы формой), и объявляется
+   линейкой под землёй. */
+
+var W = 1000, HGT = 460;
+/* Орудие стоит левее середины: при горизонтальном стволе стрелка снаряда
+   уходит от дула на 129 px вправо и обязана влезть в панель. */
+var L = { x0: 20, x1: 570, verh: 44, yg: 345, gx: 350 }; /* площадка: края, верх, земля, орудие */
+var S1 = 26;                                              /* пикселей на метр слева */
+var S_P = 0.13;                                           /* пикселей на кг·м/с */
+var R = { x0: 600, x1: 985, verh: 60, yg: 362 };          /* полёт: края, потолок параболы, земля */
+
+var CV = '#4db6c6';   /* импульсы тел: бирюза скорости из рисунков главы */
+var CO = '#e08a52';   /* импульс от площадки: охра сил */
+
+function strelka(ctx, x0, y0, x1, y1, color, width, head){
+  var dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy);
+  if (len < 1) return;
+  var ux = dx / len, uy = dy / len;
+  head = head || Math.min(13, len * 0.32);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * head - uy * head * 0.34, y1 - uy * head + ux * head * 0.34);
+  ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.lineTo(x1 - ux * head + uy * head * 0.34, y1 - uy * head - ux * head * 0.34);
+  ctx.closePath(); ctx.fill();
+}
+
+/* Масштаб правой панели: парабола целиком, с полем по 12 px по краям. */
+function masshtab(v){
+  return Math.min((R.x1 - R.x0 - 24) / v.dalnost, (R.yg - R.verh) / v.vysota);
+}
+
+/* Линейка правой панели: круглая длина, не длиннее 200 px. */
+var LINEJKI = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+function linejka(S){
+  var L = LINEJKI[0];
+  for (var i = 0; i < LINEJKI.length; i++) if (LINEJKI[i] * S <= 200) L = LINEJKI[i];
+  return L;
+}
+
+function Demka(){
+  var st = useRef({
+    alfa: 45, faza: 'do', skor: 1,   /* фазы: do → polet → zemlya */
+    t: 0,                            /* время с выстрела, с */
+    v: null,                         /* vystrel() сделанного выстрела */
+    xo: 0,                           /* орудие: смещение по площадке, м; назад — минус */
+    xs: 0, ys: 0, vys: 0,            /* снаряд: положение, м, и вертикальная скорость */
+    sled: [],                        /* след снаряда, точки в метрах */
+    vsp: 9                           /* секунды с выстрела по часам кадра: вспышка у дула */
+  }).current;
+  /* Пара из одного useState: два отдельных дают два независимых состояния,
+     и рейка перестаёт отзываться (урок годографа). */
+  var pair = useState({ alfa: 45, faza: 'do', skor: 1 });
+  var ui = pair[0], setUi = pair[1];
+
+  function step(dt){
+    if (st.faza === 'do') { pokazaniya(); return; }
+    st.vsp += dt;
+    var h = dt * st.skor / SUB;
+    for (var i = 0; i < SUB; i++) {
+      st.t += h;
+      st.xo -= st.v.V * h;
+      if (st.faza === 'polet') {
+        st.xs += st.v.vx * h;
+        st.ys += st.vys * h - G * h * h / 2;
+        st.vys -= G * h;
+        if (st.ys <= 0) {
+          st.faza = 'zemlya';
+          st.xs = st.v.dalnost; st.ys = 0;
+          st.sled.push([st.xs, st.ys]);
+        }
+      }
+    }
+    if (st.faza === 'polet') st.sled.push([st.xs, st.ys]);
+    pokazaniya();
+    if (st.faza !== ui.faza) setUi({ alfa: st.alfa, faza: st.faza, skor: st.skor });
+  }
+
+  /* Показания пишутся из шага, а не из тела компонента: автопроверка
+     двигает модель через __demoTick без рендера. До выстрела «после»
+     не утверждается вовсе: null, а не прогноз. */
+  function pokazaniya(){
+    var v = st.v, an = v ? parabola(v, Math.min(st.t, v.T)) : null;
+    window.__demoState = {
+      alfa: st.alfa, M: M_OR, m: M_SN, u: U, g: G,
+      faza: st.faza, skor: st.skor, t: st.t,
+      px_do: 0, py_do: 0,
+      px_posle: v ? v.px_posle : null, py_posle: v ? v.py_posle : null,
+      opora_x: v ? 0 : null, opora_y: v ? v.opora : null,
+      V: v ? v.V : null, vx: v ? v.vx : null, vy: v ? v.vy : null,
+      v_sn: v ? Math.hypot(v.vx, v.vy) : null,
+      x_or: st.xo, x_sn: st.xs, y_sn: st.ys,
+      x_analit: an ? an.x : null, y_analit: an ? an.y : null,
+      T: v ? v.T : null, dalnost: v ? v.dalnost : null, vysota: v ? v.vysota : null
+    };
+  }
+
+  function sbros(alfa){
+    if (alfa != null) st.alfa = alfa;
+    st.faza = 'do'; st.v = null; st.t = 0; st.xo = 0;
+    st.xs = 0; st.ys = 0; st.vys = 0; st.sled = []; st.vsp = 9;
+    pokazaniya();
+    setUi({ alfa: st.alfa, faza: 'do', skor: st.skor });
+  }
+  function ogon(){
+    sbros();
+    var v = vystrel(st.alfa);
+    st.v = v; st.faza = 'polet'; st.vsp = 0;
+    st.xs = v.x0; st.ys = v.y0; st.vys = v.vy;
+    st.sled = [[v.x0, v.y0]];
+    pokazaniya();
+    setUi({ alfa: st.alfa, faza: 'polet', skor: st.skor });
+  }
+  function vremya(k){ st.skor = k; setUi({ alfa: st.alfa, faza: st.faza, skor: k }); }
+
+  /* Для прогона без рук: выставить угол и выстрелить из консоли. */
+  window.__demoVystrel = function(alfa){ if (alfa != null) st.alfa = alfa; ogon(); };
+  window.__demoFizika = { vystrel: vystrel, parabola: parabola };
+
+  /* ── левая панель: площадка ── */
+  function risPloshchadku(ctx, tone){
+    var muted = 'rgb(' + tone.muted + ')';
+    var a = st.alfa * Math.PI / 180;
+    var sx = function(xw){ return L.gx + (xw - st.xo) * S1; };
+    var sy = function(yw){ return L.yg - yw * S1; };
+    ctx.save();
+    ctx.beginPath(); ctx.rect(L.x0, L.verh, L.x1 - L.x0, L.yg + 40 - L.verh); ctx.clip();
+
+    /* Площадка с метровыми рисками. Камера едет за орудием, и риски
+       ползут вправо, пока оно откатывается влево; «старт» уезжает с ними. */
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.55)'; ctx.lineWidth = 2.2; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(L.x0, L.yg); ctx.lineTo(L.x1, L.yg); ctx.stroke();
+    var kmin = Math.ceil(st.xo + (L.x0 - L.gx) / S1), kmax = Math.floor(st.xo + (L.x1 - L.gx) / S1);
+    ctx.lineWidth = 1.4;
+    for (var k = kmin; k <= kmax; k++) {
+      var x = sx(k), big = k % 5 === 0;
+      ctx.beginPath(); ctx.moveTo(x, L.yg); ctx.lineTo(x, L.yg + (big ? 10 : 5)); ctx.stroke();
+      if (big) C.label(ctx, x, L.yg + 30, k === 0 ? 'старт' : cel(k) + ' м', 17, muted);
+    }
+
+    /* Орудие: колёса, ствол на оси, лафет поверх ствола. Колёса без спиц:
+       на гладкой площадке крутить их нечему, орудие скользит. */
+    var gx = L.gx, gy = sy(OS);
+    var mx = gx + STVOL * Math.cos(a) * S1, my = gy - STVOL * Math.sin(a) * S1;   /* дуло */
+    ctx.fillStyle = 'rgba(' + tone.muted + ',.95)';
+    ctx.beginPath(); ctx.arc(gx - 0.85 * S1, L.yg - 0.45 * S1, 0.45 * S1, 0, 6.2832); ctx.fill();
+    ctx.beginPath(); ctx.arc(gx + 0.85 * S1, L.yg - 0.45 * S1, 0.45 * S1, 0, 6.2832); ctx.fill();
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.85)'; ctx.lineWidth = 0.34 * S1; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(mx, my); ctx.stroke();
+    C.roundRect(ctx, gx - 1.2 * S1, L.yg - 1.4 * S1, 2.4 * S1, 0.8 * S1, 4);
+    ctx.fillStyle = 'rgba(' + tone.ink + ',.9)'; ctx.fill();
+    ctx.fillStyle = 'rgba(' + tone.muted + ',.95)';
+    ctx.beginPath(); ctx.arc(gx, gy, 3.5, 0, 6.2832); ctx.fill();
+
+    /* Снаряд виден здесь два-три кадра: 200 м/с это пять тысяч пикселей в
+       секунду. Вспышка у дула на четверть секунды по часам кадра говорит,
+       что выстрел был; она не физика, а отметка момента. */
+    if (st.faza !== 'do' && st.vsp < 0.25)
+      C.glow(ctx, mx, my, 44, tone.accent, (0.25 - st.vsp) / 0.25 * 0.9);
+    if (st.faza === 'polet') {
+      ctx.fillStyle = CV;
+      ctx.beginPath(); ctx.arc(sx(st.xs), sy(st.ys), 5, 0, 6.2832); ctx.fill();
+    }
+
+    /* Импульсы сразу после выстрела. Орудие и площадка — от оси ствола и
+       от точки опоры, снаряд — от дула, где он и родился: из одной точки
+       его стрелка легла бы прямо на ствол. Длины в одном масштабе, риска
+       под таблицей. */
+    var v = st.v;
+    if (v) {
+      strelka(ctx, gx, L.yg, gx, L.yg - v.opora * S_P, CO, 3.4);
+      strelka(ctx, gx, gy, gx - M_OR * v.V * S_P, gy, CV, 3.4);
+      strelka(ctx, mx, my, mx + M_SN * v.vx * S_P, my - M_SN * v.vy * S_P, CV, 3.4);
+      /* Подписи слева от орудия, где нет ни ствола, ни стрелки снаряда:
+         «площадка» на высоте острия своей стрелки, «орудие» под остриём
+         своей, но не ближе к лафету, чем его левый край: при 80° откат
+         мал и вся стрелка прячется в лафете. Короткая стрелка площадки
+         (ствол ниже 14°) остаётся без подписи, подпись её бы закрыла. */
+      if (v.opora * S_P > 30)
+        C.label(ctx, gx - 8, L.yg - v.opora * S_P + 6, 'площадка', 17, CO, 'right');
+      C.label(ctx, Math.min(gx - M_OR * v.V * S_P, gx - 1.2 * S1) - 6, gy + 6, 'орудие', 17, CV, 'right');
+      /* «Снаряд» над остриём, а у пологой стрелки над её серединой:
+         за остриём там уже край панели. */
+      var tx = mx + M_SN * v.vx * S_P, ty = my - M_SN * v.vy * S_P;
+      if (my - ty > 40) C.label(ctx, tx, ty - 12, 'снаряд', 17, CV);
+      else C.label(ctx, (mx + tx) / 2, ty - 14, 'снаряд', 17, CV);
+    }
+
+    /* Риска масштаба импульсов, под таблицей. */
+    strelka(ctx, 40, 212, 40 + 500 * S_P, 212, 'rgba(' + tone.muted + ',.85)', 3, 11);
+    C.label(ctx, 40 + 500 * S_P + 10, 217, 'импульс 500 кг·м/с', 17, muted, 'left');
+    ctx.restore();
+  }
+
+  /* Таблица сохранения: два столбика по осям, три строки. Третья строка —
+     разность первых двух, и в ней видно, что площадка добавила по
+     вертикали ровно столько, сколько не сошлось, а по горизонтали ничего.
+     Шрифты те же, что у C.readout; сам readout ставит подпись над числом
+     и в таблицу не складывается. */
+  function risTablicu(ctx, tone){
+    var muted = 'rgb(' + tone.muted + ')', ink = 'rgb(' + tone.ink + ')';
+    var X0 = 40, XG = 200, XV = 312, Y = 68, v = st.v;
+    ctx.font = '600 15px "JetBrains Mono", ui-monospace, monospace';
+    ctx.fillStyle = muted;
+    ctx.textAlign = 'left'; ctx.fillText('кг·м/с', X0, Y);
+    ctx.textAlign = 'right'; ctx.fillText('ГОРИЗОНТАЛЬ', XG, Y); ctx.fillText('ВЕРТИКАЛЬ', XV, Y);
+    var stroki = [
+      ['до',          '0',                        '0',                        ink],
+      ['сразу после', v ? cel(v.px_posle) : '—',  v ? cel(v.py_posle) : '—',  v ? ink : muted],
+      ['от площадки', v ? '0' : '—',              v ? cel(v.opora) : '—',     v ? CO : muted]
+    ];
+    for (var i = 0; i < stroki.length; i++) {
+      var y = Y + 38 + i * 36, s = stroki[i];
+      C.label(ctx, X0, y, s[0], 17, muted, 'left');
+      ctx.font = '600 28px "JetBrains Mono", ui-monospace, monospace';
+      ctx.fillStyle = s[3]; ctx.textAlign = 'right';
+      ctx.fillText(s[1], XG, y); ctx.fillText(s[2], XV, y);
+    }
+    ctx.textAlign = 'center';
+  }
+
+  /* ── правая панель: полёт ── */
+  function risPolet(ctx, tone){
+    var muted = 'rgb(' + tone.muted + ')';
+    var v = st.v || vystrel(st.alfa);        /* масштаб задаёт угол, выстрел его не меняет */
+    var S2 = masshtab(v);
+    var ox = R.x0 + 12, oy = R.yg;
+    var sx = function(xw){ return ox + xw * S2; };
+    var sy = function(yw){ return oy - yw * S2; };
+    ctx.save();
+    ctx.beginPath(); ctx.rect(R.x0, L.verh, R.x1 - R.x0, R.yg + 40 - L.verh); ctx.clip();
+
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.55)'; ctx.lineWidth = 2.2; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(R.x0, R.yg); ctx.lineTo(R.x1, R.yg); ctx.stroke();
+
+    /* Линейка под землёй: масштаб плавает с углом, и без неё картинка
+       ничего не значит. */
+    var Lm = linejka(S2), lx1 = R.x1 - 4, lx0 = lx1 - Lm * S2, ly = R.yg + 22;
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.85)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(lx0, ly); ctx.lineTo(lx1, ly);
+    ctx.moveTo(lx0, ly - 6); ctx.lineTo(lx0, ly + 6);
+    ctx.moveTo(lx1, ly - 6); ctx.lineTo(lx1, ly + 6);
+    ctx.stroke();
+    C.label(ctx, lx0 - 12, ly + 6, Lm >= 1000 ? cel(Lm / 1000) + ' км' : cel(Lm) + ' м', 17, muted, 'right');
+
+    /* Орудие здесь значок постоянного размера: в километрах его не видно,
+       а откат за весь полёт — считанные пиксели. Стоит оно на своём
+       честном месте. */
+    var a = st.alfa * Math.PI / 180, qx = sx(st.xo), qy = oy;
+    ctx.fillStyle = 'rgba(' + tone.ink + ',.9)';
+    ctx.fillRect(qx - 6, qy - 5, 12, 5);
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.85)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(qx, qy - 4); ctx.lineTo(qx + 12 * Math.cos(a), qy - 4 - 12 * Math.sin(a)); ctx.stroke();
+
+    if (st.v) {
+      /* Парабола по формуле, пунктиром: обещание. След снаряда поверх неё,
+         сплошной: как вышло по шагам. Совпадение и есть проверка. */
+      ctx.strokeStyle = 'rgba(' + tone.ink + ',.28)'; ctx.lineWidth = 1.6; ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      for (var i = 0; i <= 80; i++) {
+        var p = parabola(st.v, st.v.T * i / 80);
+        if (i === 0) ctx.moveTo(sx(p.x), sy(p.y)); else ctx.lineTo(sx(p.x), sy(p.y));
+      }
+      ctx.stroke(); ctx.setLineDash([]);
+      if (st.sled.length > 1) {
+        ctx.strokeStyle = CV; ctx.lineWidth = 2.6; ctx.lineJoin = 'round';
+        ctx.beginPath();
+        for (var j = 0; j < st.sled.length; j++) {
+          var px = sx(st.sled[j][0]), py = sy(st.sled[j][1]);
+          if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+      var hx = sx(st.xs), hy = sy(st.ys);
+      C.glow(ctx, hx, hy, 16, '77,182,198', .5);
+      ctx.fillStyle = CV;
+      ctx.beginPath(); ctx.arc(hx, hy, 5, 0, 6.2832); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function draw(ctx){
+    var tone = C.tones(ctx);
+    var ink = 'rgb(' + tone.ink + ')', muted = 'rgb(' + tone.muted + ')';
+    C.label(ctx, (L.x0 + L.x1) / 2, 34, 'ПЛОЩАДКА', 15, muted);
+    C.label(ctx, (R.x0 + R.x1) / 2, 34, 'ПОЛЁТ', 15, muted);
+    risPloshchadku(ctx, tone);
+    risTablicu(ctx, tone);
+    risPolet(ctx, tone);
+
+    /* Показания внизу. Снаряд относительно земли идёт медленнее 200 м/с:
+       орудие уходит из-под него. Пролетел и время бегут в полёте и
+       замирают на земле. */
+    var v = st.v, t = v ? Math.min(st.t, v.T) : 0;
+    C.readout(ctx, 180, HGT - 52, 'ОТКАТ, М/С', v ? num(v.V, 2) : '—', CV);
+    C.readout(ctx, 420, HGT - 52, 'СНАРЯД, М/С', v ? num(Math.hypot(v.vx, v.vy), 1) : '—', CV);
+    C.readout(ctx, 700, HGT - 52, 'ПРОЛЕТЕЛ, М', v ? cel(st.xs) : '—', ink);
+    C.readout(ctx, 930, HGT - 52, 'ВРЕМЯ, С', v ? num(t, 1) : '—', ink);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+
+  /* Строка показаний: что видно на сцене в этой фазе. */
+  function skaz(){
+    var v = st.v;
+    if (!v) return 'Всё в покое, импульс системы нуль по обеим осям. Ствол под ' + ui.alfa +
+      '°; снаряд выйдет из него на 200 м/с относительно орудия, а орудие к тому мгновению ' +
+      'уже откатывается.';
+    var s;
+    if (st.alfa === 0)
+      s = 'Ствол горизонтален. Откат ' + num(v.V, 2) + ' м/с против снаряда, сумма по горизонтали ' +
+          'осталась нулём; вертикального импульса у снаряда нет, и площадке нечего сообщать.';
+    else
+      s = 'По горизонтали внешних сил нет: откат ' + num(v.V, 2) + ' м/с уравновесил снаряд, сумма ' +
+          'осталась нулём. По вертикали площадка не пустила орудие вниз и за выстрел сообщила системе ' +
+          cel(v.opora) + ' кг·м/с вверх, ровно столько унёс снаряд.';
+    if (ui.faza === 'zemlya')
+      s += ' Снаряд упал в ' + cel(v.dalnost) + ' м через ' + num(v.T, 1) +
+           ' с; орудие катится дальше, остановить его на гладкой площадке нечему.';
+    return s;
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${ogon}>Выстрел<//>
+          <${C.Btn} onClick=${function(){ sbros(); }}>Сброс<//>
+        <//>
+        <${C.Slider} label="Угол ствола:" min=${0} max=${80} step=${1}
+                     value=${ui.alfa} onChange=${function(a){ sbros(a); }}
+                     display=${ui.alfa + '°'} />
+        <${C.Group} label="Время:">
+          <${C.Btn} active=${ui.skor === 1} onClick=${function(){ vremya(1); }}>×1<//>
+          <${C.Btn} active=${ui.skor === 10} onClick=${function(){ vremya(10); }}>×10<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${skaz()} />
+    </div>`;
+}
+
+C.mount(Demka);
+</script>
+</body>
+</html>

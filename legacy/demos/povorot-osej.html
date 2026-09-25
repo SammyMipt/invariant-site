@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Поворот осей: столбик меняется, стрелка нет</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+<style>
+/* Единственный класс сверх demo.css. Латех-слой поверх канвы красит подписи
+   в --muted (правило .stage-wrap .ax > span), но имена повёрнутых осей стоят
+   рядом с числами на сцене и обязаны читаться наравне с ними, то есть
+   чернилами темы. В demo.css не вынесено: файл сейчас правят другие демки. */
+.po-ink { color: var(--ink); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-02/">&larr; Неделя 02</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=povorot-osej"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* Поворот осей — неделя 02, блок «Выберем тело отсчёта и оси»
+   (sistema-otscheta), рисунок ris-tochka-v-dvuh-osyah.
+
+   ══════════════════ физика ══════════════════
+
+   На плоскости стоит одна точка. Оси, которыми её меряют, выбраны нами, и
+   выбрать их можно как угодно: это четвёртая договорённость главы. Поворот
+   осей на угол α пересчитывает столбик по формулам из sistema-otscheta
+
+       x' =  x·cos α + y·sin α,
+       y' = −x·sin α + y·cos α,
+
+   и оба числа зависят от α. Длина здесь не берётся готовой, а считается из
+   тех же пересчитанных чисел, √(x'² + y'²): только так видно, что она
+   выходит одной и той же при любом α, а не назначена такой.
+
+   Полярная пара строится на первой оси выбранного набора, поэтому при
+   повороте её угол уезжает вместе с осями, φ' = φ − α, а первое число пары
+   остаётся длиной. На сцене меняются четыре числа: x', y', φ' и сам α.
+   Не меняется одно, и это длина стрелки.
+
+   Числа рисунка ris-tochka-v-dvuh-osyah: точка x = 3, y = 4; при α = 30°
+   получается (4,60; 1,96); полярная пара от исходной оси (5; 53,13°).
+   Счёт: 3·cos30° + 4·sin30° = 4,598; −3·sin30° + 4·cos30° = 1,964;
+   √(4,598² + 1,964²) = 5,000; arctg(4/3) = 53,130°. */
+
+/* Кадр вытянут по горизонтали не для красоты: сцена с поворотом квадратная,
+   и высоту диктует она — подпись оси должна уместиться на радиусе 6 единиц
+   от начала. Всё, что шире квадрата, уходит журналу показаний справа. */
+var W = 1120, HGT = 460;
+var S = 34;                     /* пикселей на единицу длины */
+var O = { x: 300, y: 232 };     /* начало координат на сцене */
+var AXL = 5.4;                  /* полудлина оси в единицах длины */
+var REF = 3.4;                  /* пунктирный луч исходной оси x, от него мерят α */
+var PT = { x: 3, y: 4 };        /* точка рисунка: она же и есть предмет разговора */
+var SPIN = 26;                  /* градусов в секунду у крутилки */
+var RAD = Math.PI / 180;
+var PHI0 = Math.atan2(PT.y, PT.x) / RAD;          /* 53,130° — полярный угол от исходной оси */
+
+var TBL = { x: 640, r: 1090, top: 104, step: 50 }; /* журнал записей справа от сцены */
+
+/* Поворот осей на угол a (градусы). Точка не двигается, двигаются оси. */
+function shtrih(a){
+  var c = Math.cos(a * RAD), s = Math.sin(a * RAD);
+  return { x: PT.x * c + PT.y * s, y: -PT.x * s + PT.y * c };
+}
+
+/* Угол в диапазон (−180; 180]: дугу всегда рисуем короткой стороной, иначе
+   на краях ползунка φ' обходит почти полный круг. */
+function wrap180(a){
+  a = (a + 180) % 360;
+  if (a < 0) a += 360;
+  return a - 180;
+}
+
+/* Число для канвы: запятая вместо точки и настоящий минус. Порог отсекает
+   «−0,00» — при повороте, где координата проходит через ноль, знак у нуля
+   выглядел бы показанием. */
+function num(v, d){
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '\u2212');
+}
+/* То же число для формулы: латех сам сделает знак из дефиса, а запятая
+   в математике должна быть разделителем, а не знаком препинания. */
+function tnum(v, d){
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', '{,}');
+}
+
+/* Правило курса: буквы величин и формулы — только KaTeX. Канва латех не
+   умеет, поэтому имена осей и углов живут DOM-слоем поверх неё
+   (см. .stage-wrap в demo.css), а канве остаются линии и числа. */
+function kx(tex){
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+
+function sx(u){ return O.x + u * S; }
+function sy(v){ return O.y - v * S; }
+
+/* Стрелка с наконечником: хвост не доводится до острия, иначе при толстой
+   линии наконечник тупится. */
+function strela(ctx, x0, y0, x1, y1, col, wd, head){
+  var dx = x1 - x0, dy = y1 - y0, L = Math.sqrt(dx * dx + dy * dy) || 1;
+  var ux = dx / L, uy = dy / L, w = head * 0.42;
+  ctx.setLineDash([]);
+  ctx.strokeStyle = col; ctx.lineWidth = wd; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x1 - ux * head * 0.75, y1 - uy * head * 0.75);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * head - uy * w, y1 - uy * head + ux * w);
+  ctx.lineTo(x1 - ux * head + uy * w, y1 - uy * head - ux * w);
+  ctx.closePath();
+  ctx.fillStyle = col; ctx.fill();
+}
+
+/* Числа на сцене и в журнале моноширинные: при вращении осей они меняются
+   каждый кадр, и пропорциональные цифры дёргали бы столбик по ширине. */
+function mono(ctx, x, y, text, size, col, align){
+  ctx.fillStyle = col;
+  ctx.font = '600 ' + size + 'px "JetBrains Mono", ui-monospace, monospace';
+  ctx.textAlign = align || 'center';
+  ctx.fillText(text, x, y);
+  ctx.textAlign = 'center';
+}
+
+function Povorot(){
+  var st = useRef({ alpha: 30, dir: 1, spin: false, polar: false }).current;
+  var [ui, setUi] = useState({ alpha: 30, spin: false, polar: false });
+
+  function sync(){ setUi({ alpha: st.alpha, spin: st.spin, polar: st.polar }); }
+
+  /* Все показания собираются в одном месте: и то, что рисуется, и то, что
+     читает автопроверка через window.__demoState. */
+  function readings(){
+    var p = shtrih(st.alpha);
+    var len = Math.sqrt(p.x * p.x + p.y * p.y);
+    return {
+      alpha: st.alpha,
+      x: PT.x, y: PT.y,                 /* исходные оси: от поворота не зависят */
+      xShtrih: p.x, yShtrih: p.y,       /* повёрнутые оси: оба числа зависят */
+      dlina: len,                       /* корень из суммы квадратов повёрнутых чисел */
+      r: len,                           /* полярная пара: первое число — та же длина */
+      phi: PHI0,                        /* угол от исходной оси x, как на рисунке */
+      phiShtrih: wrap180(PHI0 - st.alpha),  /* тот же угол от повёрнутой оси x' */
+      polyarnye: st.polar, krutit: st.spin
+    };
+  }
+
+  /* Крутилка ходит туда-обратно: на краю диапазона она разворачивается, а не
+     перескакивает через ±180 — прыжок ручки ползунка читался бы сбоем. */
+  function step(dt){
+    if (!st.spin) return;
+    st.alpha += st.dir * SPIN * dt;
+    if (st.alpha >= 180) { st.alpha = 180; st.dir = -1; }
+    if (st.alpha <= -180) { st.alpha = -180; st.dir = 1; }
+    window.__demoState = readings();
+    sync();
+  }
+
+  /* ── сцена ──────────────────────────────────────────────── */
+
+  /* Сетка повёрнутых осей и есть наш выбор: точка стоит, а клетки, которыми
+     её меряют, едут вместе с осями. Обрезана кругом, чтобы у неё не было
+     угловатого края, который читался бы как ещё одна фигура. */
+  function setka(ctx, e1, e2, tone){
+    var R = 5.75 * S, k, a, b;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(O.x, O.y, R, 0, 6.284); ctx.clip();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.055)';
+    ctx.lineWidth = 1;
+    for (k = -6; k <= 6; k++) {
+      a = { x: e2.x * k - e1.x * 6.4, y: e2.y * k - e1.y * 6.4 };
+      b = { x: e2.x * k + e1.x * 6.4, y: e2.y * k + e1.y * 6.4 };
+      ctx.beginPath(); ctx.moveTo(sx(a.x), sy(a.y)); ctx.lineTo(sx(b.x), sy(b.y)); ctx.stroke();
+      a = { x: e1.x * k - e2.x * 6.4, y: e1.y * k - e2.y * 6.4 };
+      b = { x: e1.x * k + e2.x * 6.4, y: e1.y * k + e2.y * 6.4 };
+      ctx.beginPath(); ctx.moveTo(sx(a.x), sy(a.y)); ctx.lineTo(sx(b.x), sy(b.y)); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* Память о том, откуда отсчитан поворот: исходное направление оси x. */
+  function luch(ctx, tone){
+    ctx.setLineDash([6, 7]);
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.5)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(O.x, O.y); ctx.lineTo(sx(REF), sy(0)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  /* Дуга от угла a1 до a2 в градусах. Канва меряет углы по часовой стрелке
+     (ось y на экране смотрит вниз), поэтому знаки перевёрнуты. */
+  function duga(ctx, ru, a1, a2, rgb, al){
+    if (Math.abs(a2 - a1) < 1.2) return;
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(' + rgb + ',' + al + ')';
+    ctx.lineWidth = 1.7;
+    ctx.beginPath();
+    ctx.arc(O.x, O.y, ru * S, -a1 * RAD, -a2 * RAD, a2 > a1);
+    ctx.stroke();
+  }
+
+  /* Ось идёт через начало в обе стороны, наконечник только у положительного
+     направления. Отрицательная половина нужна не для симметрии: при большом
+     повороте проекция точки садится именно на неё. */
+  function os(ctx, e, tone){
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.16)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(sx(-e.x * AXL), sy(-e.y * AXL));
+    ctx.lineTo(O.x, O.y);
+    ctx.stroke();
+    strela(ctx, O.x, O.y, sx(e.x * AXL), sy(e.y * AXL),
+           'rgba(' + tone.ink + ',.5)', 1.8, 11);
+  }
+
+  /* Проекция точки на ось e: пунктир от точки до основания перпендикуляра,
+     риска поперёк оси и число рядом. Число отодвинуто на ту сторону оси, где
+     точки нет, иначе оно легло бы на пунктир. */
+  function proekciya(ctx, e, other, val, otherVal, tone){
+    var f = { x: e.x * val, y: e.y * val };
+    var sg = otherVal < 0 ? -1 : 1;
+    ctx.setLineDash([5, 6]);
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.55)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(sx(PT.x), sy(PT.y)); ctx.lineTo(sx(f.x), sy(f.y)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sx(f.x - other.x * 0.17), sy(f.y - other.y * 0.17));
+    ctx.lineTo(sx(f.x + other.x * 0.17), sy(f.y + other.y * 0.17));
+    ctx.stroke();
+    mono(ctx, sx(f.x - other.x * 0.62 * sg), sy(f.y - other.y * 0.62 * sg) + 7,
+         num(val, 2), 20, 'rgb(' + tone.ink + ')');
+  }
+
+  /* Стрелка из начала в точку. Она нарисована последней и не зависит от угла
+     вообще: ни одна её точка не сдвигается, пока крутятся оси. */
+  function strelka(ctx, tone){
+    var x = sx(PT.x), y = sy(PT.y);
+    C.glow(ctx, x, y, 26, tone.accent, .2);
+    strela(ctx, O.x, O.y, x, y, 'rgb(' + tone.accent + ')', 4, 16);
+    ctx.beginPath(); ctx.arc(O.x, O.y, 4, 0, 6.284);
+    ctx.fillStyle = 'rgb(' + tone.accent + ')'; ctx.fill();
+  }
+
+  /* ── журнал показаний ───────────────────────────────────── */
+
+  function zhurnal(ctx, tone, R){
+    var y = TBL.top;
+    C.label(ctx, TBL.x, y, 'ЗАПИСЬ ТОЧКИ', 15, 'rgb(' + tone.muted + ')', 'left');
+    y += 18;
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.14)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(TBL.x, y); ctx.lineTo(TBL.r, y); ctx.stroke();
+
+    y += 38;
+    C.label(ctx, TBL.x, y, 'оси как были', 19, 'rgb(' + tone.muted + ')', 'left');
+    mono(ctx, TBL.r, y, '(' + num(PT.x, 2) + '; ' + num(PT.y, 2) + ')',
+         21, 'rgba(' + tone.muted + ',.85)', 'right');
+
+    y += TBL.step;
+    C.label(ctx, TBL.x, y, 'оси повёрнуты', 19, 'rgb(' + tone.muted + ')', 'left');
+    mono(ctx, TBL.r, y, '(' + num(R.xShtrih, 2) + '; ' + num(R.yShtrih, 2) + ')',
+         21, 'rgb(' + tone.ink + ')', 'right');
+
+    if (R.polyarnye) {
+      y += TBL.step;
+      C.label(ctx, TBL.x, y, 'полярная, оси как были', 19, 'rgb(' + tone.muted + ')', 'left');
+      mono(ctx, TBL.r, y, '(' + num(R.r, 2) + '; ' + num(R.phi, 2) + '°)',
+           21, 'rgba(' + tone.muted + ',.85)', 'right');
+      y += TBL.step;
+      C.label(ctx, TBL.x, y, 'полярная, оси повёрнуты', 19, 'rgb(' + tone.muted + ')', 'left');
+      mono(ctx, TBL.r, y, '(' + num(R.r, 2) + '; ' + num(R.phiShtrih, 2) + '°)',
+           21, 'rgb(' + tone.ink + ')', 'right');
+    }
+
+    /* Черта под журналом опускается, когда полярных строк две: иначе она
+       ложится на вторую. */
+    y = R.polyarnye ? 340 : 296;
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.14)';
+    ctx.beginPath(); ctx.moveTo(TBL.x, y); ctx.lineTo(TBL.r, y); ctx.stroke();
+
+    C.readout(ctx, 890, y + 34, 'ПОВОРОТ ОСЕЙ', num(R.alpha, 0) + '°',
+              'rgb(' + tone.ink + ')');
+    C.readout(ctx, TBL.r, y + 34, 'ДЛИНА СТРЕЛКИ', num(R.dlina, 3),
+              'rgb(' + tone.accent + ')');
+    C.label(ctx, TBL.r, y + 100, 'одна и та же при любом повороте', 17,
+            'rgb(' + tone.muted + ')', 'right');
+  }
+
+  function draw(ctx){
+    var tone = C.tones(ctx);
+    var R = readings();
+    var A = R.alpha * RAD;
+    var e1 = { x: Math.cos(A), y: Math.sin(A) };
+    var e2 = { x: -e1.y, y: e1.x };
+
+    setka(ctx, e1, e2, tone);
+    luch(ctx, tone);
+    duga(ctx, 1.45, 0, R.alpha, tone.muted, .65);
+    os(ctx, e1, tone);
+    os(ctx, e2, tone);
+    proekciya(ctx, e1, e2, R.xShtrih, R.yShtrih, tone);
+    proekciya(ctx, e2, e1, R.yShtrih, R.xShtrih, tone);
+    /* Полярных углов рисуется два, и оба нужны (правка автора 07.09).
+       φ отмерян от исходной оси и не двигается: он свойство самой стрелки.
+       φ′ отмерян от повёрнутой и меняется вместе с осями — это запись, а не
+       вещь. Дуги разведены радиусом и цветом так же, как строки журнала:
+       «как были» приглушённо, «повёрнуты» акцентом. */
+    if (R.polyarnye) {
+      duga(ctx, 3.0, 0, R.phi, tone.muted, .7);
+      duga(ctx, 2.3, R.alpha, R.alpha + R.phiShtrih, tone.accent, .65);
+    }
+    strelka(ctx, tone);
+    zhurnal(ctx, tone, R);
+  }
+
+  /* ── управление ─────────────────────────────────────────── */
+
+  function setAlpha(v){ st.alpha = v; st.spin = false; sync(); }
+  function krutit(){ st.spin = !st.spin; sync(); }
+  function polyarnye(){ st.polar = !st.polar; sync(); }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  var R = readings();
+  window.__demoState = R;
+
+  /* Слой латех-подписей: позиции в процентах логического кадра канвы, как в
+     podobie. Имена осей едут вместе с осями, поэтому слой пересобирается на
+     каждый поворот; сама разметка KaTeX при этом не меняется. */
+  var A = R.alpha * RAD;
+  var e1 = { x: Math.cos(A), y: Math.sin(A) };
+  var e2 = { x: -e1.y, y: e1.x };
+
+  function span(key, u, v, tex, cls){
+    return html`<span key=${key} class=${cls || null}
+      style=${{ left: (sx(u) / W * 100) + '%', top: (sy(v) / HGT * 100) + '%' }}
+      dangerouslySetInnerHTML=${{ __html: kx(tex) }}></span>`;
+  }
+
+  /* Пунктирный луч исходной оси подписи не носит, как и на рисунке главы: на
+     поворотах, кратных прямому углу, его конец приходится ровно туда, где
+     стоит число проекции, и две подписи налезали друг на друга. Что это за
+     направление, говорят дуга угла и строка журнала «оси как были». */
+  var labs = [
+    span('xs', e1.x * (AXL + 0.62), e1.y * (AXL + 0.62), "x'", 'po-ink'),
+    span('ys', e2.x * (AXL + 0.62), e2.y * (AXL + 0.62), "y'", 'po-ink'),
+    span('rv', 1.0, 2.37, '\\vec r', 'ax-accent')
+  ];
+  if (Math.abs(R.alpha) > 5)
+    labs.push(span('al', 1.82 * Math.cos(A / 2), 1.82 * Math.sin(A / 2), '\\alpha'));
+  /* Углы у двух дуг перекрываются всегда, поэтому подписи разводятся не
+     ими. φ′ уходит наружу своей дуги по биссектрисе, а φ ставится к началу
+     своей, у исходной оси: его биссектриса при повороте в тридцать градусов
+     приходится почти на саму ось x′, где уже стоят её имя и число проекции. */
+  if (R.polyarnye) {
+    var mf = Math.min(R.phi * 0.16, 12) * RAD;
+    labs.push(span('ph', 3.25 * Math.cos(mf), 3.25 * Math.sin(mf), '\\varphi'));
+    if (Math.abs(R.phiShtrih) > 5) {
+      var m = (R.alpha + R.phiShtrih / 2) * RAD;
+      labs.push(span('phs', 2.75 * Math.cos(m), 2.75 * Math.sin(m), "\\varphi'", 'ax-accent'));
+    }
+  }
+
+  /* Строка показаний говорит то же, что журнал, но словами и формулой:
+     длина посчитана из тех самых чисел, которые только что поменялись. */
+  var s;
+  if (Math.abs(R.alpha) < 0.5)
+    s = 'Оси стоят как стояли, точка записана парой ' + kx('(3;\\ 4)') + '. ';
+  else
+    s = 'Оси повёрнуты на ' + kx(tnum(R.alpha, 0) + '^\\circ') +
+        ', точка не тронута, а запись стала ' +
+        kx('(' + tnum(R.xShtrih, 2) + ';\\ ' + tnum(R.yShtrih, 2) + ')') + '. ';
+  s += 'Длина ' + kx('\\sqrt{{x\'}^2 + {y\'}^2} = ' + tnum(R.dlina, 3)) +
+       ' посчитана из этих же чисел и от угла не зависит.';
+  if (R.polyarnye)
+    s += ' Полярных углов здесь два, и оба честные: ' + kx('\\varphi') +
+         ' отмерян от исходной оси и не двигается, ' + kx("\\varphi'") +
+         ' отмерян от повёрнутой и уезжает вместе с ней. Первое число пары ' +
+         'у обоих одно — та же длина.';
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Slider} label="Поворот осей:" min=${-180} max=${180} step=${1}
+                     value=${ui.alpha} onChange=${setAlpha}
+                     display=${num(ui.alpha, 0) + '°'} />
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${krutit}>${ui.spin ? 'Стоп' : 'Крутить'}<//>
+          <${C.Btn} active=${ui.polar} onClick=${polyarnye}>Полярная пара<//>
+        <//>
+      </div>
+      ${/* Сцена держит пропорцию 1120:460 и при этом обязана влезать в
+            колонку. Прежние aspectRatio плюс flex: 0 0 auto считали высоту
+            только от ширины: во врезке колоды ширина 1175 давала высоту 483, а
+            свободного места между рейкой и строкой показаний было 477, и
+            демка вылезала на шесть пикселей — ровно настолько, чтобы
+            появилась полоса прокрутки (замер 08.09, жалоба автора).
+            Теперь коробка ужимается по меньшей из двух сторон: упирается в
+            высоту — уходит в поля по бокам, упирается в ширину — ведёт себя
+            как раньше. */''}
+      <div class="stage-wrap"
+           style=${{ aspectRatio: W + ' / ' + HGT, flex: '0 1 auto', minHeight: 0,
+                     height: '100%', width: 'auto', maxWidth: '100%',
+                     alignSelf: 'center' }}>
+        <canvas class="stage" ref=${ref}></canvas>
+        <div class="ax is-on">${labs}</div>
+      </div>
+      <${C.Status} html=${s} />
+    </div>`;
+}
+
+C.mount(Povorot);
+</script>
+</body>
+</html>

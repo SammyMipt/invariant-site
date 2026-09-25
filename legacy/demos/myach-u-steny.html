@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Мяч у стены: деформация и сила</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-03/">&larr; Неделя 03</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=myach-u-steny"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы integralnaya-forma и рисунок sila_pri_udare. Автор просил к
+   ударному импульсу кадры высокоскоростной камеры: мяч у стены плющится,
+   потом распрямляется и улетает. Чужое видео в реп не положишь, поэтому
+   сцена своя, замедленная, и вдобавок считающая.
+
+   ЧИСЛА ИЗ ГЛАВЫ. Теннисный мяч 58 г, скорость 30 м/с туда и обратно,
+   изменение импульса 2mv = 3,48 кг·м/с; контакт 5 мс, средняя сила
+   3,48/0,005 = 696 Н; вес мяча 0,058·9,81 = 0,569 Н; импульс тяжести за
+   контакт 0,00284 кг·м/с, в 1223 раза меньше удара. С рисунка: пик
+   полусинусоиды πΔp/(2τ) = 1093 Н, те самые 1,1 кН.
+
+   МОДЕЛЬ. Мяч — масса на пружине: пока центр ближе к стене, чем радиус,
+   оболочка сжата на x = R − s, и стена отталкивает мяч с силой kx. Ось s
+   отсчитывается от стены наружу, поэтому сила положительна:
+
+       m · d²s/dt² = k · max(0, R − s).
+
+   Внутри контакта это гармонический осциллятор, и время контакта есть
+   половина его периода:
+
+       τ = π√(m/k),   значит   k = m(π/τ)².
+
+   Отсюда жёсткость оболочки: контакт 5 мс даёт k = 22 897 Н/м (22,9 кН/м),
+   вдвое более короткий контакт 2,5 мс — вчетверо больше, 91 590 Н/м. Это и
+   есть переключатель «мягкий/жёсткий»: изменение импульса у обоих одно,
+   а пик силы у жёсткого вдвое выше, потому что время вдвое меньше.
+
+   В формуле времени контакта нет скорости налёта. Линейная пружина держит
+   мяч у стены одинаково долго и на 5 м/с, и на 60: быстрый сжимается
+   сильнее и давит сильнее ровно во столько же раз. Прогон подтверждает:
+   при скоростях от 5 до 60 м/с измеренное τ расходится на 2·10⁻¹⁰ доли.
+
+   Полусинусоида рисунка главы здесь не нарисована, а получена. Демка
+   интегрирует уравнение движения Рунге–Куттой четвёртого порядка (форма
+   Нюстрёма: правая часть зависит только от s), силу на каждом шаге берёт
+   из сжатия, а площадь под кривой набирает трапециями по тем же шагам —
+   отдельным счётом, не через изменение скорости. Поэтому сверка площади
+   с 2mv что-то значит. Шаг внутри контакта τ/800, вход в контакт вырезан
+   точно (до касания сила нулевая и мяч идёт равномерно), выход пойман
+   линейной вставкой по s, где сила как раз обращается в ноль и кривая s(t)
+   локально пряма. Расхождение площади с 2mv выходит 1,3·10⁻⁴ процента,
+   вдвое мельче шаг ничего заметно не меняет.
+
+   ТЯЖЕСТЬ в уравнение не входит: мяч летит горизонтально, тяжесть
+   перпендикулярна движению и горизонтальный импульс не трогает. Её
+   импульс за время контакта считается и печатается рядом — то самое
+   сравнение, ради которого в главе стоит вся эта арифметика.
+
+   ГДЕ МОДЕЛЬ УПИРАЕТСЯ. Чтобы встать за половину контакта, центр мяча
+   обязан пройти x = v₀τ/π, при 30 м/с и 5 мс это 4,8 см. Радиус
+   теннисного мяча 3,3 см, то есть линейная пружина просит сжатия больше
+   радиуса. Дело не в схеме счёта: любая модель со средней скоростью
+   торможения порядка половины начальной даст то же самое, а уложиться в
+   радиус может только резко твердеющая к дну оболочка — какой настоящий
+   мяч и оказывается, отчего он и держит жёсткую стену короче пяти
+   миллисекунд. Жёсткий мяч демки (2,5 мс) просит 2,4 см и в радиус
+   укладывается. Силуэт на сцене сжимается вместе с расчётом, но упирается
+   в 0,8 радиуса: дальше картинка стоит, а напечатанное сжатие растёт, и
+   строка показаний об этом говорит. */
+
+var MASSA = 0.058;        /* кг, масса теннисного мяча: число главы */
+var V_DEF = 30;           /* м/с, скорость налёта по умолчанию: число главы */
+var R = 0.033;            /* м, радиус теннисного мяча (диаметр 6,6 см по правилам) */
+var G = 9.81;             /* м/с², для веса мяча и импульса тяжести */
+var TAU_M = 0.005;        /* с, контакт мягкого мяча: число главы */
+var TAU_ZH = 0.0025;      /* с, вдвое короче */
+var D0 = 0.20;            /* м, откуда мяч стартует и куда возвращается */
+var N_SHAG = 800;         /* шагов схемы на контакт */
+var KADR = 0.0005;        /* с, интервал стробоскопа: кадр каждые полмиллисекунды */
+
+/* Жёсткость оболочки из требуемого времени контакта */
+function zhestkost(tau) { var w = Math.PI / tau; return MASSA * w * w; }
+
+function sila(st) { var x = R - st.s; return x > 0 ? st.k * x : 0; }
+function usk(k, s) { var x = R - s; return x > 0 ? k * x / MASSA : 0; }
+
+function sozdat(v0, tau) {
+  return { tau: tau, k: zhestkost(tau), hk: tau / N_SHAG, v0: v0,
+           s: D0, v: -v0, t: 0,          /* ось от стены наружу: к стене — минус */
+           faza: 'podlet',
+           J: 0, Fmax: 0, xMax: 0, tKas: 0, tauIzm: 0, vOtlet: 0,
+           sledKadr: 0, kadry: [], krivaya: [] };
+}
+
+/* Кадр стробоскопа: где был центр мяча. Кадры снимаются до конца контакта,
+   отлёт повторяет подлёт зеркально и ложился бы на те же места. */
+function snyatKadr(st) { st.kadry.push(st.s); st.sledKadr += KADR; }
+
+function nachatKontakt(st) {
+  st.faza = 'kontakt';
+  st.tKas = st.t;
+  st.J = 0;
+  st.krivaya = [0, 0];          /* плоский массив пар «время от касания, сила» */
+}
+
+/* Шаг Рунге–Кутты четвёртого порядка для s'' = a(s). Ускорение зависит
+   только от положения, поэтому четыре пробы берутся по s и складываются
+   в форме Нюстрёма, без отдельных наклонов по скорости. */
+function shagRK(st, h) {
+  var s0 = st.s, v0 = st.v, k = st.k;
+  var a1 = usk(k, s0);
+  var a2 = usk(k, s0 + h / 2 * v0);
+  var a3 = usk(k, s0 + h / 2 * (v0 + h / 2 * a1));
+  var a4 = usk(k, s0 + h * (v0 + h / 2 * a2));
+  st.s = s0 + h * (v0 + h / 6 * (a1 + a2 + a3));
+  st.v = v0 + h / 6 * (a1 + 2 * a2 + 2 * a3 + a4);
+  st.t += h;
+}
+
+/* Продвинуть модель на dt модельного времени. Вне контакта силы нет, и мяч
+   идёт равномерно: там шаг режется по моменту касания и по кадрам
+   стробоскопа, чтобы засечки попадали точно на своё время. Внутри контакта
+   шаг фиксирован. */
+function prodvinut(st, dt) {
+  var ost = dt, storozh = 0;
+  while (ost > 1e-12 && ++storozh < 400000) {
+    if (st.faza !== 'otlet' && st.t >= st.sledKadr - 1e-12) { snyatKadr(st); continue; }
+
+    if (st.faza === 'podlet') {
+      if (st.s - R <= 1e-12) { st.s = R; nachatKontakt(st); continue; }
+      var hp = Math.min(ost, (st.s - R) / (-st.v), st.sledKadr - st.t);
+      st.s += st.v * hp; st.t += hp; ost -= hp;
+
+    } else if (st.faza === 'kontakt') {
+      var h = Math.min(ost, st.hk, st.sledKadr - st.t);
+      var sPred = st.s, tPred = st.t, vPred = st.v, Fpred = sila(st);
+      shagRK(st, h);
+      if (st.s >= R) {
+        /* Мяч отошёл от стены. Доля шага до пересечения s = R берётся
+           линейно: сила там уже в нуле, ускорения нет, и s по времени
+           прямая. Дальше шаг переигрывается укороченным, чтобы скорость
+           отлёта и время контакта считала схема, а не вставка. */
+        var f = (R - sPred) / (st.s - sPred);
+        if (!(f > 0 && f <= 1)) f = 1;
+        st.s = sPred; st.v = vPred; st.t = tPred;
+        shagRK(st, f * h);
+        var Fkon = sila(st);
+        st.J += (Fpred + Fkon) / 2 * f * h;
+        st.krivaya.push(st.t - st.tKas, Fkon);
+        st.s = R;
+        st.tauIzm = st.t - st.tKas;
+        st.vOtlet = st.v;
+        st.faza = 'otlet';
+        ost -= f * h;
+      } else {
+        var Fnov = sila(st);
+        st.J += (Fpred + Fnov) / 2 * h;          /* трапеция по той же сетке */
+        if (Fnov > st.Fmax) st.Fmax = Fnov;
+        if (R - st.s > st.xMax) st.xMax = R - st.s;
+        st.krivaya.push(st.t - st.tKas, Fnov);
+        ost -= h;
+      }
+
+    } else {
+      st.s += st.v * ost; st.t += ost; ost = 0;
+    }
+  }
+  if (st.faza === 'otlet' && st.s > D0) st.s = D0;
+  return st;
+}
+
+/* Удар целиком, без кадров: отсюда берётся бледная кривая второго мяча на
+   графике, и то же самое гоняет автопроверка. */
+function udar(v0, tau) {
+  var st = sozdat(v0, tau);
+  return prodvinut(st, D0 / v0 + 3 * tau);
+}
+
+/* Верх шкалы силы: с запасом накрывает пик жёсткого мяча при этой скорости,
+   округлённый вверх до половины килоньютона. Шкала одна на оба мяча, иначе
+   равенство площадей под узким и широким горбом не увидеть. */
+function osSily(v0) {
+  return Math.ceil(MASSA * (Math.PI / TAU_ZH) * v0 * 1.12 / 500) * 500;
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Сверху удар: мяч идёт к стене слева, сплющивается о неё и уходит назад.
+   Позади него остаются кадры стробоскопа через каждые полмиллисекунды —
+   на подлёте они стоят ровной цепочкой, у стены сбиваются в кучу, потому
+   что мяч там почти стоит. Это и есть та самая лента высокоскоростной
+   камеры, только посчитанная.
+
+   Снизу график силы по времени от касания. Шкала времени постоянная,
+   до 6,5 мс, шкала силы задана скоростью налёта, — поэтому при смене мяча
+   горб меняет форму на неподвижных осях: узкий и вдвое более высокий у
+   жёсткого, широкий и низкий у мягкого, площадь одна. Бледная кривая —
+   второй мяч, посчитанный тем же прогоном без кадров.
+
+   Полка тяжести нарисована там, где она есть: 0,57 Н на шкале в 2,5 кН
+   это четыре сотых пикселя, и линия ложится на ось. В печатном рисунке
+   главы её пришлось задрать в 44 раза, здесь врать не нужно — выноска
+   говорит, почему полки не видно. */
+
+var W = 1000, HGT = 460;
+var SC = 900;                         /* px на метр сцены */
+var XW = 620;                         /* стена: её лицевая плоскость */
+var WY0 = 40, WY1 = 206;
+var YB = 128;                         /* линия полёта */
+var GX0 = 108, GX1 = 660;             /* график: поле по горизонтали */
+var GY0 = 262, GY1 = 424;
+var T_OS = 0.0065;                    /* с, предел шкалы времени */
+var RXL = 838, RXC = 978;             /* правые края двух столбцов показаний */
+var RX1 = 792, RX2 = 885;             /* трёхколоночный ряд сил */
+var TAU2 = 6.2832;
+
+/* Цвета данных от темы не зависят. Сила — охра рисунка главы (главный
+   объект), тяжесть — бирюза (то, с чем сравнивают), мяч — своя жёлто-
+   зелёная, чтобы его ни с чем не спутать. */
+var CV_SILA = '224,138,82';
+var CV_TYAZH = '77,182,198';
+var CV_MYACH = '176,196,58';
+
+var ZAM = [1, 2, 5, 10, 20, 50, 100, 200, 300, 500];   /* ряд замедлений */
+var ZAM_DEF = 7;                                        /* ×200 */
+
+/* Русская запятая и настоящий минус; остатки счёта в последних знаках
+   печатались бы как «−0,00», а ноль есть ноль. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function razy(v) { return C.plural(Math.round(v), 'раз', 'раза', 'раз'); }
+
+/* Силуэт мяча. Полуось вдоль полёта равна расстоянию от центра до стены,
+   то есть рисуется само сжатие; поперечная растёт на половину сжатия —
+   это правило рисунка, а не физика: оболочка не тянется, воздух внутри
+   сжимается, и площадь силуэта не сохраняется. Центр упирается в 0,2
+   радиуса, дальше картинка стоит (см. шапку). */
+function siluet(s) {
+  var sd = Math.max(s, 0.2 * R);
+  var a = Math.min(sd, R);
+  return { cx: XW - sd * SC, a: a * SC, b: (R + (R - a) / 2) * SC };
+}
+
+function MyachUSteny() {
+  /* До «Пуска» опыт стоит: мяч на старте, график пуст. Так же ведут себя
+     остальные демки недели (решение автора 11.09). */
+  var ref0 = useRef(null);
+  if (!ref0.current) {
+    ref0.current = { v0: V_DEF, tau: TAU_M, zi: ZAM_DEF, run: false, done: false };
+    zaryadit(ref0.current);
+  }
+  var S = ref0.current;
+  /* Пара берётся из одного вызова useState: два отдельных дают два
+     независимых состояния, и рейка перестаёт отзываться на ползунок. */
+  var pair = useState({ run: false, done: false, tau: TAU_M, v0: V_DEF, zi: ZAM_DEF });
+  var ui = pair[0], setUi = pair[1];
+
+  /* Новый опыт: модель, шкала силы и бледная кривая второго мяча. */
+  function zaryadit(s) {
+    s.m = sozdat(s.v0, s.tau);
+    s.osF = osSily(s.v0);
+    s.ten = udar(s.v0, s.tau === TAU_M ? TAU_ZH : TAU_M).krivaya;
+    s.done = false;
+    pokazaniya(s);
+  }
+
+  /* Показания демки: то, что она утверждает. Пишутся из шага, а не из
+     отрисовки: автопроверка двигает модель через __demoTick, рендера при
+     этом нет. */
+  function pokazaniya(s) {
+    var m = s.m;
+    s.t = m.t;
+    s.faza = m.faza;
+    s.skorost = m.v;                        /* м/с, ось от стены наружу */
+    s.szhatie = Math.max(0, R - m.s);       /* м, текущее сжатие оболочки */
+    s.szhatieMax = m.xMax;
+    s.F = sila(m);                          /* Н, сила стены на мяч сейчас */
+    s.Fmax = m.Fmax;
+    s.integral = m.J;                       /* кг·м/с, площадь под кривой */
+    s.dvaMV = 2 * MASSA * s.v0;             /* кг·м/с, изменение импульса */
+    s.tKontakta = m.tauIzm;                 /* с, измеренное время контакта */
+    s.Fsred = m.tauIzm > 0 ? m.J / m.tauIzm : 0;
+    s.zhestkost = m.k;
+    s.ves = MASSA * G;                      /* Н */
+    s.impulsTyazhesti = MASSA * G * m.tau;  /* кг·м/с за время контакта */
+    s.otnoshenie = s.dvaMV / s.impulsTyazhesti;
+    s.zamedlenie = ZAM[s.zi];
+  }
+  if (!window.__demoState) window.__demoState = S;
+
+  /* Кадр: модельного времени идёт во столько раз меньше, во сколько
+     замедлена съёмка. На ×1 весь удар со всем подлётом укладывается в
+     один кадр экрана, и это ровно то, что видит глаз в жизни. */
+  function step(dt) {
+    if (!S.run || S.done) return;
+    prodvinut(S.m, dt / ZAM[S.zi]);
+    if (S.m.faza === 'otlet' && S.m.s >= D0) {
+      S.done = true; S.run = false;
+      setUi({ run: false, done: true, tau: S.tau, v0: S.v0, zi: S.zi });
+    }
+    pokazaniya(S);
+  }
+
+  /* ── примитивы сцены ── */
+
+  function strelka(ctx, x0, x1, y, col, w) {
+    if (Math.abs(x1 - x0) < 2) return;
+    var zn = x1 < x0 ? -1 : 1;
+    ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1 - zn * 9, y); ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(x1, y);
+    ctx.lineTo(x1 - zn * 12, y - 6.5);
+    ctx.lineTo(x1 - zn * 12, y + 6.5);
+    ctx.closePath(); ctx.fill();
+  }
+
+  function stena(ctx, ink) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(XW, WY0, 42, WY1 - WY0); ctx.clip();
+    ctx.fillStyle = 'rgba(' + ink + ',.08)';
+    ctx.fillRect(XW, WY0, 42, WY1 - WY0);
+    ctx.strokeStyle = 'rgba(' + ink + ',.30)'; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (var y = WY0; y < WY1 + 44; y += 11) { ctx.moveTo(XW, y); ctx.lineTo(XW + 44, y - 44); }
+    ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(' + ink + ',.8)'; ctx.lineWidth = 3.5; ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(XW, WY0); ctx.lineTo(XW, WY1); ctx.stroke();
+  }
+
+  /* Мяч рисуется в своей системе: перенос в центр, сжатие масштабом, и
+     дальше окружность радиуса R. Шов ложится на неё сам и плющится вместе
+     с мячом. */
+  function myach(ctx, s, alpha, zaliv) {
+    var g = siluet(s), rp = R * SC;
+    ctx.save();
+    ctx.translate(g.cx, YB);
+    ctx.scale(g.a / rp, g.b / rp);
+    ctx.beginPath(); ctx.arc(0, 0, rp, 0, TAU2);
+    if (zaliv) {
+      ctx.fillStyle = 'rgba(' + CV_MYACH + ',.85)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(' + CV_MYACH + ',1)'; ctx.lineWidth = 2;
+    } else {
+      ctx.strokeStyle = 'rgba(' + CV_MYACH + ',' + alpha + ')'; ctx.lineWidth = 1.6;
+    }
+    ctx.stroke();
+    if (zaliv) {
+      /* Шов теннисного мяча: две дуги большого радиуса, выгнутые к краям.
+         Центры дуг вынесены в стороны, поэтому внутрь ложатся их дальние
+         куски, и получается знакомая восьмёрка, а не глаз. */
+      ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(rp * 1.2, 0, rp * 1.75, Math.PI - 0.58, Math.PI + 0.58);
+      ctx.stroke();
+      ctx.beginPath(); ctx.arc(-rp * 1.2, 0, rp * 1.75, -0.58, 0.58);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* ── график силы ── */
+
+  function tx(t) { return GX0 + t / T_OS * (GX1 - GX0); }
+  function fy(F) { return GY1 - F / S.osF * (GY1 - GY0); }
+
+  function gorb(ctx, arr, col, w, zaliv) {
+    if (arr.length < 4) return;
+    var i;
+    if (zaliv) {
+      ctx.beginPath();
+      ctx.moveTo(tx(arr[0]), GY1);
+      for (i = 0; i < arr.length; i += 2) ctx.lineTo(tx(arr[i]), fy(arr[i + 1]));
+      ctx.lineTo(tx(arr[arr.length - 2]), GY1);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(' + col + ',.22)'; ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(' + col + ',' + (zaliv ? 1 : 0.45) + ')';
+    ctx.lineWidth = w; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (i = 0; i < arr.length; i += 2) {
+      var x = tx(arr[i]), y = fy(arr[i + 1]);
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  /* Подпись горба: у его вершины, чуть выше. Для бледной кривой вершина
+     ищется по её же точкам, а не берётся из формулы. */
+  function podpisatGorb(ctx, arr, tekst, col, alpha) {
+    if (arr.length < 4) return;
+    var best = 0, bi = 0;
+    for (var i = 0; i < arr.length; i += 2) if (arr[i + 1] > best) { best = arr[i + 1]; bi = i; }
+    if (best <= 0) return;
+    C.label(ctx, tx(arr[bi]), fy(best) - 13, tekst, 17, 'rgba(' + col + ',' + alpha + ')');
+  }
+
+  function grafik(ctx, tone) {
+    var ink = tone.ink, muted = tone.muted, t, F, x, y;
+
+    C.label(ctx, GX0, GY0 - 14, 'сила, кН', 17, 'rgba(' + muted + ',.95)', 'left');
+    C.label(ctx, GX1, GY0 - 14, 'время от касания, мс', 17, 'rgba(' + muted + ',.95)', 'right');
+
+    /* сетка и деления */
+    ctx.lineCap = 'butt';
+    for (F = 500; F <= S.osF + 1; F += 500) {
+      y = fy(F);
+      ctx.strokeStyle = 'rgba(' + ink + ',.08)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(GX0, y); ctx.lineTo(GX1, y); ctx.stroke();
+      ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(GX0 - 6, y); ctx.lineTo(GX0, y); ctx.stroke();
+      C.label(ctx, GX0 - 11, y + 6, num(F / 1000, 1), 17, 'rgba(' + muted + ',.95)', 'right');
+    }
+    for (t = 0.001; t < T_OS; t += 0.001) {
+      x = tx(t);
+      ctx.strokeStyle = 'rgba(' + ink + ',.08)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, GY0); ctx.lineTo(x, GY1); ctx.stroke();
+      ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(x, GY1); ctx.lineTo(x, GY1 + 6); ctx.stroke();
+      C.label(ctx, x, GY1 + 26, num(t * 1000, 0), 17, 'rgba(' + muted + ',.95)');
+    }
+
+    ctx.strokeStyle = 'rgba(' + ink + ',.5)'; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(GX0, GY0); ctx.lineTo(GX0, GY1); ctx.lineTo(GX1, GY1); ctx.stroke();
+
+    /* полка тяжести: в масштабе оси она лежит на ней, и выноска идёт из
+       пустого правого верха, чтобы не лечь на горбы */
+    ctx.strokeStyle = 'rgb(' + CV_TYAZH + ')'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(GX0, fy(S.ves)); ctx.lineTo(GX1, fy(S.ves)); ctx.stroke();
+    ctx.save();
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = 'rgba(' + CV_TYAZH + ',.75)'; ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(GX1 - 56, GY1 - 44); ctx.lineTo(GX1 - 76, GY1 - 5);
+    ctx.stroke();
+    ctx.restore();
+    /* Правый край поля свободен от горбов при любой скорости: самый широкий
+       кончается на пяти миллисекундах. Там и стоит выноска. */
+    C.label(ctx, GX1 - 4, GY1 - 74, 'вес мяча ' + num(S.ves, 2) + ' Н', 17,
+            'rgb(' + CV_TYAZH + ')', 'right');
+    C.label(ctx, GX1 - 4, GY1 - 52, 'лёг на ось', 17, 'rgb(' + CV_TYAZH + ')', 'right');
+
+    gorb(ctx, S.ten, CV_SILA, 2, false);
+    gorb(ctx, S.m.krivaya, CV_SILA, 3, true);
+
+    /* Средняя сила: полка появляется после контакта, когда площадь и время
+       измерены. Прямоугольник под ней равновелик горбу — тот самый ход
+       рисунка главы. Подпись стоит у левого края, где горб ещё низкий;
+       число печатается в показаниях. */
+    if (S.tKontakta > 0) {
+      y = fy(S.Fsred);
+      ctx.save();
+      ctx.setLineDash([5, 5]);
+      ctx.strokeStyle = 'rgba(' + ink + ',.65)'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(GX0, y); ctx.lineTo(tx(S.tKontakta), y); ctx.stroke();
+      ctx.restore();
+      C.label(ctx, GX0 + 8, y - 9, 'средняя', 17, 'rgb(' + ink + ')', 'left');
+    }
+
+    var mjagkij = S.tau === TAU_M;
+    podpisatGorb(ctx, S.m.krivaya, mjagkij ? 'мягкий, 5,0 мс' : 'жёсткий, 2,5 мс',
+                 CV_SILA, 1);
+    podpisatGorb(ctx, S.ten, mjagkij ? 'жёсткий, 2,5 мс' : 'мягкий, 5,0 мс',
+                 CV_SILA, 0.6);
+  }
+
+  /* ── показания ── */
+
+  function pokaz(ctx, tone) {
+    var ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var mut = 'rgba(' + muted + ',.95)';
+    var cS = 'rgb(' + CV_SILA + ')';
+
+    C.label(ctx, RXC, 44, 'сила на мяч, Н', 17, mut, 'right');
+    C.readout(ctx, RX1, 72, 'СЕЙЧАС', num(S.F, 0), cS);
+    C.readout(ctx, RX2, 72, 'СРЕДНЯЯ', S.Fsred > 0 ? num(S.Fsred, 0) : '—', cS);
+    C.readout(ctx, RXC, 72, 'ПИК', num(S.Fmax, 0), cS);
+
+    C.label(ctx, RXC, 140, 'изменение импульса, кг·м/с', 17, mut, 'right');
+    C.readout(ctx, RXL, 168, 'ПО КРИВОЙ', num(S.integral, 3), 'rgb(' + acc + ')');
+    C.readout(ctx, RXC, 168, 'ПО СКОРОСТИ', num(S.dvaMV, 3), 'rgb(' + ink + ')');
+
+    /* Пока мяч у стены, сжатие показывается текущее; после отлёта оно
+       нулевое и говорить нечего, там встаёт наибольшее за удар. */
+    var otlet = S.faza === 'otlet';
+    C.label(ctx, RXC, 236, 'контакт', 17, mut, 'right');
+    C.readout(ctx, RXL, 264, 'ВРЕМЯ, МС',
+              S.tKontakta > 0 ? num(S.tKontakta * 1000, 2) : '—', 'rgb(' + ink + ')');
+    C.readout(ctx, RXC, 264, otlet ? 'МАКС., СМ' : 'СЖАТИЕ, СМ',
+              num((otlet ? S.szhatieMax : S.szhatie) * 100, 2), 'rgb(' + CV_MYACH + ')');
+
+    C.label(ctx, RXC, 332, 'мяч, ось от стены', 17, mut, 'right');
+    C.readout(ctx, RXL, 360, 'СКОРОСТЬ, М/С', num(S.skorost, 1), 'rgb(' + ink + ')');
+    C.readout(ctx, RXC, 360, 'ВЕС, Н', num(S.ves, 2), 'rgb(' + CV_TYAZH + ')');
+
+    C.label(ctx, RXC, 418, 'импульс тяжести за контакт', 16,
+            'rgba(' + CV_TYAZH + ',.9)', 'right');
+    C.label(ctx, RXC, 440, num(S.impulsTyazhesti, 4) + ' кг·м/с, в ' +
+            num(S.otnoshenie, 0) + ' ' + razy(S.otnoshenie) + ' меньше удара', 16,
+            'rgba(' + CV_TYAZH + ',.9)', 'right');
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    var ink = tone.ink, muted = tone.muted;
+    var m = S.m, i;
+
+    /* линия полёта и стена */
+    ctx.save();
+    ctx.setLineDash([3, 6]);
+    ctx.strokeStyle = 'rgba(' + ink + ',.22)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(96, YB); ctx.lineTo(XW, YB); ctx.stroke();
+    ctx.restore();
+    stena(ctx, ink);
+    C.label(ctx, XW + 21, WY1 + 22, 'стена', 17, 'rgba(' + muted + ',.95)');
+
+    /* отметка, где центр мяча касается стены */
+    ctx.save();
+    ctx.setLineDash([4, 5]);
+    ctx.strokeStyle = 'rgba(' + muted + ',.7)'; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(XW - R * SC, WY0 + 16); ctx.lineTo(XW - R * SC, WY1 - 6);
+    ctx.stroke();
+    ctx.restore();
+    C.label(ctx, XW - R * SC - 6, WY1 - 12, 'касание', 17, 'rgba(' + muted + ',.95)', 'right');
+
+    for (i = 0; i < m.kadry.length; i++) myach(ctx, m.kadry[i], 0.3, false);
+    myach(ctx, m.s, 1, true);
+
+    /* сила стены на мяч: стрелка влево от стены, длина в масштабе оси графика */
+    C.label(ctx, 96, 64, 'сила, с которой стена давит на мяч', 17,
+            'rgba(' + muted + ',.95)', 'left');
+    strelka(ctx, XW, XW - 150 * S.F / S.osF, 64, 'rgb(' + CV_SILA + ')', 7);
+
+    C.label(ctx, 96, 152, 'теннисный мяч 58 г, радиус 3,3 см', 17,
+            'rgba(' + muted + ',.95)', 'left');
+    C.label(ctx, 96, 178, 'кадры через 0,5 мс, замедление ×' + ZAM[S.zi], 17,
+            'rgba(' + muted + ',.95)', 'left');
+
+    grafik(ctx, tone);
+    pokaz(ctx, tone);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Чистые функции модели наружу: по ним автопроверка гоняет схему без
+     кадров и сверяет то же, что печатает сцена. */
+  window.__demoModel = { sozdat: sozdat, prodvinut: prodvinut, udar: udar,
+                         sila: sila, zhestkost: zhestkost, osSily: osSily,
+                         MASSA: MASSA, R: R, D0: D0, TAU_M: TAU_M, TAU_ZH: TAU_ZH };
+
+  function pusk() {
+    if (S.done) zaryadit(S);
+    S.run = !S.run;
+    setUi({ run: S.run, done: S.done, tau: S.tau, v0: S.v0, zi: S.zi });
+  }
+  function sbros() {
+    zaryadit(S); S.run = false;
+    setUi({ run: false, done: false, tau: S.tau, v0: S.v0, zi: S.zi });
+  }
+  /* Смена мяча или скорости начинает опыт заново: график с изломом
+     посередине читался бы как два графика. Замедление меняется на ходу. */
+  function vybratMyach(tau) {
+    S.tau = tau; sbros();
+  }
+  function zadatSkorost(v) {
+    S.v0 = Math.round(v); sbros();
+  }
+  function zadatZamedlenie(i) {
+    S.zi = Math.round(i);
+    pokazaniya(S);
+    setUi({ run: S.run, done: S.done, tau: S.tau, v0: S.v0, zi: S.zi });
+  }
+
+  function slova() {
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var zam = ZAM[S.zi];
+    var perebor = S.szhatieMax > R
+      ? ' Сжатие дошло до ' + A(num(S.szhatieMax * 100, 1) + ' см') + ' при радиусе 3,3 см: ' +
+        'линейная пружина с контактом в 5 мс просит больше, чем у мяча есть, а настоящий ' +
+        'мяч к дну твердеет и держит стену короче.'
+      : '';
+
+    if (S.faza === 'podlet' && !S.run) {
+      return 'Мяч 58 г идёт в стену со скоростью ' + A(num(S.v0, 0) + ' м/с') +
+        ' и отскочит с той же: импульс изменится на ' + A(num(S.dvaMV, 2) + ' кг·м/с') +
+        '. Жёсткость оболочки ' + A(num(S.zhestkost / 1000, 1) + ' кН/м') +
+        ' подобрана под время контакта ' + num(S.m.tau * 1000, 1) + ' мс. Замедление ×' +
+        zam + (zam >= 100
+          ? ' растягивает эти миллисекунды в секунды.'
+          : zam === 1
+            ? ' — реальное время, и весь удар пройдёт за один кадр экрана.'
+            : ' ещё коротко для глаза: сотни дают разглядеть сжатие.');
+    }
+    if (S.faza === 'podlet') {
+      return 'Мяч летит к стене, сила нулевая. Точки позади него — кадры через каждые ' +
+        'полмиллисекунды, и пока они стоят ровной цепочкой.';
+    }
+    if (S.faza === 'kontakt') {
+      return 'Стена плющит мяч и давит на него тем сильнее, чем сильнее сжатие. Площадь ' +
+        'под горбом набирается на глазах: уже ' + A(num(S.integral, 3) + ' кг·м/с') +
+        ' из ' + num(S.dvaMV, 3) + '. Кадры у стены сбились в кучу, мяч там почти стоит.' +
+        perebor;
+    }
+    /* Подсказка про независимость времени контакта от скорости даётся там,
+       где строка и так короткая: с оговоркой про сжатие она не влезает. */
+    return 'Контакт длился ' + A(num(S.tKontakta * 1000, 2) + ' мс') + ', площадь под горбом ' +
+      A(num(S.integral, 3) + ' кг·м/с') + ' против ' + num(S.dvaMV, 3) +
+      ' по скоростям. Средняя сила ' + A(num(S.Fsred, 0) + ' Н') + ', вес мяча ' +
+      num(S.ves, 2) + ' Н: удар сильнее веса в ' +
+      num(S.Fsred / S.ves, 0) + ' ' + razy(S.Fsred / S.ves) + '.' +
+      (perebor || ' Время контакта у линейной пружины от скорости налёта не зависит, ' +
+                  'проверьте ползунком.');
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+        <${C.Group} label="Мяч:">
+          <${C.Btn} active=${ui.tau === TAU_M} onClick=${function () { vybratMyach(TAU_M); }}>
+            Мягкий<//>
+          <${C.Btn} active=${ui.tau === TAU_ZH} onClick=${function () { vybratMyach(TAU_ZH); }}>
+            Жёсткий<//>
+        <//>
+        <${C.Slider} label="Замедление:" min=${0} max=${ZAM.length - 1} step=${1}
+                     value=${ui.zi} onChange=${zadatZamedlenie}
+                     display=${'×' + ZAM[ui.zi]} />
+        <${C.Slider} label="Скорость:" min=${10} max=${40} step=${1}
+                     value=${ui.v0} onChange=${zadatSkorost}
+                     display=${ui.v0 + ' м/с'} />
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(MyachUSteny);
+</script>
+</body>
+</html>

@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сколько раз стукнутся шары</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-04/">&larr; Неделя 04</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=pi-v-soudareniyah"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `uprugij-udar-1d`, одна фраза о числе π (решение автора
+   15.09, развилка 12). Написана генеральной сессией 15.09 (билдера
+   оборвал лимит), бриф briefs/demki_nedelya04.md, № 6.
+
+   МОДЕЛЬ. Стенка в x = 0, лёгкий шар массы m = 1 стоит в x = 1, тяжёлый
+   массы M = 100^N налетает на него из x = 2 со скоростью −1. Все удары
+   упругие: удар шаров по формулам одномерного упругого удара, удар о
+   стенку меняет знак скорости лёгкого шара. Размеры шаров в счёт не
+   входят, они только нарисованы.
+
+   СЧЁТ СОБЫТИЙНЫЙ. Момент следующего удара вычисляется точно: лёгкий шар
+   дойдёт до стенки через x₁/|v₁|, если летит к ней; шары сойдутся через
+   (x₂ − x₁)/(v₁ − v₂), если догоняют друг друга. Ударов больше не будет,
+   когда оба уходят от стенки и тяжёлый быстрее лёгкого: v₂ ≥ v₁ ≥ 0.
+   Прогон 15.09: при N = 0…5 ударов 3, 31, 314, 3141, 31415, 314159,
+   относительная ошибка энергии не больше 2·10⁻¹⁴, весь прогон 85 мс.
+
+   ПОЧЕМУ π. В осях √M·V и √m·v энергия есть окружность. Удар о стенку
+   отражает точку относительно одной оси, удар шаров относительно прямой,
+   повёрнутой к ней на угол θ = arctg√(m/M); два отражения подряд
+   поворачивают точку на 2θ. Ударов ровно столько, сколько углов θ
+   умещается в π, не доходя до него: наибольшее n с nθ < π, то есть
+   ⌈π/θ⌉ − 1, и это совпадает со счётом при всех N выше. При большом M
+   угол θ почти равен √(m/M) = 10⁻ᴺ, отсюда цифры π. То же π, что в
+   периоде колебаний: и там энергия рисует окружность, в осях √m·v и
+   √k·x (поправлено проверкой главы 15.09). */
+
+var X1_0 = 1, X2_0 = 2, V0 = -1;
+var MASSY = ['1', '100', '10 000', '10⁶', '10⁸'];
+
+function novaya(N) {
+  return { N: N, M: Math.pow(100, N), t: 0, x1: X1_0, x2: X2_0, v1: 0, v2: V0,
+           count: 0, done: false, put: [[Math.sqrt(Math.pow(100, N)) * V0, 0]], E0: null };
+}
+
+function energiya(s) { return 0.5 * s.v1 * s.v1 + 0.5 * s.M * s.v2 * s.v2; }
+
+/* Время до следующего события и его вид. */
+function sleduyushee(s) {
+  var tW = s.v1 < 0 ? s.x1 / -s.v1 : Infinity;
+  var tB = s.v1 > s.v2 ? (s.x2 - s.x1) / (s.v1 - s.v2) : Infinity;
+  if (tW === Infinity && tB === Infinity) return null;
+  return tW < tB ? { t: tW, vid: 'стенка' } : { t: tB, vid: 'шары' };
+}
+
+function sdvinut(s, dt) { s.x1 += s.v1 * dt; s.x2 += s.v2 * dt; s.t += dt; }
+
+function udar(s, vid) {
+  if (vid === 'стенка') { s.v1 = -s.v1; s.x1 = 0; }
+  else {
+    var m = 1, M = s.M, v1 = s.v1, v2 = s.v2;
+    s.v1 = ((m - M) * v1 + 2 * M * v2) / (m + M);
+    s.v2 = ((M - m) * v2 + 2 * m * v1) / (m + M);
+    s.x1 = s.x2;
+  }
+  s.count++;
+  if (s.put.length < 40000) s.put.push([Math.sqrt(s.M) * s.v2, s.v1]);
+  if (s.v1 >= 0 && s.v2 >= s.v1) s.done = true;
+}
+
+/* Продвинуть модель на время dt, отработав все удары внутри. */
+function prodvinut(s, dt) {
+  if (s.E0 === null) s.E0 = energiya(s);
+  var ost = dt;
+  while (!s.done) {
+    var e = sleduyushee(s);
+    if (!e || e.t > ost) break;
+    sdvinut(s, e.t); ost -= e.t;
+    udar(s, e.vid);
+  }
+  sdvinut(s, ost);
+}
+
+/* Досчитать до конца без анимации. */
+function doKonca(s) {
+  if (s.E0 === null) s.E0 = energiya(s);
+  var guard = 0;
+  while (!s.done && guard++ < 1e6) {
+    var e = sleduyushee(s);
+    if (!e) break;
+    sdvinut(s, e.t); udar(s, e.vid);
+  }
+  return s;
+}
+
+function svodka(s) {
+  var E0 = s.E0 === null ? energiya(s) : s.E0, th = Math.atan(Math.sqrt(1 / s.M));
+  return { N: s.N, count: s.count, done: s.done, V: s.v2, v: s.v1, t: s.t,
+           energyError: (energiya(s) - E0) / E0,
+           piNaUgol: Math.PI / th, ocenka: Math.ceil(Math.PI / th) - 1 };
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Сверху стенка и два шара на прямой, счётчик ударов крупно. Снизу слева
+   строка чисел, справа плоскость (√M·V, √m·v) с окружностью энергии и
+   ломаной отражений. */
+
+var W = 1000, HGT = 440;
+var TX0 = 70, TX1 = 930, TY = 130;              /* дорожка */
+var XV = 4;                                      /* метров на экране */
+var PCX = 800, PCY = 320, PR = 100;             /* плоскость отражений */
+var TAU = 6.2832;
+
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+
+/* 2,0·10⁻¹⁴ вместо 2.0e-14 */
+function stepen(x) {
+  if (!x) return '0';
+  var p = Math.floor(Math.log10(Math.abs(x))), m = x / Math.pow(10, p);
+  var SUP = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+  var e = String(Math.abs(p)).split('').map(function (c) { return SUP[+c]; }).join('');
+  return num(m, 1) + '·10' + (p < 0 ? '⁻' : '') + e;
+}
+
+function Pi() {
+  var ref0 = useRef(null);
+  if (!ref0.current) ref0.current = { s: novaya(1), run: false, temp: 0.6, sv: null };
+  var S = ref0.current;
+  var pair = useState(0), bump = function () { pair[1](function (k) { return k + 1; }); };
+
+  function pokazaniya() { var v = svodka(S.s); v.run = S.run; S.sv = v; window.__demoState = v; }
+  if (!S.sv) pokazaniya();
+
+  function step(dt) {
+    if (!S.run) return;
+    var bylo = S.s.done;
+    prodvinut(S.s, dt * S.temp);
+    if (S.s.done && S.s.x2 > XV * 1.05) S.run = false;
+    pokazaniya();
+    if (!S.run || bylo !== S.s.done) bump();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    var ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var s = S.s, sv = S.sv;
+    var mut = 'rgba(' + muted + ',.95)';
+    function sx(x) { return TX0 + x / XV * (TX1 - TX0); }
+
+    /* стенка и дорожка */
+    ctx.strokeStyle = 'rgba(' + ink + ',.6)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(TX0, TY + 30); ctx.lineTo(TX1, TY + 30); ctx.stroke();
+    ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(TX0, TY - 50); ctx.lineTo(TX0, TY + 30); ctx.stroke();
+
+    /* шары: модельная точка x есть левый край; при x₁ = x₂ шары касаются */
+    var r1 = 12, r2 = 30, yL = TY + 30;
+    var c1 = sx(s.x1) + 3 + r1, c2 = sx(s.x2) + 3 + 2 * r1 + r2;
+    ctx.fillStyle = 'rgb(77,182,198)';
+    ctx.beginPath(); ctx.arc(c1, yL - r1, r1, 0, TAU); ctx.fill();
+    C.label(ctx, c1, yL - 2 * r1 - 10, 'm', 17, 'rgb(77,182,198)');
+    if (c2 - r2 < TX1) {
+      ctx.fillStyle = 'rgb(224,138,82)';
+      ctx.beginPath(); ctx.arc(c2, yL - r2, r2, 0, TAU); ctx.fill();
+      C.label(ctx, Math.min(c2, TX1 - 60), yL - 2 * r2 - 12, 'M = ' + MASSY[s.N] + ' m', 17, 'rgb(224,138,82)');
+    }
+
+    /* счётчик */
+    ctx.font = '600 64px "JetBrains Mono", ui-monospace, monospace';
+    ctx.fillStyle = 'rgb(' + acc + ')'; ctx.textAlign = 'left';
+    ctx.fillText(String(sv.count), TX0, 290);
+    C.label(ctx, TX0, 322, 'ударов', 19, mut, 'left');
+    C.label(ctx, TX0, 372, 'π / arctg √(m/M) = ' + num(sv.piNaUgol, 2), 18, mut, 'left');
+    C.label(ctx, TX0, 404, 'ошибка энергии ' + stepen(sv.energyError), 17, mut, 'left');
+
+    /* плоскость отражений */
+    ctx.strokeStyle = 'rgba(' + muted + ',.5)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(PCX - PR - 14, PCY); ctx.lineTo(PCX + PR + 14, PCY);
+    ctx.moveTo(PCX, PCY - PR - 14); ctx.lineTo(PCX, PCY + PR + 14); ctx.stroke();
+    ctx.strokeStyle = 'rgba(' + ink + ',.35)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(PCX, PCY, PR, 0, TAU); ctx.stroke();
+    var R0 = Math.sqrt(s.M) * Math.abs(V0);
+    ctx.strokeStyle = 'rgb(' + acc + ')'; ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (var i = 0; i < s.put.length; i++) {
+      var q = s.put[i], X = PCX + q[0] / R0 * PR, Y = PCY - q[1] / R0 * PR;
+      if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+    }
+    ctx.stroke();
+    C.label(ctx, PCX + PR + 16, PCY + 22, '√M·V', 17, mut, 'left');
+    C.label(ctx, PCX + 8, PCY - PR - 18, '√m·v', 17, mut, 'left');
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  window.__demoModel = { novaya: novaya, prodvinut: prodvinut, doKonca: doKonca, svodka: svodka };
+  window.__demoRun = function (N) { return svodka(doKonca(novaya(N))); };
+
+  function sbros(N) {
+    S.s = novaya(N == null ? S.s.N : N); S.run = false; pokazaniya(); bump();
+  }
+  function pusk() {
+    if (S.s.done) { S.s = novaya(S.s.N); }
+    S.run = !S.run; pokazaniya(); bump();
+  }
+  function doKoncaUi() { doKonca(S.s); S.run = false; pokazaniya(); bump(); }
+
+  function slova() {
+    var A = function (x) { return '<span class="accent">' + x + '</span>'; };
+    var sv = S.sv, N = S.s.N;
+    if (!sv.done) {
+      return (N === 0 ? 'Шар катится к такому же шару, который стоит у стенки.' :
+        'Шар в ' + A(MASSY[N]) + ' раз тяжелее лёгкого катится к нему; лёгкий стоит у стенки.') +
+        ' Все удары упругие. Сколько раз шары стукнутся друг о друга и о стенку, пока тяжёлый не уйдёт?';
+    }
+    return 'Ударов ' + A(String(sv.count)) + '. При отношении масс 1, 100, 10 000, 10⁶, 10⁸ выходит ' +
+      '3, 31, 314, 3141, 31415, первые цифры π. В осях √M·V и √m·v энергия рисует окружность, ' +
+      'каждый удар есть отражение, и ударов столько, сколько углов arctg √(m/M) умещается в π, ' +
+      'не доходя до него. То же π, что в периоде колебаний.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${S.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${function () { sbros(); }}>Сброс<//>
+          <${C.Btn} onClick=${doKoncaUi}>до конца<//>
+        <//>
+        <${C.Group} label="M/m:">
+          ${MASSY.map(function (t, n) {
+            return html`<${C.Btn} active=${S.s.N === n} onClick=${function () { sbros(n); }}>${t}<//>`;
+          })}
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(Pi);
+</script>
+</body>
+</html>

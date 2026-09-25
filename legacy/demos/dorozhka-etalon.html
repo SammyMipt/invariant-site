@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дорожка с эталоном</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-03/">&larr; Неделя 03</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=dorozhka-etalon"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `massa-i-impuls`: масса определяется опытом на воздушной
+   дорожке до того, как в главе появится слово «сила». Две тележки
+   взаимодействуют только друг с другом, и опыт сообщает про изменения их
+   скоростей одно: m₁Δv₁ = −m₂Δv₂, причём отношение m₂/m₁ = |Δv₁|/|Δv₂|
+   не зависит ни от рода взаимодействия, ни от скоростей. В обеих живых
+   лекциях этот опыт был картинкой на слайде; здесь он гонится.
+
+   ОДНА ТЕЛЕЖКА, первый опыт и тот, с которого демка открывается: что
+   вообще представляет собой модель. Тележку толкают, и дальше её никто не
+   трогает; засечки в начале пути и у отметки на рельсе дают одну и ту же
+   скорость. Сама по себе тележка скорости не меняет, то есть ведёт себя
+   как свободное тело из первого закона (правка автора 11.09). Слова
+   «трение» на кадре нет: причина постоянства скорости в этом опыте не
+   называется, она и есть содержание первого закона.
+
+   ЧТО СЧИТАЕТСЯ. Тележки идут по рельсу, координаты интегрируются по
+   времени; вне взаимодействия скорости постоянны, и шаг Эйлера здесь
+   точен. Взаимодействие короткое, и его исход берётся из двух балансов, а
+   не из силового закона: силы в главе ещё нет. Движение пары удобно
+   разложить на скорость центра масс u и относительную скорость w = v₁ − v₂:
+
+       u = (m₁v₁ + m₂v₂)/(m₁+m₂),   v₁ = u + m₂w/(m₁+m₂),   v₂ = u − m₁w/(m₁+m₂).
+
+   Сохранение импульса значит, что u взаимодействие не трогает; всё, что
+   оно решает, это новое w′. Упругий удар: энергия сохраняется, w′ = −w,
+   относительная скорость меняет знак. Пластилин: w′ = 0. Пружина из
+   покоя: w = 0, и весь её запас E уходит в относительное движение,
+   ½μw′² = E при приведённой массе μ = m₁m₂/(m₁+m₂). Тогда
+
+       Δv₁ = m₂(w′ − w)/(m₁+m₂),   Δv₂ = −m₁(w′ − w)/(m₁+m₂),
+
+   и |Δv₁|/|Δv₂| = m₂/m₁ при любом w′: как именно тележки взаимодействовали,
+   в отношение не входит. Модель этот баланс закладывает, иначе ей не из
+   чего считать исход; демка же снимает отношение с засечек и показывает,
+   что оно одно при всех трёх взаимодействиях и при любом толчке.
+
+   ПРУЖИНА ЗАДАЁТСЯ СЖАТИЕМ, НЕ ЭНЕРГИЕЙ. Внутри модель считает пружину по
+   Гуку: сжатие x запасает ½·K_PR·x², и весь запас уходит в относительное
+   движение тележек. Наружу выходит только сжатие в сантиметрах: энергия в
+   главе ещё не введена, и ни на кадре, ни в рейке, ни в строке показаний
+   её нет (правка автора 11.09). Шесть сантиметров при k = 75 Н/м дают
+   ровно 0,135 Дж, то есть числа главы.
+
+   КАК ИЗМЕРЯЕТСЯ. Самописец пишет координаты тележек каждый шаг. Скорость
+   в окне засечек есть приращение координаты за 0,2 с, делённое на 0,2 с.
+   У пары окно «до» кончается за 0,02 с до момента взаимодействия, окно
+   «после» начинается через 0,02 с после него; у одной тележки первое окно
+   начинается через 0,02 с после толчка, второе открывается, когда середина
+   тележки проходит отметку 0,5 м. Из переменных модели в показания не
+   идёт ничего. Отступ в 0,02 с нужен, чтобы окно засечек заведомо не
+   задело момент толчка. Сверка засечек со скоростями модели лежит в
+   __demoState.rashozhdenie_v и обязана быть нулём в пределах счёта.
+
+   ЧИСЛА ИЗ ГЛАВЫ. m₂/m₁ = 0,5 и сжатие 6 см (0,135 Дж при m₁ = 1 кг):
+   эталон приобретает 0,30 м/с, вторая 0,60 м/с в другую сторону,
+   отношение 0,5. Удар: вторая налетает на стоящий эталон с 1 м/с; при
+   равных массах тележки обмениваются скоростями. Пластилин: общая
+   скорость m₂v₂/(m₁+m₂) = 0,33 м/с. Кнопка «клонировать эталон» ставит
+   m₂ = 2, две копии эталона, сцепленные вместе: отношение печатается 2,00;
+   повторное нажатие возвращает одну тележку и прежний m₂/m₁.
+
+   ЧЕГО ЗДЕСЬ НЕТ. Силы и её профиля во время толчка: взаимодействие
+   мгновенно, та же идеализация, что в главе, где записаны только скорости
+   до и после. Трения: дорожка воздушная, и в опытах с парой об этом
+   сказано в строке показаний. Второй встречи тележек: после измерения
+   тележка, дошедшая до края, ловится упором, и опыт кончается. */
+
+/* ── чистая физика ──────────────────────────────────────────────
+   Отсюда и до пометки «конец чистой физики» код не знает о браузере и
+   целиком копируется в node для прогона без глаз; так проверялось, что
+   отношение равно m₂/m₁ по всей сетке ручек (см. отчёт сборки). */
+
+var M1 = 1;                              /* эталон: масса единица; для запаса пружины это килограмм */
+var OTN_MIN = 0.25, OTN_MAX = 4, OTN_SHAG = 0.25, OTN_NACH = 0.5;
+var K_PR = 75;                           /* Н/м, жёсткость пружины: внутреннее число модели, наружу не выходит */
+var L_PR = 0.14;                         /* м, свободная длина пружины */
+var SZH_MIN = 2, SZH_MAX = 10, SZH_SHAG = 1, SZH_NACH = 6;      /* см, сжатие пружины */
+var VN_MIN = 0.4, VN_MAX = 2, VN_SHAG = 0.1, VN_NACH = 1;        /* м/с, толчок одной или скорость налёта */
+var TAU = 0.2;                           /* с, база засечек */
+var ZAZOR = 0.02;                        /* с, отступ окна засечек от момента толчка */
+var T_OTPUSK = 0.5;                      /* с, через полсекунды после пуска: нить пережигается, одну тележку толкают */
+var TRACK = 1.2;                         /* м, полудлина дорожки: рельс от −1,2 до +1,2 */
+var CART_L = 0.16;                       /* м, длина тележки */
+var X1_UDAR = 0.15, X2_UDAR = -0.85;     /* м, где стоят тележки перед налётом */
+var X_ODNA = -0.9;                       /* м, откуда идёт одна тележка */
+var X_OTM = 0.5;                         /* м, отметка на рельсе: второе окно засечек одной тележки */
+var T_MAX = 12;                          /* с, предохранитель: дольше опыт не идёт */
+
+/* Запас рельса после взаимодействия проверен на краях ручек: самая
+   быстрая тележка (эталон при m₂/m₁ = 4 и налёте 2 м/с) идёт 3,2 м/с и за
+   0,22 с окна проходит 0,70 м при 0,97 м до упора; вторая при отскоке
+   (m₂/m₁ = 0,25) идёт назад 1,2 м/с при 1,11 м запаса; после пружины,
+   сжатой на 10 см, лёгкая вторая идёт 1,55 м/с при 1,02 м запаса. Одна
+   тележка при 2 м/с проходит от отметки до конца окна 0,4 м при 0,62 м до
+   упора. Засечки поэтому всегда снимаются со свободного хода. */
+
+/* Скорости после взаимодействия из балансов, см. вывод в шапке. Пружина
+   считается из покоя: в демке она отпускается только так, и w = 0. */
+function posle(rezhim, m1, m2, v1, v2, E) {
+  var M = m1 + m2, u = (m1 * v1 + m2 * v2) / M, w = v1 - v2, wp;
+  if (rezhim === 'udar') wp = -w;
+  else if (rezhim === 'plastilin') wp = 0;
+  else wp = Math.sqrt(2 * E * M / (m1 * m2));
+  return [u + m2 / M * wp, u - m1 / M * wp];
+}
+
+/* Модель: одна или две тележки, их скорости, самописец и засечки.
+   p: { rezhim, otn: m₂/m₁, klon, szh: сжатие пружины в метрах, vn }.
+   Эталон всегда справа, вторая слева; пружина отпускает эталон вправо,
+   налетающая вторая идёт вправо; одну тележку толкают вправо. */
+function novayaModel(p) {
+  var odna = p.rezhim === 'odna', L2 = (p.klon ? 2 : 1) * CART_L;
+  var m = { rezhim: p.rezhim, n: odna ? 1 : 2, m1: M1, m2: p.otn * M1,
+            L: odna ? [CART_L] : [CART_L, L2],
+            E: p.rezhim === 'pruzhina' ? 0.5 * K_PR * p.szh * p.szh : 0,   /* запас пружины, внутреннее число */
+            vn: p.vn,
+            t: 0, x: odna ? [X_ODNA] : [0, 0], v: odna ? [0] : [0, 0],
+            tSob: null,                  /* момент взаимодействия или толчка */
+            tOtm: null,                  /* одна тележка: момент прохода отметки */
+            okna: null,                  /* два окна засечек [t0, t1], когда известны */
+            vOkna: null,                 /* скорости модели в этих окнах: только для сверки */
+            zapis: [],                   /* самописец: [t, x₁, x₂] */
+            zas: null,                   /* засечки, когда сняты */
+            konec: false };
+  if (p.rezhim === 'pruzhina') {
+    var s = L_PR - p.szh;                /* длина сжатой пружины между бортами */
+    m.x[0] = s / 2 + CART_L / 2; m.x[1] = -s / 2 - L2 / 2;
+  } else if (!odna) { m.x[0] = X1_UDAR; m.x[1] = X2_UDAR; m.v[1] = p.vn; }
+  zapisat(m);
+  return m;
+}
+
+function zapisat(m) { m.zapis.push(m.n === 1 ? [m.t, m.x[0]] : [m.t, m.x[0], m.x[1]]); }
+
+/* Просвет между тележками: от правого борта второй до левого борта эталона */
+function zazor(m) { return (m.x[0] - m.L[0] / 2) - (m.x[1] + m.L[1] / 2); }
+
+/* Шаг по времени. События внутри шага (толчок, отпуск нити, касание,
+   проход отметки, упор) не округляются до кадра: шаг режется в точке
+   события, и самописец получает запись ровно в этот момент. Иначе засечка,
+   взятая интерполяцией, легла бы на излом координаты и врала бы на долю
+   кадра. */
+function shag(m, dt) {
+  if (m.konec) return;
+  var ost = dt, n = 0, i, tk;
+  while (ost > 0 && n++ < 16) {
+    var h = ost, sob = null;
+    if (m.n === 1) {
+      if (m.tSob === null) {
+        tk = T_OTPUSK - m.t;
+        if (tk <= h) { h = Math.max(tk, 0); sob = 'tolchok'; }
+      } else if (m.tOtm === null && m.v[0] > 0) {
+        tk = (X_OTM - m.x[0]) / m.v[0];
+        if (tk <= h) { h = Math.max(tk, 0); sob = 'otmetka'; }
+      }
+    } else if (m.rezhim === 'pruzhina' && m.tSob === null) {
+      tk = T_OTPUSK - m.t;
+      if (tk <= h) { h = Math.max(tk, 0); sob = 'vzaim'; }
+    } else {
+      var sbl = m.v[1] - m.v[0];         /* скорость сближения */
+      if (sbl > 0) {
+        tk = zazor(m) / sbl;
+        /* до взаимодействия касание и есть взаимодействие; после него
+           вторая может догнать эталон, уже пойманный упором, и тогда обе
+           просто останавливаются: опыт кончился на засечках */
+        if (tk <= h) { h = Math.max(tk, 0); sob = m.tSob === null ? 'vzaim' : 'svalka'; }
+      }
+    }
+    for (i = 0; i < m.n; i++) {
+      if (m.v[i] === 0) continue;
+      var kraj = m.v[i] > 0 ? TRACK - m.L[i] / 2 - m.x[i] : m.x[i] - (m.L[i] / 2 - TRACK);
+      tk = kraj / Math.abs(m.v[i]);
+      if (tk <= h) { h = Math.max(tk, 0); sob = 'kraj' + i; }
+    }
+    for (i = 0; i < m.n; i++) m.x[i] += m.v[i] * h;
+    m.t += h; ost -= h;
+    if (sob === 'tolchok') {
+      /* толчок: тележка получает скорость, оба окна засечек лежат после него */
+      m.v[0] = m.vn; m.tSob = m.t;
+      m.okna = [[m.t + ZAZOR, m.t + ZAZOR + TAU], null];
+      m.vOkna = [[m.vn], [m.vn]];
+    } else if (sob === 'otmetka') {
+      m.tOtm = m.t;
+      m.okna[1] = [m.t, m.t + TAU];
+    } else if (sob === 'vzaim') {
+      m.vOkna = [m.v.slice(), null];
+      m.v = posle(m.rezhim, m.m1, m.m2, m.v[0], m.v[1], m.E);
+      m.vOkna[1] = m.v.slice();
+      m.tSob = m.t;
+      m.okna = [[m.t - ZAZOR - TAU, m.t - ZAZOR], [m.t + ZAZOR, m.t + ZAZOR + TAU]];
+    } else if (sob === 'svalka') {
+      m.v = [0, 0];
+    } else if (sob === 'kraj0' || sob === 'kraj1') {
+      i = sob === 'kraj0' ? 0 : 1;
+      m.v[i] = 0;
+      /* слипшиеся едут вместе и вместе встают */
+      if (m.rezhim === 'plastilin' && m.tSob !== null) m.v = [0, 0];
+    }
+    zapisat(m);
+    var stoyat = true;
+    for (i = 0; i < m.n; i++) if (m.v[i] !== 0) stoyat = false;
+    if ((m.tSob !== null && stoyat) || m.t >= T_MAX) { m.konec = true; break; }
+  }
+  if (m.okna && m.okna[1] && !m.zas && m.t >= m.okna[1][1]) m.zas = zasechki(m);
+}
+
+/* Координата тележки i в момент t по ленте самописца: линейная
+   интерполяция между соседними записями. Между записями скорость
+   постоянна, поэтому интерполяция здесь не приближение, а точный ответ. */
+function polozhenie(zapis, t, i) {
+  var n = zapis.length;
+  if (!n || t < zapis[0][0] - 1e-12 || t > zapis[n - 1][0] + 1e-12) return null;
+  var lo = 0, hi = n - 1;
+  while (hi - lo > 1) { var mid = (lo + hi) >> 1; if (zapis[mid][0] <= t) lo = mid; else hi = mid; }
+  var a = zapis[lo], b = zapis[hi], dt = b[0] - a[0];
+  if (dt <= 0) return b[1 + i];
+  var s = Math.min(1, Math.max(0, (t - a[0]) / dt));
+  return a[1 + i] + (b[1 + i] - a[1 + i]) * s;
+}
+
+/* Засечки: четыре координаты на тележку и три числа из них.
+   Скорости в первом и втором окне есть приращения координаты за TAU,
+   делённые на TAU; Δv их разность, отношение у пары берётся от модулей Δv.
+   Никакая скорость модели сюда не входит. */
+function zasechki(m) {
+  var w = m.okna, r = { xDo: [], xPosle: [], vDo: [], vPosle: [], dv: [], otn: null };
+  for (var i = 0; i < m.n; i++) {
+    var a = polozhenie(m.zapis, w[0][0], i), b = polozhenie(m.zapis, w[0][1], i);
+    var c = polozhenie(m.zapis, w[1][0], i), d = polozhenie(m.zapis, w[1][1], i);
+    if (a === null || b === null || c === null || d === null) return null;
+    r.xDo.push([a, b]); r.xPosle.push([c, d]);
+    r.vDo.push((b - a) / TAU); r.vPosle.push((d - c) / TAU);
+    r.dv.push(r.vPosle[i] - r.vDo[i]);
+  }
+  if (m.n === 2) r.otn = Math.abs(r.dv[0]) / Math.abs(r.dv[1]);
+  return r;
+}
+
+/* Прогон без глаз: та же модель шагами по кадру, пока не сняты засечки.
+   Возвращает модель; засечки в .zas, скорости модели в окнах для сверки в
+   .vOkna. Им же пользуется __demoCheck. */
+function progon(p, dt) {
+  var m = novayaModel(p), h = dt || 1 / 60, n = 0;
+  while (!m.zas && !m.konec && n++ < 100000) shag(m, h);
+  return m;
+}
+
+/* Расхождение засечек со скоростями модели в окнах: обязано быть нулём в
+   пределах счёта. */
+function rashozhdenieV(m) {
+  var z = m.zas, rv = 0;
+  for (var i = 0; i < m.n; i++) {
+    rv = Math.max(rv, Math.abs(z.vDo[i] - m.vOkna[0][i]), Math.abs(z.vPosle[i] - m.vOkna[1][i]));
+  }
+  return rv;
+}
+
+/* Сводка прогона. У пары: измеренное отношение против заданного m₂/m₁; у
+   одной тележки: Δv против нуля. Пластилину сверх того печатается общая
+   скорость m₂v₂/(m₁+m₂). */
+function svodka(p, dt) {
+  var m = progon(p, dt), z = m.zas;
+  if (!z) return { oshibka: 'засечки не сняты', t: m.t };
+  var odna = m.n === 1;
+  return {
+    rezhim: p.rezhim, m2_m1: odna ? null : p.otn, klon: !odna && !!p.klon,
+    szhatie_sm: p.rezhim === 'pruzhina' ? p.szh * 100 : null,
+    vn: p.rezhim === 'pruzhina' ? null : p.vn,
+    tSob: m.tSob, tOtm: m.tOtm,
+    v1_do: z.vDo[0], v2_do: odna ? null : z.vDo[1],
+    v1_posle: z.vPosle[0], v2_posle: odna ? null : z.vPosle[1],
+    dv1: z.dv[0], dv2: odna ? null : z.dv[1],
+    otnoshenie: z.otn, formula: odna ? 0 : p.otn,
+    rashozhdenie: odna ? Math.abs(z.dv[0]) : Math.abs(z.otn - p.otn),
+    rashozhdenie_v: rashozhdenieV(m),
+    obshchaya_po_formule: p.rezhim === 'plastilin' ? p.otn * M1 * p.vn / (M1 + p.otn * M1) : null
+  };
+}
+/* ── конец чистой физики ── */
+
+var REZHIMY = [
+  { id: 'odna',      label: 'Одна тележка' },
+  { id: 'pruzhina',  label: 'Пружина' },
+  { id: 'udar',      label: 'Упругий удар' },
+  { id: 'plastilin', label: 'Пластилин' }
+];
+
+/* Русская запятая и настоящий минус; остатки счёта в последних знаках
+   печатались бы как «−0,00», а ноль есть ноль. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* Скорости со знаком: знак говорит, в какую сторону вдоль рельса. */
+function znak(v, d) {
+  var s = num(v, d);
+  return s === num(0, d) ? s : (v > 0 ? '+' + s : s);
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Вид сбоку: рельс с отверстиями через всю ширину кадра, линейка под ним,
+   тележки на воздушном просвете. Масштаб вдоль рельса честный, 380 px на
+   метр, и по нему считаются все места. Тележки нарисованы в масштабе
+   (0,16 м это 61 px), высота тела второй пропорциональна её массе: та же
+   плотность, больше вещества; клон эталона — два тела эталонной высоты,
+   сцепленные скобой.
+
+   Засечки живут на двух дорожках вне рельса: у эталона над тележками, у
+   второй под линейкой, в каждой два ряда, первое окно и второе. На одном
+   ряду они бы легли друг на друга: при отскоке окно «после» проходит по
+   тем же местам, что окно «до». Внизу таблица по обеим тележкам и крупное
+   отношение; у одной тележки вместо отношения крупное Δv. */
+
+var W = 1000, HGT = 440;
+var SC = 380;                            /* px на метр */
+var CX = 500;                            /* экранный x нуля рельса */
+var RX = 956;                            /* правая кромка содержимого */
+var TRK = 246;                           /* линия рельса */
+var ZAZ = 5;                             /* воздушный просвет под тележкой, px */
+var H_ET = 20;                           /* высота тела эталона, px */
+var LANE1 = [110, 130];                  /* ряды засечек эталона: первое окно, второе */
+var LANE2 = [316, 336];                  /* ряды засечек второй */
+var RUL_Y = 276;                         /* подписи линейки */
+var T_STRELKI = 0.35;                    /* с, сколько виден толчок на кадре */
+/* Таблица: колонки и строки. У одной тележки заголовки длиннее («У ОТМЕТКИ,
+   М/С»), и колонки раздвинуты, иначе заголовки наезжали друг на друга. */
+var TAB_Y = [374, 400, 426];
+var TAB_X = { para: [44, 236, 344, 452], odna: [44, 250, 400, 520] };
+var MONO = '"JetBrains Mono", ui-monospace, monospace';
+
+/* Цвета данных, от темы не зависят: бирюза и охра из палитры рисунков
+   главы; глина для пластилина. */
+var CV1 = '77,182,198';                  /* эталон */
+var CV2 = '224,138,82';                  /* вторая */
+var CGL = '176,124,98';                  /* пластилин */
+
+function ekr(x) { return CX + x * SC; }
+
+/* Показания живут в одном объекте весь сеанс и правятся на месте:
+   автопроверка читает его после __demoTick, когда рендера не было. */
+var pokaz = { trenie: 0 };
+window.__demoState = pokaz;
+
+function Dorozhka() {
+  var st = useRef({ rezhim: 'odna', otn: OTN_NACH, klon: false, otnDoKlona: OTN_NACH,
+                    szh: SZH_NACH, vn: VN_NACH, run: true, m: null, fazaUi: '' }).current;
+  /* Пара берётся из одного вызова useState: два отдельных дают два
+     независимых состояния, и рейка перестаёт отзываться на ползунок. */
+  var pair = useState({ rezhim: 'odna', otn: OTN_NACH, klon: false, szh: SZH_NACH, vn: VN_NACH,
+                        run: true, faza: 'do', zas: null });
+  var ui = pair[0], setUi = pair[1];
+
+  /* Фазы опыта: start — стоим до «Пуска»; do — до толчка или
+     взаимодействия; posle — толчок прошёл, самописец дописывает окна;
+     izmereno — засечки сняты; konec — тележки встали. */
+  function faza() {
+    var m = st.m;
+    if (!st.run && m.t === 0) return 'start';
+    if (m.tSob === null) return 'do';
+    if (!m.zas) return 'posle';
+    return m.konec ? 'konec' : 'izmereno';
+  }
+
+  function snyat() {
+    var m = st.m, z = m.zas, odna = m.n === 1;
+    pokaz.rezhim = m.rezhim;
+    pokaz.m2_m1 = odna ? null : st.otn; pokaz.klon = odna ? null : st.klon;
+    pokaz.szhatie_sm = m.rezhim === 'pruzhina' ? st.szh : null;
+    pokaz.vn = m.rezhim === 'pruzhina' ? null : st.vn;
+    pokaz.t = m.t; pokaz.faza = faza(); pokaz.tSob = m.tSob; pokaz.tOtm = m.tOtm;
+    pokaz.x1 = m.x[0]; pokaz.x2 = odna ? null : m.x[1];
+    pokaz.v1_model = m.v[0]; pokaz.v2_model = odna ? null : m.v[1];
+    pokaz.v1_do = z ? z.vDo[0] : null;       pokaz.v2_do = z && !odna ? z.vDo[1] : null;
+    pokaz.v1_posle = z ? z.vPosle[0] : null; pokaz.v2_posle = z && !odna ? z.vPosle[1] : null;
+    pokaz.dv1 = z ? z.dv[0] : null;          pokaz.dv2 = z && !odna ? z.dv[1] : null;
+    pokaz.otnoshenie = z ? z.otn : null;
+    /* формула: у пары m₂/m₁ по ползунку, у одной тележки нулевое Δv */
+    pokaz.formula = odna ? 0 : st.otn;
+    pokaz.rashozhdenie = !z ? null : odna ? Math.abs(z.dv[0]) : Math.abs(z.otn - st.otn);
+    pokaz.rashozhdenie_v = z ? rashozhdenieV(m) : null;
+  }
+
+  /* Новая модель из текущих ручек */
+  function sobrat() {
+    st.m = novayaModel({ rezhim: st.rezhim, otn: st.otn, klon: st.klon, szh: st.szh / 100, vn: st.vn });
+    st.fazaUi = faza();
+    snyat();
+  }
+  if (!st.m) sobrat();
+
+  function step(dt) {
+    if (!st.run) return;
+    shag(st.m, dt);
+    snyat();
+    var f = faza();
+    if (f !== st.fazaUi) {
+      st.fazaUi = f;
+      var z = st.m.zas;
+      setUi(function (u) { return Object.assign({}, u, { faza: f, zas: z }); });
+    }
+  }
+
+  /* ── примитивы сцены ── */
+
+  function telo(ctx, xc, L, h, rgb) {
+    var w = L * SC, y0 = TRK - ZAZ - h;
+    C.roundRect(ctx, ekr(xc) - w / 2, y0, w, h, Math.min(4, h / 2));
+    ctx.fillStyle = 'rgba(' + rgb + ',.92)'; ctx.fill();
+  }
+
+  function telezhka(ctx, i) {
+    var m = st.m;
+    if (i === 0) { telo(ctx, m.x[0], CART_L, H_ET, CV1); return; }
+    if (!st.klon) { telo(ctx, m.x[1], CART_L, H_ET * st.otn, CV2); return; }
+    /* клон: два тела эталонной высоты и скоба между ними */
+    var xl = m.x[1] - CART_L / 2, xr = m.x[1] + CART_L / 2;
+    telo(ctx, xl, CART_L - 0.012, H_ET, CV2);
+    telo(ctx, xr, CART_L - 0.012, H_ET, CV2);
+    ctx.fillStyle = 'rgba(' + CV2 + ',.92)';
+    ctx.fillRect(ekr(m.x[1]) - 7, TRK - ZAZ - H_ET / 2 - 2.5, 14, 5);
+  }
+
+  function pruzhinaRis(ctx, xa, xb, y, rgb) {
+    var n = 7, amp = 6, dx = (xb - xa) / (n + 1);
+    ctx.strokeStyle = 'rgba(' + rgb + ',.8)'; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(xa, y);
+    for (var i = 1; i <= n; i++) ctx.lineTo(xa + i * dx, y + (i % 2 ? -amp : amp));
+    ctx.lineTo(xb, y); ctx.stroke();
+  }
+
+  /* Горизонтальная стрелка толчка: древко и клин. Обёрнута в save/restore
+     ради круглого торца, который больше никому на кадре не нужен. */
+  function strelka(ctx, x0, x1, y, kraska, w) {
+    var gol = 12;
+    ctx.save();
+    ctx.strokeStyle = kraska; ctx.fillStyle = kraska;
+    ctx.lineWidth = w; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1 - gol + 1, y); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x1, y); ctx.lineTo(x1 - gol, y - gol * 0.5); ctx.lineTo(x1 - gol, y + gol * 0.5);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  /* Пара засечек: две риски и перекладина между ними; слово окна стоит у
+     конца хода. Тележка, стоявшая всё окно, оставляет одну риску: за 0,2 с
+     она не сдвинулась, и это тоже показание. */
+  function zasechkiRis(ctx, z, i, rows, slova, rgb) {
+    [[z.xDo[i], rows[0], slova[0]], [z.xPosle[i], rows[1], slova[1]]].forEach(function (p) {
+      var xa = ekr(p[0][0]), xb = ekr(p[0][1]), y = p[1], vpravo = xb >= xa;
+      ctx.strokeStyle = 'rgba(' + rgb + ',.95)'; ctx.lineWidth = 2; ctx.lineCap = 'butt';
+      ctx.beginPath();
+      ctx.moveTo(xa, y - 6); ctx.lineTo(xa, y + 6);
+      if (Math.abs(xb - xa) >= 1) {
+        ctx.moveTo(xb, y - 6); ctx.lineTo(xb, y + 6);
+        ctx.moveTo(xa, y); ctx.lineTo(xb, y);
+      }
+      ctx.stroke();
+      C.label(ctx, vpravo ? xb + 8 : xb - 8, y + 6, p[2], 17, 'rgba(' + rgb + ',.9)',
+              vpravo ? 'left' : 'right');
+    });
+  }
+
+  function kvadrat(ctx, x, y, rgb) {
+    C.roundRect(ctx, x, y - 5, 10, 10, 2);
+    ctx.fillStyle = 'rgb(' + rgb + ')'; ctx.fill();
+  }
+
+  /* ── кадр ── */
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), m = st.m, odna = m.n === 1;
+    var ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var i, x;
+
+    /* ── легенда ── */
+    kvadrat(ctx, 44, 31, CV1);
+    C.label(ctx, 62, 36, odna ? 'тележка' : 'эталон, m₁ = 1', 17, 'rgb(' + CV1 + ')', 'left');
+    if (!odna) {
+      kvadrat(ctx, 214, 31, CV2);
+      C.label(ctx, 232, 36, st.klon ? 'вторая: две копии эталона, m₂ = 2 m₁'
+                                    : 'вторая, m₂ = ' + num(st.otn, 2) + ' m₁',
+              17, 'rgb(' + CV2 + ')', 'left');
+    }
+
+    /* ── рельс: полоса, отверстия воздушной подушки через 5 см, упоры ── */
+    ctx.strokeStyle = 'rgba(' + ink + ',.5)'; ctx.lineWidth = 4; ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(ekr(-TRACK), TRK); ctx.lineTo(ekr(TRACK), TRK); ctx.stroke();
+    ctx.fillStyle = 'rgba(' + ink + ',.45)';
+    for (x = -TRACK + 0.05; x < TRACK - 0.025; x += 0.05) {
+      ctx.beginPath(); ctx.arc(ekr(x), TRK - 4.5, 1.3, 0, 6.2832); ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(' + ink + ',.6)';
+    [-1, 1].forEach(function (s) {
+      C.roundRect(ctx, ekr(s * TRACK) - (s > 0 ? 0 : 6), TRK - 24, 6, 26, 2); ctx.fill();
+    });
+
+    /* ── линейка под рельсом: риски через 10 см, подписи через полметра ── */
+    ctx.strokeStyle = 'rgba(' + muted + ',.7)'; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (i = -12; i <= 12; i++) {
+      x = ekr(i / 10);
+      ctx.moveTo(x, TRK + 4); ctx.lineTo(x, TRK + (i % 5 ? 9 : 14));
+    }
+    ctx.stroke();
+    [-1, -0.5, 0, 0.5, 1].forEach(function (v) {
+      C.label(ctx, ekr(v), RUL_Y, num(v, v % 1 ? 1 : 0), 17, 'rgba(' + muted + ',.9)');
+    });
+    C.label(ctx, RX, RUL_Y, 'м', 17, 'rgba(' + muted + ',.9)', 'right');
+
+    /* ── отметка на рельсе: у одной тележки здесь открывается второе окно ── */
+    if (odna) {
+      x = ekr(X_OTM);
+      ctx.save();
+      ctx.setLineDash([4, 5]);
+      ctx.strokeStyle = 'rgba(' + muted + ',.8)'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(x, TRK - 4); ctx.lineTo(x, 160); ctx.stroke();
+      ctx.restore();
+      C.label(ctx, x, 152, 'отметка', 17, 'rgba(' + muted + ',.9)');
+    }
+
+    /* ── засечки ── */
+    if (m.zas) {
+      if (odna) zasechkiRis(ctx, m.zas, 0, LANE1, ['в начале', 'у отметки'], CV1);
+      else {
+        zasechkiRis(ctx, m.zas, 0, LANE1, ['до', 'после'], CV1);
+        zasechkiRis(ctx, m.zas, 1, LANE2, ['до', 'после'], CV2);
+      }
+    }
+
+    /* ── что между тележками ── */
+    var yMid = TRK - ZAZ - H_ET / 2;
+    if (m.rezhim === 'pruzhina') {
+      /* Пружина сидит на эталоне. Пока просвет меньше свободной длины, она
+         тянется от борта до борта; дальше висит на эталоне своей длиной. */
+      var xb2 = ekr(m.x[1] + m.L[1] / 2), xb1 = ekr(m.x[0] - m.L[0] / 2);
+      var dl = Math.min(xb1 - xb2, L_PR * SC);
+      pruzhinaRis(ctx, xb1 - dl, xb1, yMid, ink);
+      if (m.tSob === null) {
+        /* нить через просвет, с узелками на бортах: её и пережигает «Пуск» */
+        var yn = TRK - ZAZ - H_ET - 4;
+        ctx.strokeStyle = 'rgba(' + muted + ',.9)'; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(xb2 - 6, yn); ctx.lineTo(xb1 + 6, yn); ctx.stroke();
+        ctx.fillStyle = 'rgba(' + muted + ',.9)';
+        [xb2 - 6, xb1 + 6].forEach(function (xx) {
+          ctx.beginPath(); ctx.arc(xx, yn, 2.2, 0, 6.2832); ctx.fill();
+        });
+      }
+    } else if (m.rezhim === 'plastilin') {
+      /* комок на носу второй; после касания сплющен между бортами */
+      var xn = ekr(m.x[1] + m.L[1] / 2);
+      ctx.fillStyle = 'rgba(' + CGL + ',.95)';
+      ctx.beginPath();
+      if (m.tSob === null) ctx.ellipse(xn - 1, yMid, 7, 8, 0, 0, 6.2832);
+      else ctx.ellipse(xn, yMid, 4, 11, 0, 0, 6.2832);
+      ctx.fill();
+    } else if (odna && m.tSob !== null && m.t - m.tSob < T_STRELKI) {
+      /* толчок: стрелка за кормой, гаснет за треть секунды; дальше тележку
+         никто не трогает, и на кадре это видно буквально */
+      var a = 1 - (m.t - m.tSob) / T_STRELKI, xk = ekr(m.x[0] - CART_L / 2);
+      strelka(ctx, xk - 52, xk - 8, yMid, 'rgba(' + acc + ',' + a + ')', 3);
+      C.label(ctx, xk - 30, yMid - 14, 'толчок', 17, 'rgba(' + acc + ',' + a + ')');
+    }
+
+    /* ── тележки ── */
+    if (!odna) telezhka(ctx, 1);
+    telezhka(ctx, 0);
+
+    /* ── таблица засечек и крупное показание ── */
+    var z = m.zas, tx = odna ? TAB_X.odna : TAB_X.para;
+    var caps = odna ? ['В НАЧАЛЕ, М/С', 'У ОТМЕТКИ, М/С', 'Δv, М/С'] : ['ДО, М/С', 'ПОСЛЕ, М/С', 'Δv, М/С'];
+    var rows = odna ? [['тележка', CV1]] : [['эталон', CV1], ['вторая', CV2]];
+    ctx.save();
+    ctx.textAlign = 'right';
+    ctx.font = '600 15px ' + MONO; ctx.fillStyle = 'rgb(' + muted + ')';
+    caps.forEach(function (cap, k) { ctx.fillText(cap, tx[k + 1], TAB_Y[0]); });
+    ctx.font = '600 20px ' + MONO;
+    rows.forEach(function (row, k) {
+      var y = TAB_Y[k + 1];
+      ctx.fillStyle = 'rgb(' + row[1] + ')';
+      ctx.textAlign = 'left'; ctx.fillText(row[0], tx[0], y);
+      ctx.textAlign = 'right';
+      var vals = z ? [znak(z.vDo[k], 2), znak(z.vPosle[k], 2), znak(z.dv[k], 2)] : ['—', '—', '—'];
+      vals.forEach(function (s, j) { ctx.fillText(s, tx[j + 1], y); });
+    });
+    ctx.restore();
+    if (odna) C.readout(ctx, RX, 380, 'Δv, М/С', z ? znak(z.dv[0], 2) : '—', 'rgb(' + acc + ')');
+    else C.readout(ctx, RX, 380, '|Δv₁| / |Δv₂|', z ? num(z.otn, 2) : '—', 'rgb(' + acc + ')');
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Прогон по требованию, без анимации: та же модель на заданных ручках.
+     Третий аргумент — то, что стоит на ползунке толчка: сжатие в
+     сантиметрах у пружины, скорость в м/с у остальных; klon четвёртым.
+     __demoCheck('udar', 0.5, 1) даёт сводку с измеренным отношением и
+     расхождениями, __demoCheck('odna', null, 1.5) — с Δv одной тележки. */
+  window.__demoCheck = function (rezhim, otn, param, klon) {
+    var r = rezhim || st.rezhim, o = otn == null ? st.otn : otn;
+    var p = { rezhim: r, otn: o, klon: !!klon,
+              szh: (r === 'pruzhina' && param != null ? param : st.szh) / 100,
+              vn: r !== 'pruzhina' && param != null ? param : st.vn };
+    return svodka(p);
+  };
+
+  /* Ручки меняют опыт: новая модель, тележки стоят до «Пуска». Обновление
+     через функцию, а не через замыкание: ползунок сыплет события чаще,
+     чем React успевает перерисовать рейку. */
+  function obnovit(patch) {
+    Object.assign(st, patch); st.run = false; sobrat();
+    setUi(function (u) { return Object.assign({}, u, patch, { run: false, faza: st.fazaUi, zas: null }); });
+  }
+  function pusk() {
+    st.run = true; sobrat();
+    setUi(function (u) { return Object.assign({}, u, { run: true, faza: st.fazaUi, zas: null }); });
+  }
+  /* Клон — переключатель: нажатие ставит две копии эталона и m₂ = 2,
+     повторное возвращает одну тележку и тот m₂/m₁, что стоял до клона.
+     Ползунок массы клон тоже снимает. */
+  function klon() {
+    if (st.klon) obnovit({ klon: false, otn: st.otnDoKlona });
+    else { st.otnDoKlona = st.otn; obnovit({ otn: 2, klon: true }); }
+  }
+
+  /* Строка показаний пересказывает кадр словами; числа в неё подставляются
+     те же, что напечатаны на сцене. У одной тележки слова «трение» нет. */
+  function slova(u) {
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var z = u.zas, s;
+    if (u.rezhim === 'odna') {
+      if (u.faza === 'start')
+        return 'Одна тележка на воздушной подушке над рельсом. «Пуск» толкает её со скоростью ' +
+          A(num(u.vn, 1) + ' м/с') + ', и дальше её никто не трогает.';
+      if (u.faza === 'do') return 'Тележка стоит; сейчас её толкнут, и дальше её никто не трогает.';
+      if (u.faza === 'posle' || !z)
+        return 'Тележку толкнули, и дальше её никто не трогает. Засечки снимаются в начале пути ' +
+          'и у отметки 0,5 м.';
+      return 'В начале пути ' + A(znak(z.vDo[0], 2) + ' м/с') + ', у отметки ' +
+        A(znak(z.vPosle[0], 2) + ' м/с') + ': сама по себе тележка скорости не меняет и ведёт ' +
+        'себя как свободное тело из первого закона. Остальные опыты ставят на рельс вторую тележку.';
+    }
+    var kl = u.klon ? ' Вторая здесь — две сцепленные копии эталона.' : '';
+    var tr = ' Трения нет: дорожка воздушная, тележки рельса не касаются.';
+    if (u.faza === 'start' || u.faza === 'do') {
+      if (u.rezhim === 'pruzhina')
+        return 'Пружина между тележками сжата на ' + A(u.szh + ' см') +
+          '; обе тележки стоят, их держит нить.' + kl + tr +
+          (u.faza === 'start' ? ' «Пуск» пережигает нить.' : ' Самописец уже пишет координаты.');
+      return 'Вторая ' + (u.faza === 'start' ? 'налетит' : 'налетает') + ' на стоящий эталон со скоростью ' +
+        A(num(u.vn, 1) + ' м/с') +
+        (u.rezhim === 'udar' ? '; удар упругий.' : ' и прилипнет.') + kl + tr;
+    }
+    if (u.faza === 'posle' || !z)
+      return 'Взаимодействие прошло. Самописец дописывает 0,2 с после него, и тогда снимутся засечки.';
+    var obmen = u.rezhim === 'udar' && Math.abs(z.vPosle[1]) < 5e-3;
+    s = 'Засечки за 0,2 с до и после: эталон приобрёл ' + A(znak(z.dv[0], 2) + ' м/с') +
+      ', вторая изменила скорость на ' + A(znak(z.dv[1], 2) + ' м/с');
+    if (u.rezhim === 'pruzhina') s += ': разошлись в разные стороны, и лёгкая изменила скорость сильнее.';
+    else if (obmen) s += ': тележки обменялись скоростями, вторая стоит.';
+    else if (u.rezhim === 'udar') s += ' (шла ' + znak(z.vDo[1], 2) + ', идёт ' + znak(z.vPosle[1], 2) + ').';
+    else s += '; слиплись и едут вместе, ' + znak(z.vPosle[0], 2) + ' м/с.';
+    s += ' Отношение |Δv₁|/|Δv₂| = ' + A(num(z.otn, 2)) + '.';
+    s += u.klon ? ' Две копии эталона отвечают как два эталона.'
+                : ' Смените взаимодействие или толчок: число останется.';
+    return s;
+  }
+
+  var odnaUi = ui.rezhim === 'odna';
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Опыт:">
+          ${REZHIMY.map(function (r) { return html`
+            <${C.Btn} key=${r.id} active=${ui.rezhim === r.id}
+                      onClick=${function () { obnovit({ rezhim: r.id }); }}>${r.label}<//>`; })}
+        <//>
+        ${odnaUi ? null : html`
+          <${C.Slider} key="otn" label="Масса второй:" min=${OTN_MIN} max=${OTN_MAX} step=${OTN_SHAG}
+                       value=${ui.otn}
+                       onChange=${function (v) { obnovit({ otn: Math.round(v * 4) / 4, klon: false }); }}
+                       display=${'m₂/m₁ = ' + num(ui.otn, 2)} />
+          <${C.Group} key="klon">
+            <${C.Btn} active=${ui.klon} onClick=${klon}>Клонировать эталон<//>
+          <//>`}
+        ${ui.rezhim === 'pruzhina'
+          ? html`<${C.Slider} key="szh" label="Сжатие:" min=${SZH_MIN} max=${SZH_MAX} step=${SZH_SHAG}
+                     value=${ui.szh}
+                     onChange=${function (v) { obnovit({ szh: Math.round(v) }); }}
+                     display=${ui.szh + ' см'} />`
+          : html`<${C.Slider} key="vn" label=${odnaUi ? 'Толчок:' : 'Налёт:'}
+                     min=${VN_MIN} max=${VN_MAX} step=${VN_SHAG}
+                     value=${ui.vn}
+                     onChange=${function (v) { obnovit({ vn: Math.round(v * 10) / 10 }); }}
+                     display=${num(ui.vn, 1) + ' м/с'} />`}
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>Пуск<//>
+          <${C.Btn} onClick=${function () { obnovit({}); }}>Сброс<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova(ui)} />
+    </div>`;
+}
+
+C.mount(Dorozhka);
+</script>
+</body>
+</html>

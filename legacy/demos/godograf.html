@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Годограф скорости</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-02/">&larr; Неделя 02</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=godograf"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `godograf`: точка идёт по окружности радиуса R, все векторы
+   скорости сносятся в одну точку, и множество их концов — годограф.
+   Числа блока: R = 1 м, v = 2 м/с, отсюда T = 2πR/v = π ≈ 3,14 с и
+   a = v²/R = 4 м/с².
+
+   Условие равномерности в тексте названо вслух, и сказано, чем за него
+   плачено: только при нём годограф выходит окружностью. Проверить это
+   словами нельзя, а ползунком можно — ради него демка и заведена.
+
+   Движение задаётся угловой скоростью, зависящей от самого угла:
+
+       φ' = ω₀ (1 + ε sin φ),      ω₀ = v/R
+
+   При ε = 0 это то самое равномерное движение из блока. При ε > 0 модуль
+   скорости гуляет, годограф перестаёт быть окружностью, и у ускорения
+   появляется составляющая вдоль скорости.
+
+   Ускорение берётся не из общей формулы, а честным дифференцированием
+   скорости. Для v = R φ' e_t, где e_t = (−sin φ, cos φ):
+
+       a = R φ'' e_t − R φ'² e_r,      e_r = (cos φ, sin φ)
+
+   то есть a_t = R φ'', a_n = R φ'². Вторая производная угла берётся по
+   цепочке: φ'' = dφ'/dφ · φ' = ω₀ ε cos φ · φ'.
+
+   Аналитика проверяется численно в тот же момент времени: скорость
+   считается конечной разностью положения, ускорение — конечной разностью
+   скорости, и обе величины лежат в __demoState рядом с аналитическими.
+   При ε = 0 нормальная составляющая обязана дать 4,000 м/с². */
+
+var R = 1;                  /* радиус траектории, м */
+var V0 = 2;                 /* модуль скорости при ε = 0, м/с */
+var W0 = V0 / R;            /* угловая скорость при ε = 0, рад/с */
+var T0 = 2 * Math.PI / W0;  /* период при ε = 0, с */
+var SUB = 24;               /* подшагов на кадр: годограф не должен «дышать» */
+
+function omega(phi, eps){ return W0 * (1 + eps * Math.sin(phi)); }
+
+/* Положение, скорость и ускорение в текущем угле — всё аналитически. */
+function state(phi, eps){
+  var w = omega(phi, eps);
+  var dw = W0 * eps * Math.cos(phi);   /* dφ'/dφ */
+  var wd = dw * w;                     /* φ'' */
+  var er = [Math.cos(phi), Math.sin(phi)];
+  var et = [-Math.sin(phi), Math.cos(phi)];
+  return {
+    r:  [R * er[0], R * er[1]],
+    v:  [R * w * et[0], R * w * et[1]],
+    a:  [R * wd * et[0] - R * w * w * er[0],
+         R * wd * et[1] - R * w * w * er[1]],
+    at: R * wd,          /* вдоль скорости: при ε = 0 равен нулю */
+    an: R * w * w,       /* поперёк, к центру */
+    w:  w
+  };
+}
+
+/* Численная сверка: та же точка, но производные конечной разностью.
+   Шаг подобран так, чтобы ошибка усечения и ошибка округления не спорили:
+   на double это примерно кубический корень из машинного эпсилон. */
+function chislenno(phi, eps){
+  var h = 1e-5;
+  function pos(t){
+    /* Интегрируем угол от phi на время t малыми шагами: φ' зависит от φ,
+       готовой формулы φ(t) здесь нет. */
+    var p = phi, n = 40, dt = t / n;
+    for (var i = 0; i < n; i++) p += omega(p, eps) * dt;
+    return [R * Math.cos(p), R * Math.sin(p)];
+  }
+  function vel(t){
+    var a = pos(t - h), b = pos(t + h);
+    return [(b[0] - a[0]) / (2 * h), (b[1] - a[1]) / (2 * h)];
+  }
+  var v = vel(0);
+  var va = vel(-h), vb = vel(h);
+  return { v: Math.hypot(v[0], v[1]),
+           a: Math.hypot((vb[0] - va[0]) / (2 * h), (vb[1] - va[1]) / (2 * h)) };
+}
+
+function num(x, d){ return x.toFixed(d).replace('.', ','); }
+
+/* ══════════════════ сцена ══════════════════
+
+   Две панели рядом: слева комната с траекторией в метрах, справа годограф
+   в метрах в секунду. Метр слева и метр в секунду справа нарочно выведены
+   в разном масштабе — это разные величины, и одинаковый масштаб уверял бы,
+   что их можно сравнивать.
+
+   Масштаб стрелки скорости слева совпадает с масштабом годографа справа:
+   стрелка у точки и стрелка из общего начала выходят одной длины, и видно,
+   что это буквально один и тот же вектор, перенесённый. */
+
+var W = 1000, HGT = 430;
+var LEFT = { x: 250, y: 232 }, RIGHT = { x: 706, y: 232 };
+var S_R = 118;    /* пикселей на метр (траектория) */
+var S_V = 55;     /* пикселей на м/с (годограф и стрелка скорости) */
+var S_A = 18;     /* пикселей на м/с²: при снятой равномерности a доходит до 8 */
+
+var CV = '#4db6c6';   /* скорость: та же бирюза, что у векторов скорости в рисунках главы */
+var CA = '#e08a52';   /* ускорение: та же охра */
+
+function strelka(ctx, x0, y0, x1, y1, color, width, head){
+  var dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy);
+  if (L < 1) return;
+  var ux = dx / L, uy = dy / L;
+  head = head || Math.min(13, L * 0.32);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.stroke();
+  /* Наконечник с выемкой сзади: тот же силуэт, что в рисунках главы, —
+     равнобедренный треугольник читается жирным клином. */
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * head - uy * head * 0.34, y1 - uy * head + ux * head * 0.34);
+  ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.lineTo(x1 - ux * head + uy * head * 0.34, y1 - uy * head - ux * head * 0.34);
+  ctx.closePath(); ctx.fill();
+}
+
+function Godograf(){
+  var st = useRef({ phi: 0, eps: 0, run: true, sled: [], pokaz: null }).current;
+  /* Пара берётся из одного вызова useState: два отдельных вызова дают два
+     независимых состояния, и рейка перестаёт отзываться на ползунок. */
+  var pair = useState({ eps: 0, run: true });
+  var ui = pair[0], setUi = pair[1];
+
+  function step(dt){
+    if (!st.run) { st.pokaz = state(st.phi, st.eps); return; }
+    var h = dt / SUB;
+    for (var i = 0; i < SUB; i++) st.phi += omega(st.phi, st.eps) * h;
+    if (st.phi > 1e6) st.phi -= 1e6;
+    var s = state(st.phi, st.eps);
+    st.pokaz = s;
+    pokazaniya(s);
+    /* След годографа: конец вектора скорости. Хранится ровно один обход,
+       иначе при неравномерности кривая обводится по многу раз и толстеет. */
+    st.sled.push([s.v[0], s.v[1]]);
+    if (st.sled.length > 900) st.sled.shift();
+  }
+
+  /* Показания пишутся из шага, а не из отрисовки компонента: автопроверка
+     двигает модель через __demoTick, рендера при этом не происходит, и
+     объект, собранный в теле компонента, оставался бы от первого кадра. */
+  function pokazaniya(s){
+    window.__demoState = {
+      eps: st.eps, phi: st.phi, R: R, v0: V0, T0: T0,
+      v: Math.hypot(s.v[0], s.v[1]),
+      a: Math.hypot(s.a[0], s.a[1]),
+      at: s.at, an: s.an,
+      ravnomerno: st.eps === 0
+    };
+  }
+
+  /* Сверка аналитики с конечными разностями по требованию: считать её
+     каждый кадр незачем, внутри сорок шагов интегрирования на вызов. */
+  window.__demoSverka = function(){
+    var s = state(st.phi, st.eps), ch = chislenno(st.phi, st.eps);
+    return { v: Math.hypot(s.v[0], s.v[1]), v_chislenno: ch.v,
+             a: Math.hypot(s.a[0], s.a[1]), a_chislenno: ch.a };
+  };
+
+  function draw(ctx){
+    var tone = C.tones(ctx);
+    var ink = 'rgb(' + tone.ink + ')', muted = 'rgb(' + tone.muted + ')';
+    var s = st.pokaz || state(st.phi, st.eps);
+
+    /* ── оси и окружности ── */
+    function osi(c, len, podpisi){
+      ctx.strokeStyle = 'rgba(' + tone.muted + ',.5)'; ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(c.x - len, c.y); ctx.lineTo(c.x + len, c.y);
+      ctx.moveTo(c.x, c.y + len); ctx.lineTo(c.x, c.y - len);
+      ctx.stroke();
+      C.label(ctx, c.x + len + 14, c.y + 6, podpisi[0], 18, muted, 'left');
+      C.label(ctx, c.x, c.y - len - 12, podpisi[1], 18, muted, 'center');
+    }
+    /* Оси годографа подписаны одними единицами, без букв: буквы для проекций
+       скорости в главе не заведены, и придумывать их рисунок не вправе.
+       Так же подписан и печатный рисунок ris-godograf. */
+    osi(LEFT, 168, ['x, м', 'y, м']);
+    osi(RIGHT, 152, ['м/с', 'м/с']);
+
+    /* Траектория: окружность радиуса R. */
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.55)'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.arc(LEFT.x, LEFT.y, R * S_R, 0, 6.2832); ctx.stroke();
+
+    /* Годограф: при ε = 0 это окружность радиуса v, и она рисуется тонким
+       пунктиром как обещание; след поверх неё показывает, сбывается ли оно. */
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.28)';
+    ctx.lineWidth = 1.6; ctx.setLineDash([6, 6]);
+    ctx.beginPath(); ctx.arc(RIGHT.x, RIGHT.y, V0 * S_V, 0, 6.2832); ctx.stroke();
+    ctx.setLineDash([]);
+
+    /* След концов вектора скорости. */
+    if (st.sled.length > 1) {
+      ctx.strokeStyle = CV; ctx.lineWidth = 2.6; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (var i = 0; i < st.sled.length; i++) {
+        var px = RIGHT.x + st.sled[i][0] * S_V, py = RIGHT.y - st.sled[i][1] * S_V;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+
+    /* ── слева: точка, радиус-вектор, скорость ── */
+    var Px = LEFT.x + s.r[0] * S_R, Py = LEFT.y - s.r[1] * S_R;
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.75)'; ctx.lineWidth = 1.6;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.moveTo(LEFT.x, LEFT.y); ctx.lineTo(Px, Py); ctx.stroke();
+    ctx.setLineDash([]);
+    strelka(ctx, Px, Py, Px + s.v[0] * S_V, Py - s.v[1] * S_V, CV, 3);
+    /* Ускорение в точке: тот же вектор, что справа касается годографа. */
+    strelka(ctx, Px, Py, Px + s.a[0] * S_A, Py - s.a[1] * S_A, CA, 3);
+    ctx.fillStyle = ink;
+    ctx.beginPath(); ctx.arc(Px, Py, 5.5, 0, 6.2832); ctx.fill();
+    C.label(ctx, LEFT.x - 12, LEFT.y + 20, 'O', 19, muted, 'right');
+
+    /* ── справа: тот же вектор из общего начала ── */
+    var Qx = RIGHT.x + s.v[0] * S_V, Qy = RIGHT.y - s.v[1] * S_V;
+    strelka(ctx, RIGHT.x, RIGHT.y, Qx, Qy, CV, 3);
+    strelka(ctx, Qx, Qy, Qx + s.a[0] * S_A, Qy - s.a[1] * S_A, CA, 3);
+    ctx.fillStyle = CV;
+    ctx.beginPath(); ctx.arc(Qx, Qy, 5, 0, 6.2832); ctx.fill();
+    C.label(ctx, RIGHT.x - 12, RIGHT.y + 20, 'O′', 19, muted, 'right');
+
+    C.label(ctx, LEFT.x, 34, 'ТРАЕКТОРИЯ', 15, muted);
+    C.label(ctx, RIGHT.x, 34, 'ГОДОГРАФ', 15, muted);
+
+    /* ── показания ── */
+    var vAbs = Math.hypot(s.v[0], s.v[1]), aAbs = Math.hypot(s.a[0], s.a[1]);
+    C.readout(ctx, 176, HGT - 52, '|v|, м/с', num(vAbs, 2), CV);
+    C.readout(ctx, 332, HGT - 52, '|a|, м/с²', num(aAbs, 2), CA);
+    C.readout(ctx, 640, HGT - 52, 'a вдоль v', num(s.at, 2), st.eps ? CA : muted);
+    C.readout(ctx, 828, HGT - 52, 'a поперёк v', num(s.an, 2), CA);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  if (!window.__demoState) pokazaniya(st.pokaz || state(st.phi, st.eps));
+
+  function menyat(e){
+    st.eps = e; st.sled.length = 0;
+    setUi({ eps: e, run: st.run });
+  }
+  function pusk(){
+    st.run = !st.run;
+    setUi({ eps: st.eps, run: st.run });
+  }
+  function sbros(){
+    st.phi = 0; st.sled.length = 0; st.pokaz = state(0, st.eps);
+    setUi({ eps: st.eps, run: st.run });
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+        <${C.Slider} label="Неравномерность:" min=${0} max=${0.5} step=${0.05}
+                     value=${ui.eps} onChange=${menyat}
+                     display=${'ε = ' + num(ui.eps, 2)} />
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      ${/* Формула v²/R из этой строки убрана 08.09. Следующий слайд колоды
+            («Поделим две длины на один период») спрашивает зал, что выйдет,
+            если поделить длину годографа на период, и весь его пуант в том,
+            что v²/R выпадает без единой производной. Пока формула стояла
+            здесь, ответ висел на экране кадром раньше вопроса — тот самый
+            урок живой лекции 2026 года, который колода уже записала про
+            слайд со сферическим треугольником.
+            Показания |a| это не спойлер и остаются: зал видит число, а
+            выводит формулу, и число ему потом только на руку. */''}
+      <${C.Status} html=${ui.eps === 0
+        ? 'Движение равномерное. Концы вектора скорости обводят окружность радиуса ' +
+          'v = 2 м/с, а ускорение всё время перпендикулярно скорости. ' +
+          'Ровно это условие в главе названо вслух: без него годограф не окружность.'
+        : 'Равномерность снята. Модуль скорости гуляет, годограф перестал быть окружностью ' +
+          'и отошёл от пунктира, а у ускорения появилась составляющая вдоль скорости — ' +
+          'та самая, которой при ε = 0 не было.'} />
+    </div>`;
+}
+
+C.mount(Godograf);
+</script>
+</body>
+</html>

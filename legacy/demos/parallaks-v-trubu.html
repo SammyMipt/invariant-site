@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Параллакс в трубу: что видно с Земли</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-02/">&larr; Неделя 02</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=parallaks-v-trubu"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Продолжение демки parallaks-krivizna, но с другой стороны: та показывает
+   треугольник сверху, а эта — что видно в трубу. Просьба автора 07.09:
+   «как мы видим условную звезду в разные времена года по сравнению с
+   неподвижным объектом, и что бы мы видели для выпуклого и вогнутого
+   пространства, чтобы было понятно, что люди видят».
+
+   Что происходит на самом деле. Земля за год обходит орбиту, и близкая
+   звезда рисуется на фоне далёких то с одной стороны, то с другой. Далёкие
+   звёзды при этом стоят: их параллакс во столько же раз меньше, во сколько
+   они дальше. Замкнутая кривая, которую близкая звезда обводит за год,
+   называется параллактическим эллипсом; большая полуось у него равна
+   параллаксу p, малая — p·sin β, где β — угол между направлением на звезду
+   и плоскостью орбиты. Здесь β взято 55°, чтобы эллипс не выродился ни в
+   окружность (β = 90°), ни в отрезок (β = 0).
+
+   Как связаны параллакс и расстояние. В прямоугольном треугольнике с
+   катетом a (радиус орбиты) и катетом d (расстояние до звезды) угол при
+   звезде даётся обобщённой теоремой синусов, одной записью на все три
+   геометрии:
+
+       tg p = tn(a, k) / sn(d, k),
+
+   где sn и cs — обобщённые синус и косинус (те же функции, что в
+   parallaks-krivizna; определения скопированы оттуда дословно, чтобы две
+   демки не разошлись). В плоском случае sn(d) = d, и выходит школьное
+   tg p = a/d.
+
+   Что меняет кривизна. Радиус орбиты рядом с межзвёздными расстояниями
+   ничтожен, поэтому tn(a, k) при любой разумной k равен a с точностью до
+   десятого знака, и вся кривизна входит через sn(d, k):
+
+     — на сфере sn(d) = sin(kd)/k < d, значит p БОЛЬШЕ плоского, и звезда
+       по плоской формуле выходит ближе, чем она есть;
+     — на псевдосфере sn(d) = sh(|k|d)/|k| > d, значит p МЕНЬШЕ, и звезда
+       выходит дальше.
+
+   Измеряют при этом всегда угол; расстояние из него получают формулой, и
+   если геометрия не та, ответ уезжает. Это и есть содержание проверки.
+
+   ЧЕСТНАЯ ОГОВОРКА ПРО МАСШТАБ КРИВИЗНЫ. Чтобы искривление было видно
+   глазом, радиус кривизны пространства взят сравнимым с расстоянием до
+   звезды, то есть чудовищно малым: наблюдения ставят нижнюю границу на
+   много порядков выше. Демка показывает не то, каким пространство
+   является, а то, чем измерение угла отличается от измерения расстояния. */
+
+/* Обобщённые функции длины — дословно из parallaks-krivizna.html.
+   Ветки сшиты рядами: при k → 0 обе дают ровно одно и то же. */
+function sinc(u)  { return Math.abs(u) < 1e-5 ? 1 - u * u / 6 : Math.sin(u) / u; }
+function sinhc(u) { return Math.abs(u) < 1e-5 ? 1 + u * u / 6 : Math.sinh(u) / u; }
+function sn(x, k) { return k >= 0 ? x * sinc(k * x) : x * sinhc(-k * x); }
+function cs(x, k) { return k >= 0 ? Math.cos(k * x) : Math.cosh(-k * x); }
+function tn(x, k) { return sn(x, k) / cs(x, k); }
+
+var AU_V_PK = 1 / 206264.80624709636;    /* астрономическая единица в парсеках */
+var ARCSEC = 180 * 3600 / Math.PI;       /* радиан в угловые секунды */
+var BETA = 55 * Math.PI / 180;           /* наклон направления на звезду к плоскости орбиты */
+
+/* Параллакс звезды, стоящей на расстоянии d парсеков, при кривизне k (1/пк). */
+function parallaks(d, k){
+  return Math.atan(tn(AU_V_PK, k) / sn(d, k));   /* радианы */
+}
+
+/* Расстояние, которое получит наблюдатель, если померит угол и подставит
+   его в плоскую формулу. В плоском мире совпадёт с истинным, в кривом нет. */
+function poPloskoj(p){ return AU_V_PK / Math.tan(p); }
+
+function num(v, d){
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function kx(tex){
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+
+/* ══════════════════ сцена ══════════════════ */
+
+var W = 1060, HGT = 440;
+var TRUBA = { x: 230, y: 208, r: 150 };  /* поле трубы */
+var POLE_SEC = 2.6;                      /* ширина поля в угловых секундах:
+   наибольший параллакс во всём диапазоне ползунков 1,035″ (звезда в парсеке
+   при кривизне 0,45), эллипс с такой полуосью в поле помещается */
+var ORBITA = { x: 616, y: 200, r: 88 };  /* вид сверху */
+
+var CZ = '#4db6c6';   /* близкая звезда: та же бирюза, что у главного объекта в рисунках */
+var CF = '#8f97ad';   /* далёкие звёзды: фон, по которому меряют */
+var CE = '#e08a52';   /* Земля и линия визирования */
+
+/* Далёкие звёзды фона. Раскладка постоянная: случайные точки, посчитанные
+   один раз детерминированным генератором, — иначе фон мерцал бы каждый кадр
+   и читался как шум, а он здесь опорная сетка. */
+var FON = (function(){
+  var out = [], seed = 20260907;
+  function rnd(){ seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+  for (var i = 0; i < 46; i++) {
+    var a = rnd() * 6.2832, r = Math.sqrt(rnd()) * 0.94;
+    out.push({ x: Math.cos(a) * r, y: Math.sin(a) * r, s: 0.9 + rnd() * 1.7 });
+  }
+  return out;
+})();
+
+function Truba(){
+  var st = useRef({ god: 0.12, d: 1.6, k: 0, idet: true }).current;
+  var pair = useState({ god: st.god, d: st.d, k: 0, idet: true });
+  var ui = pair[0], setUi = pair[1];
+
+  function pokazaniya(){
+    var p = parallaks(st.d, st.k);
+    var pl = poPloskoj(p);
+    window.__demoState = {
+      god: st.god, d: st.d, k: st.k,
+      p_sec: p * ARCSEC,                 /* измеренный угол, секунды дуги */
+      p_ploskij: parallaks(st.d, 0) * ARCSEC,
+      d_istinnoe: st.d,                  /* парсеки */
+      d_po_ploskoj: pl,
+      rashozhdenie: pl / st.d - 1
+    };
+  }
+
+  function step(dt){
+    if (st.idet) { st.god += dt * 0.12; if (st.god > 1) st.god -= 1; }
+    pokazaniya();
+  }
+
+  function draw(ctx){
+    var tone = C.tones(ctx);
+    var ink = 'rgb(' + tone.ink + ')', muted = 'rgb(' + tone.muted + ')';
+    var p = parallaks(st.d, st.k), pSec = p * ARCSEC;
+    var fi = st.god * 6.2832;            /* положение Земли на орбите */
+
+    /* ── левое поле: что видно в трубу ── */
+    ctx.save();
+    ctx.beginPath(); ctx.arc(TRUBA.x, TRUBA.y, TRUBA.r, 0, 6.2832);
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.45)'; ctx.lineWidth = 1.6; ctx.stroke();
+    ctx.clip();
+
+    /* Далёкие звёзды: опора, по которой и меряют. Они стоят. */
+    for (var i = 0; i < FON.length; i++) {
+      var f = FON[i];
+      ctx.fillStyle = CF;
+      ctx.globalAlpha = 0.35 + f.s * 0.18;
+      ctx.beginPath();
+      ctx.arc(TRUBA.x + f.x * TRUBA.r, TRUBA.y + f.y * TRUBA.r, f.s, 0, 6.2832);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    /* Параллактический эллипс: путь близкой звезды за год. Пиксели на
+       секунду дуги считаются от объявленной ширины поля, поэтому размер
+       эллипса на экране — настоящий размер параллакса в этом поле. */
+    var PX = 2 * TRUBA.r / POLE_SEC;
+    var ea = pSec * PX, eb = ea * Math.sin(BETA);
+    ctx.strokeStyle = 'rgba(77,182,198,.4)'; ctx.lineWidth = 1.6;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.ellipse(TRUBA.x, TRUBA.y, ea, eb, 0, 0, 6.2832); ctx.stroke();
+    ctx.setLineDash([]);
+
+    /* Сама звезда — шарик с отметками, чтобы сдвиг читался не по одному
+       блику, а по узнаваемому рисунку на диске. */
+    var sx = TRUBA.x + Math.cos(fi) * ea, sy = TRUBA.y + Math.sin(fi) * eb;
+    C.glow(ctx, sx, sy, 30, '77,182,198', .5);
+    ctx.fillStyle = CZ;
+    ctx.beginPath(); ctx.arc(sx, sy, 15, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = 'rgba(6,10,18,.55)';
+    ctx.beginPath(); ctx.arc(sx - 4.5, sy - 3.5, 3.6, 0, 6.2832); ctx.fill();
+    ctx.beginPath(); ctx.arc(sx + 5, sy + 2, 2.4, 0, 6.2832); ctx.fill();
+    ctx.beginPath(); ctx.arc(sx + 1, sy - 6.5, 1.8, 0, 6.2832); ctx.fill();
+
+    /* Перекрестье в центре поля: неподвижная отметка, от которой глазом
+       и меряется сдвиг. */
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.5)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(TRUBA.x - 12, TRUBA.y); ctx.lineTo(TRUBA.x + 12, TRUBA.y);
+    ctx.moveTo(TRUBA.x, TRUBA.y - 12); ctx.lineTo(TRUBA.x, TRUBA.y + 12);
+    ctx.stroke();
+    ctx.restore();
+
+    /* Линейка поля: сколько секунд дуги в этом кружке. */
+    var ly = TRUBA.y + TRUBA.r + 26;
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.7)'; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(TRUBA.x - PX / 2, ly); ctx.lineTo(TRUBA.x + PX / 2, ly);
+    ctx.moveTo(TRUBA.x - PX / 2, ly - 5); ctx.lineTo(TRUBA.x - PX / 2, ly + 5);
+    ctx.moveTo(TRUBA.x + PX / 2, ly - 5); ctx.lineTo(TRUBA.x + PX / 2, ly + 5);
+    ctx.stroke();
+    C.label(ctx, TRUBA.x, ly + 22, '1″', 18, muted);
+    C.label(ctx, TRUBA.x, TRUBA.y - TRUBA.r - 16, 'ЧТО ВИДНО В ТРУБУ', 15, muted);
+
+    /* ── правое поле: где Земля ── */
+    C.label(ctx, ORBITA.x, TRUBA.y - TRUBA.r - 16, 'ГДЕ ЗЕМЛЯ', 15, muted);
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.45)'; ctx.lineWidth = 1.4;
+    ctx.setLineDash([4, 5]);
+    ctx.beginPath(); ctx.arc(ORBITA.x, ORBITA.y, ORBITA.r, 0, 6.2832); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#ffd27a';
+    ctx.beginPath(); ctx.arc(ORBITA.x, ORBITA.y, 7, 0, 6.2832); ctx.fill();
+    C.label(ctx, ORBITA.x, ORBITA.y + 26, 'Солнце', 17, muted);
+
+    var ex = ORBITA.x + Math.cos(fi) * ORBITA.r, ey = ORBITA.y + Math.sin(fi) * ORBITA.r;
+    ctx.fillStyle = CE;
+    ctx.beginPath(); ctx.arc(ex, ey, 6, 0, 6.2832); ctx.fill();
+    C.label(ctx, ex, ey - 16, 'Земля', 17, 'rgba(224,138,82,.9)');
+
+    /* Звезда далеко за краем кадра: линия визирования уходит вверх-вправо
+       и упирается в подпись, а не в нарисованную звезду — иначе пришлось бы
+       врать про расстояние в сотни тысяч радиусов орбиты. */
+    var zx = ORBITA.x + 196, zy = ORBITA.y - 104;
+    ctx.strokeStyle = 'rgba(224,138,82,.75)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(zx, zy); ctx.stroke();
+    C.glow(ctx, zx, zy, 22, '77,182,198', .45);
+    ctx.fillStyle = CZ;
+    ctx.beginPath(); ctx.arc(zx, zy, 7, 0, 6.2832); ctx.fill();
+    C.label(ctx, zx, zy - 18, 'звезда', 17, muted);
+    C.label(ctx, ORBITA.x + 90, ORBITA.y + 136, 'расстояние до звезды на схеме сжато', 15,
+            'rgba(' + tone.muted + ',.75)');
+
+    /* ── показания ── */
+    /* Показания столбцом у правого края: середина занята видом сверху,
+       низ — линейкой поля. */
+    var pl = poPloskoj(p);
+    C.readout(ctx, 1042, 92, 'ПАРАЛЛАКС', num(pSec, 3) + '″', CZ);
+    C.readout(ctx, 1042, 212, 'ЗВЕЗДА НА САМОМ ДЕЛЕ', num(st.d, 2) + ' пк', ink);
+    C.readout(ctx, 1042, 332, 'ПО ПЛОСКОЙ ФОРМУЛЕ', num(pl, 2) + ' пк',
+              Math.abs(pl / st.d - 1) > 0.005 ? CE : ink);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+
+  function pusk(){ st.idet = !st.idet; setUi({ god: st.god, d: st.d, k: st.k, idet: st.idet }); }
+  function vesti(v){ st.god = v; st.idet = false; pokazaniya();
+                     setUi({ god: v, d: st.d, k: st.k, idet: false }); }
+  function daleko(v){ st.d = v; pokazaniya(); setUi({ god: st.god, d: v, k: st.k, idet: st.idet }); }
+  function krivit(v){ st.k = v; pokazaniya(); setUi({ god: st.god, d: st.d, k: v, idet: st.idet }); }
+
+  var s = window.__demoState;
+  var slova;
+  if (Math.abs(st.k) < 1e-9) {
+    slova = 'Пространство плоское. За год близкая звезда обходит эллипс на фоне далёких, ' +
+      'большая полуось у него и есть параллакс. Померив угол и подставив его в ' +
+      kx('\\operatorname{tg} p = a/d') + ', получаем то самое расстояние, на котором звезда стоит.';
+  } else if (st.k > 0) {
+    slova = 'Пространство выпуклое. Угол вырос, хотя звезда не сдвинулась, и плоская формула ' +
+      'ставит её ближе, чем она есть: ' + kx(num(s.d_po_ploskoj, 2)) + ' пк вместо ' +
+      kx(num(st.d, 2)) + '. Меряют всегда угол, а расстояние из него уже выводят.';
+  } else {
+    slova = 'Пространство вогнутое. Угол упал, звезда осталась там же, и плоская формула ' +
+      'отправляет её дальше: ' + kx(num(s.d_po_ploskoj, 2)) + ' пк вместо ' +
+      kx(num(st.d, 2)) + '. Кривизна взята чудовищно большой нарочно — иначе разницы не увидеть.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+        <//>
+        <${C.Slider} label="Время года:" min=${0} max=${1} step=${0.002}
+                     value=${ui.god} onChange=${vesti}
+                     display=${num(ui.god * 12, 1) + ' мес'} />
+        <${C.Slider} label="До звезды:" min=${1} max=${5} step=${0.05}
+                     value=${ui.d} onChange=${daleko}
+                     display=${num(ui.d, 2) + ' пк'} />
+        <${C.Slider} label="Кривизна:" min=${-0.45} max=${0.45} step=${0.005}
+                     value=${ui.k} onChange=${krivit}
+                     display=${num(ui.k, 3) + ' 1/пк'} />
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova} />
+    </div>`;
+}
+
+C.mount(Truba);
+</script>
+</body>
+</html>

@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дрожание с дрейфом</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+<style>
+/* Единственный новый класс демки. KaTeX объявляет .katex кеглем 1,21em, и
+   в строке показаний математика выпирала над прозой на четверть роста.
+   Здесь она приведена к кеглю текста. В demo.css правило не кладётся:
+   над общим файлом параллельно работают другие демки недели. */
+.status .katex { font-size: 1.05em; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-02/">&larr; Неделя 02</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=drozhanie-s-drejfom"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `ravnouskorennoe-dvizhenie`, место «среднее не то же, что
+   мгновенное». Ускорение качается,
+
+       a(t) = ±a₀ sin ωt,
+
+   и за целый период его среднее равно нулю, потому что площадь над осью в
+   точности равна площади под ней. Интуиция делает отсюда вывод «в среднем
+   не разгоняли, значит стоим на месте». Вывод неверен.
+
+   Первое интегрирование даёт
+
+       v(t) = ±(a₀/ω)(1 − cos ωt),
+
+   а множитель (1 − cos ωt) неотрицателен всегда. Скорость знака не меняет,
+   она качается между нулём и 2a₀/ω, и среднее её равно a₀/ω. Второе
+   интегрирование даёт
+
+       x(t) = ±(a₀/ω)(t − sin(ωt)/ω),
+
+   прямую со скоростью a₀/ω, на которую наложено дрожание с амплитудой
+   a₀/ω². Знак первого толчка входит во всё множителем ±1 и решает только
+   направление сноса, числа при этом те же.
+
+   Формулы выше нужны для проверки и в счёт не идут. Три кривые строятся
+   интегрированием, показания снимаются с тех же массивов (см. izmerit), и
+   совпадение с a₀/ω — результат демки, а не её начальное условие. */
+
+/* ── числа модели ── */
+
+var A_MIN = 2, A_MAX = 8;      /* амплитуда ускорения a₀, м/с² */
+var W_MIN = 2, W_MAX = 6;      /* частота дрожания ω, рад/с */
+var TWIN = 5;                  /* окно наблюдения, с */
+var NPER = 400;                /* шагов интегрирования на период */
+
+/* Оси ускорения и скорости закреплены по краям диапазонов ползунков, а не
+   подгоняются под текущую кривую. При автомасштабе картинка выходила бы
+   одинаковой при любом a₀ (всё домножается на общий множитель), и ползунок
+   двигал бы одни цифры на осях. Десять процентов запаса — чтобы кривая на
+   краю диапазона не упиралась в верхнюю линию. */
+var AX_A = A_MAX * 1.1;                       /* ±8,8 м/с² */
+var AX_V = 2 * A_MAX / W_MIN * 1.1;           /* 8,8 м/с */
+
+/* Ось координаты — исключение, она подгоняется под текущий заезд. Снос
+   растёт как t, дрожание не растёт вовсе, и их отношение равно числу
+   периодов в окне, помноженному на 2π. На общей закреплённой оси дрожание
+   у слабого заезда выходило в две десятых пикселя, то есть исчезало ровно
+   то, ради чего демка сделана. */
+function osKoordinaty(xTop){ return xTop * 1.06; }
+
+/* Круглые подписи для подвижной оси: шаг из ряда 1-2-5, иначе на ней
+   стояли бы числа вроде 4,37. */
+function shagPodpisej(hi){
+  var raw = hi / 3;                       /* около трёх делений на ось */
+  var p = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+  var m = raw / p;
+  return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p;
+}
+
+/* Цвета данных. Ускорение и скорость взяты из канона рисунков главы
+   (figb и figa), высветленными под тёмный слайд ровно так же, как в
+   годографе. Координата рисуется чернилами темы: в рисунках главы сама
+   траектория тоже чёрная. Лаймовый — цвет постоянных из канона (figconst),
+   и здесь он держит всё, что означает среднее. */
+var CA = '224,138,82';    /* ускорение, охра */
+var CV = '77,182,198';    /* скорость, бирюза */
+var CD = '134,171,46';    /* среднее и прямая сноса */
+
+/* ── честное интегрирование ──────────────────────────────────
+
+   Система x' = v, v' = a(t), метод Рунге—Кутты четвёртого порядка.
+   Простого Эйлера здесь не хватает: у него средняя скорость выходит с
+   относительной ошибкой (ωh)²/12, и при двухстах шагах на период это уже
+   8·10⁻⁵, то есть четвёртый знак ответа. У РК4 ошибка порядка (ωh)⁴, при
+   четырёхстах шагах на период она уходит за восьмой знак, и удвоение
+   числа шагов ответа не двигает. Проверяется вызовом __demoCheck(800). */
+
+function integrate(a0, w, sign, nper){
+  var T = 2 * Math.PI / w;
+  var h = T / nper;                       /* вдвое мельче требуемого T/200 */
+  var n = Math.ceil(TWIN / h);            /* шагов на всё окно наблюдения */
+  var ts = new Float64Array(n + 1),
+      vs = new Float64Array(n + 1),
+      xs = new Float64Array(n + 1);
+  var v = 0, x = 0;
+  for (var i = 0; i < n; i++) {
+    var t0 = i * h;
+    var a1 = sign * a0 * Math.sin(w * t0);
+    var a2 = sign * a0 * Math.sin(w * (t0 + h / 2));
+    var a4 = sign * a0 * Math.sin(w * (t0 + h));
+    /* Правая часть для скорости от самой скорости не зависит, поэтому её
+       четыре коэффициента сворачиваются в правило Симпсона. У координаты
+       остаются все четыре, и второй с третьим различаются. */
+    var k1 = v, k2 = v + h / 2 * a1, k3 = v + h / 2 * a2, k4 = v + h * a2;
+    v += h / 6 * (a1 + 4 * a2 + a4);
+    x += h / 6 * (k1 + 2 * k2 + 2 * k3 + k4);
+    /* Время берётся умножением, а не накоплением: за две тысячи шагов
+       накопленная сумма уезжает в последних знаках, а сетка обязана
+       ложиться на целый период точно. */
+    ts[i + 1] = (i + 1) * h; vs[i + 1] = v; xs[i + 1] = x;
+  }
+  return { T: T, h: h, n: n, t: ts, v: vs, x: xs };
+}
+
+/* Показания снимаются с посчитанных массивов, формулы сюда не ходят.
+
+   Среднее ускорение — приращение скорости за первый целый период, делённое
+   на период: по определению производной это и есть среднее a. Шаг выбран
+   так, что узел с номером nper приходится ровно на конец периода, поэтому
+   интерполяция не нужна.
+
+   Средняя скорость — приращение координаты за тот же период.
+
+   Наклон сноса — то же приращение координаты, но за ПОСЛЕДНИЙ целый период
+   окна. Два числа считаются в разных местах окна и обязаны совпасть: если
+   бы координата шла не прямой, а разгонялась, они разошлись бы. */
+
+function izmerit(d, nper){
+  var top = 0;
+  for (var i = 0; i <= d.n; i++) { var q = Math.abs(d.x[i]); if (q > top) top = q; }
+  return {
+    meanA: (d.v[nper] - d.v[0]) / d.T,
+    meanV: (d.x[nper] - d.x[0]) / d.T,
+    slope: (d.x[d.n] - d.x[d.n - nper]) / d.T,
+    xEnd: d.x[d.n],
+    xTop: top            /* самое дальнее место заезда, под него и ось */
+  };
+}
+
+/* Русская запятая и настоящий минус. Мелкие остатки счёта у среднего
+   ускорения (порядка 10⁻¹⁶) печатались бы как «−0,0000»; ноль есть ноль. */
+function num(v, dgt){
+  if (Math.abs(v) < Math.pow(10, -dgt) / 2) v = 0;
+  return v.toFixed(dgt).replace('.', ',').replace('-', '−');
+}
+
+function kx(t){
+  try { return katex.renderToString(t, { throwOnError: false }); }
+  catch (e) { return t; }
+}
+var TEX_2AW = kx('2a_0/\\omega'), TEX_AW = kx('a_0/\\omega');
+
+/* ══════════════════ сцена ══════════════════
+
+   Три графика друг под другом на общей оси времени: ускорение, скорость,
+   координата. Общая ось и один бегунок поперёк всех трёх — весь смысл
+   расположения: видно, что ноль скорости приходится на те же моменты, в
+   которые толчок меняет знак, а координата в это время не поворачивает. */
+
+var W = 1000, HGT = 440;
+var PX0 = 84, PX1 = 640;      /* поле графиков по горизонтали */
+var RX = 980;                 /* правый край столбца показаний */
+
+function Drozhanie(){
+  var st = useRef({ a0: 6, w: 3, sign: 1, run: true, t: 0,
+                    T: 0, h: 0, n: 0, nper: NPER,
+                    meanA: 0, meanV: 0, slope: 0, byFormula: 0,
+                    vMax: 0, xEnd: 0, xTop: 0 }).current;
+  var tr = useRef({ cur: null }).current;
+  /* Пара берётся из одного вызова useState: два отдельных дают два
+     независимых состояния, и рейка перестаёт отзываться на ползунок. */
+  var pair = useState({ a0: 6, w: 3, sign: 1, run: true });
+  var ui = pair[0], setUi = pair[1];
+
+  function perestroit(){
+    var d = integrate(st.a0, st.w, st.sign, NPER);
+    var m = izmerit(d, NPER);
+    tr.cur = d;
+    st.T = d.T; st.h = d.h; st.n = d.n;
+    st.meanA = m.meanA; st.meanV = m.meanV; st.slope = m.slope;
+    st.xEnd = m.xEnd; st.xTop = m.xTop;
+    st.byFormula = st.sign * st.a0 / st.w;      /* только для сравнения */
+    st.vMax = st.sign * 2 * st.a0 / st.w;
+  }
+  if (!tr.cur) perestroit();
+
+  /* Курсор идёт в реальном времени, пять секунд модели за пять секунд на
+     часах, и дальше сначала. */
+  function step(dt){
+    if (!st.run) return;
+    st.t += dt;
+    while (st.t > TWIN) st.t -= TWIN;
+  }
+
+  function px(t){ return PX0 + t / TWIN * (PX1 - PX0); }
+  function py(p, val){ return p.bot - (val - p.lo) / (p.hi - p.lo) * (p.bot - p.top); }
+
+  /* Значение из массива в произвольный момент, между узлами линейно.
+     Узлы стоят не реже восьми миллисекунд, на глаз разницы с кривой нет. */
+  function vzyat(arr, t){
+    var d = tr.cur, i = t / d.h, k = Math.floor(i);
+    if (k >= d.n) return arr[d.n];
+    return arr[k] + (arr[k + 1] - arr[k]) * (i - k);
+  }
+
+  function draw(ctx){
+    var tone = C.tones(ctx);
+    var muted = 'rgb(' + tone.muted + ')';
+    var d = tr.cur, sg = st.sign;
+    var iNow = Math.min(d.n, Math.floor(st.t / d.h));
+    var stride = Math.max(1, Math.floor(d.n / 900));
+
+    /* Знак первого толчка переворачивает оси скорости и координаты: ноль
+       переезжает с нижнего края панели на верхний, и картинка становится
+       зеркальной. Ось ускорения симметрична и не меняется. */
+    var pA = { name: 'a, м/с²', top: 30, bot: 138, dgt: 0,
+               lo: -AX_A, hi: AX_A, ticks: [-8, -4, 0, 4, 8] };
+    var pV = { name: 'v, м/с', top: 160, bot: 268, dgt: 0,
+               lo: sg > 0 ? 0 : -AX_V, hi: sg > 0 ? AX_V : 0,
+               ticks: sg > 0 ? [0, 4, 8] : [0, -4, -8] };
+    var xTop = osKoordinaty(st.xTop), xStep = shagPodpisej(xTop), xt = [];
+    for (var q = 0; q * xStep <= xTop; q++) xt.push(sg * q * xStep);
+    var pK = { name: 'x, м', top: 290, bot: 398, dgt: xStep < 1 ? 1 : 0,
+               lo: sg > 0 ? 0 : -xTop, hi: sg > 0 ? xTop : 0, ticks: xt };
+    var pans = [pA, pV, pK];
+
+    /* Значение кривой в узле с номером j. Ускорение задано законом и
+       берётся из него, скорость и координата — из проинтегрированных
+       массивов. */
+    var fa = function(j){ return sg * st.a0 * Math.sin(st.w * d.t[j]); };
+    var fv = function(j){ return d.v[j]; };
+    var fx = function(j){ return d.x[j]; };
+
+    /* ── подложка каждой панели ── */
+    pans.forEach(function(p){
+      /* Полоса первого периода. По ней считаются среднее ускорение и
+         средняя скорость, и она обязана быть видна, иначе слово «среднее»
+         в показаниях не к чему отнести. */
+      ctx.fillStyle = 'rgba(' + tone.ink + ',.05)';
+      ctx.fillRect(PX0, p.top, px(Math.min(d.T, TWIN)) - PX0, p.bot - p.top);
+
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(' + tone.ink + ',.07)';
+      for (var s = 1; s <= TWIN; s++) {
+        ctx.beginPath(); ctx.moveTo(px(s), p.top); ctx.lineTo(px(s), p.bot); ctx.stroke();
+      }
+      p.ticks.forEach(function(v){
+        var y = py(p, v);
+        if (v !== 0) {
+          ctx.beginPath(); ctx.moveTo(PX0, y); ctx.lineTo(PX1, y); ctx.stroke();
+        }
+        C.label(ctx, PX0 - 10, y + 6, num(v, p.dgt), 17, muted, 'right');
+      });
+
+      /* Ось времени панели и её левая ось. */
+      ctx.strokeStyle = 'rgba(' + tone.ink + ',.4)'; ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(PX0, py(p, 0)); ctx.lineTo(PX1, py(p, 0));
+      ctx.moveTo(PX0, p.top); ctx.lineTo(PX0, p.bot);
+      ctx.stroke();
+
+      ctx.save();
+      ctx.translate(26, (p.top + p.bot) / 2);
+      ctx.rotate(-Math.PI / 2);
+      C.label(ctx, 0, 6, p.name, 18, muted, 'center');
+      ctx.restore();
+    });
+
+    /* Граница первого периода через все три панели. */
+    ctx.save();
+    ctx.setLineDash([6, 6]);
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.55)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(px(d.T), pA.top); ctx.lineTo(px(d.T), pK.bot); ctx.stroke();
+    ctx.restore();
+    C.label(ctx, px(d.T / 2), pA.top - 9, 'один период', 17, muted, 'center');
+
+    /* ── ускорение ── */
+    /* Заливка между кривой и осью нарастает вместе с курсором: сколько
+       площади набежало сверху, столько же уходит вниз, и к концу периода
+       они гасят друг друга. */
+    if (iNow > 0) {
+      ctx.beginPath();
+      ctx.moveTo(PX0, py(pA, 0));
+      for (var i = 0; i <= iNow; i += stride) ctx.lineTo(px(d.t[i]), py(pA, fa(i)));
+      ctx.lineTo(px(d.t[iNow]), py(pA, fa(iNow)));
+      ctx.lineTo(px(d.t[iNow]), py(pA, 0));
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(' + CA + ',.17)';
+      ctx.fill();
+    }
+
+    /* Каждая кривая рисуется дважды: целиком бледно и пройденной частью в
+       полную силу. Так видно и куда всё придёт, и где сейчас перо. */
+    krivaya(ctx, pA, fa, d.n, CA, .26, 2.4);
+    krivaya(ctx, pA, fa, iNow, CA, 1, 2.8);
+    krivaya(ctx, pV, fv, d.n, CV, .26, 2.4);
+    krivaya(ctx, pV, fv, iNow, CV, 1, 2.8);
+    krivaya(ctx, pK, fx, d.n, tone.ink, .26, 2.4);
+    krivaya(ctx, pK, fx, iNow, tone.ink, 1, 2.8);
+
+    /* ── средние ──
+       Уровень средней скорости и прямая сноса строятся по ИЗМЕРЕННОМУ
+       среднему, а не по a₀/ω. Прямая проходит через кривую координаты в
+       каждом целом периоде: там дрожание обращается в ноль. */
+    ctx.save();
+    ctx.setLineDash([9, 7]);
+    ctx.strokeStyle = 'rgb(' + CD + ')'; ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.moveTo(PX0, py(pV, st.meanV)); ctx.lineTo(PX1, py(pV, st.meanV));
+    ctx.moveTo(PX0, py(pK, 0)); ctx.lineTo(PX1, py(pK, st.meanV * TWIN));
+    ctx.stroke();
+    /* Среднее ускорение — тот же уровень, что и ноль: пунктир ложится на
+       ось, и это ровно то, что демка утверждает. */
+    ctx.beginPath();
+    ctx.moveTo(PX0, py(pA, st.meanA)); ctx.lineTo(PX1, py(pA, st.meanA));
+    ctx.stroke();
+    ctx.restore();
+
+    var cd = 'rgb(' + CD + ')';
+    C.label(ctx, PX1 + 10, py(pA, 0) + 5, 'среднее 0', 17, cd, 'left');
+    C.label(ctx, PX1 + 10, py(pV, st.meanV) + 5, 'среднее', 17, cd, 'left');
+    C.label(ctx, PX1 + 10, py(pK, st.meanV * TWIN) + 5, 'прямая сноса', 17, cd, 'left');
+
+    /* ── курсор ── */
+    var cx = px(st.t);
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.45)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(cx, pA.top); ctx.lineTo(cx, pK.bot); ctx.stroke();
+    tochka(ctx, cx, py(pA, sg * st.a0 * Math.sin(st.w * st.t)), CA);
+    tochka(ctx, cx, py(pV, vzyat(d.v, st.t)), CV);
+    tochka(ctx, cx, py(pK, vzyat(d.x, st.t)), tone.ink);
+
+    /* ── ось времени ──
+       Буква оси стоит в ряду секундных подписей, а не над ним: над ним
+       кончается прямая сноса, и при слабом дрейфе они наезжали друг
+       на друга. */
+    for (var s2 = 0; s2 <= TWIN; s2++) {
+      C.label(ctx, px(s2), pK.bot + 25, String(s2), 17, muted, 'center');
+    }
+    C.label(ctx, PX1 + 30, pK.bot + 25, 't, с', 18, muted, 'left');
+
+    /* ── показания ── */
+    C.readout(ctx, RX, 64, 'среднее a, м/с²', num(st.meanA, 4), 'rgb(' + CA + ')');
+    C.readout(ctx, RX, 194, 'средняя v, м/с', num(st.meanV, 4), 'rgb(' + CV + ')');
+    C.readout(ctx, RX, 324, 'наклон сноса, м/с', num(st.slope, 4), cd);
+    C.label(ctx, RX, 388, 'формула a₀/ω даёт ' + num(st.byFormula, 4), 17, muted, 'right');
+
+    /* Кривая по узлам сетки, точки прореживаются: на пятьсот пикселей поля
+       приходится до двух тысяч шагов интегрирования, и рисовать их все
+       незачем. Последний узел добавляется всегда, чтобы конец не обрывался
+       на предпоследнем кратном шагу. */
+    function krivaya(ctx2, p, val, upto, rgb, alpha, width){
+      if (upto < 1) return;
+      ctx2.strokeStyle = 'rgba(' + rgb + ',' + alpha + ')';
+      ctx2.lineWidth = width; ctx2.lineJoin = 'round';
+      ctx2.beginPath();
+      for (var j = 0; j <= upto; j += stride) {
+        var X = px(d.t[j]), Y = py(p, val(j));
+        if (j === 0) ctx2.moveTo(X, Y); else ctx2.lineTo(X, Y);
+      }
+      ctx2.lineTo(px(d.t[upto]), py(p, val(upto)));
+      ctx2.stroke();
+    }
+    function tochka(ctx2, x, y, rgb){
+      C.glow(ctx2, x, y, 16, rgb, .4);
+      ctx2.beginPath(); ctx2.arc(x, y, 5, 0, 6.2832);
+      ctx2.fillStyle = 'rgb(' + rgb + ')'; ctx2.fill();
+    }
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Объект показаний живёт весь сеанс и правится на месте: автопроверка
+     читает его после __demoTick, когда рендера компонента не было. */
+  window.__demoState = st;
+
+  /* Сходимость по требованию. __demoCheck(800) считает то же самое вдвое
+     мельче: ответ обязан не сдвинуться в четвёртом знаке. */
+  window.__demoCheck = function(nper){
+    var k = nper || NPER;
+    var d = integrate(st.a0, st.w, st.sign, k);
+    var m = izmerit(d, k);
+    return { nper: k, shag: d.h, period: d.T, shagov: d.n,
+             meanA: m.meanA, meanV: m.meanV, slope: m.slope,
+             formula: st.sign * st.a0 / st.w };
+  };
+
+  function menyat(pole, v){
+    st[pole] = v;
+    perestroit();
+    setUi({ a0: st.a0, w: st.w, sign: st.sign, run: st.run });
+  }
+  function pusk(){
+    st.run = !st.run;
+    setUi({ a0: st.a0, w: st.w, sign: st.sign, run: st.run });
+  }
+
+  var status =
+    'Среднее ускорение за период равно нулю, а скорость знака не меняет. ' +
+    'Она качается между нулём и ' + TEX_2AW + ', и координата уезжает ' +
+    (ui.sign > 0 ? 'вперёд' : 'назад') + ' прямой со средней скоростью ' +
+    TEX_AW + '. Дрожание сидит на этой прямой и само никуда не ведёт.';
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+        <//>
+        <${C.Group} label="Первый толчок:">
+          <${C.Btn} active=${ui.sign > 0} onClick=${function(){ menyat('sign', 1); }}>вперёд<//>
+          <${C.Btn} active=${ui.sign < 0} onClick=${function(){ menyat('sign', -1); }}>назад<//>
+        <//>
+        <${C.Slider} label="Амплитуда:" min=${A_MIN} max=${A_MAX} step=${0.1}
+                     value=${ui.a0} onChange=${function(v){ menyat('a0', v); }}
+                     display=${'a₀ = ' + num(ui.a0, 1) + ' м/с²'} />
+        <${C.Slider} label="Частота:" min=${W_MIN} max=${W_MAX} step=${0.1}
+                     value=${ui.w} onChange=${function(v){ menyat('w', v); }}
+                     display=${'ω = ' + num(ui.w, 1) + ' рад/с'} />
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${status} />
+    </div>`;
+}
+
+C.mount(Drozhanie);
+</script>
+</body>
+</html>

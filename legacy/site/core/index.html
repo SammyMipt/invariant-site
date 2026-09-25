@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>База знаний — Физика 1</title>
+  <link rel="stylesheet" href="../site.css">
+  <style>
+    /* стили каталога: только этой страницы, токены общие */
+    .core-nav {
+      display: flex;
+      gap: 1.2rem;
+      flex-wrap: wrap;
+      margin: 0 0 1.8rem;
+    }
+    .theme {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin: 0 0 .8rem;
+    }
+    .theme summary {
+      list-style: none;
+      cursor: pointer;
+      padding: .9rem 1.1rem .85rem;
+    }
+    .theme summary::-webkit-details-marker { display: none; }
+    .theme summary:hover { color: var(--accent-ink); }
+    .theme[open] summary { border-bottom: 1px solid var(--line); }
+    .theme-head {
+      display: flex;
+      align-items: baseline;
+      gap: .7rem;
+      flex-wrap: wrap;
+    }
+    .theme-title {
+      font: 600 16.5px/1.3 system-ui, -apple-system, 'Segoe UI', sans-serif;
+    }
+    .theme-arrow {
+      margin-left: auto;
+      color: var(--muted);
+      font: 400 13px/1 system-ui, sans-serif;
+      transition: transform .15s;
+    }
+    .theme[open] .theme-arrow { transform: rotate(90deg); }
+    .theme-count {
+      font: 400 13px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+      color: var(--muted);
+      margin-top: .25rem;
+    }
+    .theme-list {
+      list-style: none;
+      margin: 0;
+      padding: .7rem 1.1rem .9rem;
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      font-size: 14.5px;
+      line-height: 1.5;
+      column-width: 17rem;
+      column-gap: 2rem;
+    }
+    .theme-list li {
+      break-inside: avoid;
+      padding: .16rem 0;
+    }
+    .theme-list a { text-decoration: none; }
+    .theme-list a:hover { text-decoration: underline; }
+    .blk-tag {
+      font-size: 11px;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <header class="page-head">
+    <p class="kicker">Физика 1 · база знаний</p>
+    <h1>База знаний</h1>
+    <p class="lead-topics">Тематическое ядро курса целиком: из этих блоков
+      собираются главы, колоды и страницы недель. Сейчас в ядре
+      <span id="n-blocks">…</span> и <span id="n-edges">…</span> между ними.
+      Заголовок блока ведёт в главу, где он свёрстан; вопросы и задачи
+      открываются на странице своей недели.</p>
+  </header>
+
+  <nav class="core-nav">
+    <a class="back-link" href="../index.html">&larr; Главная</a>
+    <a class="back-link" href="map.html">Карта курса &rarr;</a>
+  </nav>
+
+  <div id="themes"></div>
+</div>
+
+<script src="../../shared/analytics.js"></script>
+<script src="../config.js"></script>
+<script src="../../shared/auth.js"></script>
+<script src="../../shared/topbar.js"></script>
+<script src="../../content/graph-data.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* Заголовки недель — из спек weekNN.js (поле title, дословно) */
+  var WEEK_TITLES = {
+    1: 'Предмет физики. Размерности',
+    2: 'Кинематика материальной точки',
+    3: 'Законы Ньютона. ЗСИ. Центр масс',
+    4: 'Работа и энергия. Столкновения',
+    5: 'Момент импульса. Гравитация',
+    6: 'Произвольное движение твёрдого тела',
+    7: 'Колебания',
+    8: 'Деформации и гидродинамика',
+    9: 'Введение в термодинамику',
+    10: 'Второе начало термодинамики. Энтропия',
+    11: 'Фазовые переходы и реальный газ',
+    12: 'Распределения Максвелла и Больцмана',
+    13: 'Явления переноса'
+  };
+
+  /* склонение: 5 блоков, 2 блока, 1 блок */
+  var FORMS = {
+    'блок': ['блок', 'блока', 'блоков'],
+    'связь': ['связь', 'связи', 'связей'],
+    'концепт': ['концепт', 'концепта', 'концептов'],
+    'вывод': ['вывод', 'вывода', 'выводов'],
+    'пример': ['пример', 'примера', 'примеров'],
+    'вопрос': ['вопрос', 'вопроса', 'вопросов'],
+    'задача': ['задача', 'задачи', 'задач'],
+    'демка': ['демка', 'демки', 'демок'],
+    'рисунок': ['рисунок', 'рисунка', 'рисунков']
+  };
+  function plural(n, word) {
+    var f = FORMS[word] || [word, word, word];
+    var d = n % 10, h = n % 100;
+    if (d === 1 && h !== 11) return n + ' ' + f[0];
+    if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return n + ' ' + f[1];
+    return n + ' ' + f[2];
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  /* куда ведёт блок: глава с якорем или страница недели */
+  function nodeHref(n) {
+    var w = '../week' + pad2(n.week) + '/';
+    return n.page === 'week' ? w + 'index.html' : w + 'chapter.html#blk-' + n.id;
+  }
+
+  var G = window.GRAPH;
+  document.getElementById('n-blocks').textContent =
+    plural(G.nodes.length, 'блок');
+  document.getElementById('n-edges').textContent =
+    plural(G.edges.length, 'связь');
+
+  /* порядок типов в счётчике карточки */
+  var TYPE_ORDER = ['концепт', 'вывод', 'пример', 'рисунок', 'демка',
+                    'вопрос', 'задача'];
+
+  var byWeek = {};
+  G.nodes.forEach(function (n) {
+    (byWeek[n.week] = byWeek[n.week] || []).push(n);
+  });
+
+  var box = document.getElementById('themes');
+  Object.keys(byWeek).map(Number).sort(function (a, b) { return a - b; })
+    .forEach(function (w) {
+      var nodes = byWeek[w];
+      var counts = {};
+      nodes.forEach(function (n) { counts[n.type] = (counts[n.type] || 0) + 1; });
+      var parts = TYPE_ORDER.filter(function (t) { return counts[t]; })
+        .map(function (t) { return plural(counts[t], t); });
+
+      var det = document.createElement('details');
+      det.className = 'theme';
+      var sum = document.createElement('summary');
+      sum.innerHTML =
+        '<div class="theme-head">' +
+          '<span class="mat-kind">неделя ' + pad2(w) + '</span>' +
+          '<span class="theme-title"></span>' +
+          '<span class="theme-arrow">&#9656;</span>' +
+        '</div>' +
+        '<div class="theme-count"></div>';
+      sum.querySelector('.theme-title').textContent = WEEK_TITLES[w];
+      sum.querySelector('.theme-count').textContent =
+        plural(nodes.length, 'блок') + ': ' + parts.join(', ');
+      det.appendChild(sum);
+
+      var ul = document.createElement('ul');
+      ul.className = 'theme-list';
+      nodes.forEach(function (n) {
+        var li = document.createElement('li');
+        var a = document.createElement('a');
+        a.href = nodeHref(n);
+        a.textContent = n.title;
+        li.appendChild(a);
+        if (n.type !== 'концепт' && n.type !== 'вывод') {
+          li.appendChild(document.createTextNode(' '));
+          var tag = document.createElement('span');
+          tag.className = 'blk-tag';
+          tag.textContent = n.type;
+          li.appendChild(tag);
+        }
+        ul.appendChild(li);
+      });
+      det.appendChild(ul);
+      box.appendChild(det);
+    });
+
+  window.track('page_view', { page: 'core' });
+})();
+</script>
+</body>
+</html>

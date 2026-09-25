@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Шарик, трение и спуск</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-04/">&larr; Неделя 04</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=sharik-spusk"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `spusk-i-trenie`, стык актов и предметный мост в машинное
+   обучение. Написана генеральной сессией 15.09 (билдера оборвал лимит),
+   бриф briefs/demki_nedelya04.md, № 3.
+
+   МОДЕЛЬ. Шарик массы m = 1 на рельефе U(x) = (x² − 1)² + 0,3x в
+   безразмерных единицах, с вязким трением:  m·x'' = −U'(x) − γ·x'.
+   Левый минимум глубже (x ≈ −1,04, U ≈ −0,31), правый мельче (x ≈ 0,96,
+   U ≈ 0,29), между ними барьер (x ≈ 0,08, U ≈ 1,01). Шарик отпускают из
+   покоя в x = 1,6, энергия на старте U(1,6) = 2,9136. Интегратор Рунге —
+   Кутты четвёртого порядка с шагом 1/1200: без трения энергия держится до
+   десятого знака, это видно по графику.
+
+   ОСТАНОВКА. Шарик считается остановившимся, когда он ближе 10⁻³ к
+   одному из минимумов и медленнее 10⁻³. Время остановки и минимум
+   печатаются.
+
+   ТОЧКИ АЛГОРИТМОВ. Раз в Δt = 0,05 модельного времени делается шаг двух
+   дискретных методов с того же старта:
+     градиентный спуск  x ← x − η·U'(x),  η = Δt/γ;
+     тяжёлый шарик      x ← x − η·U'(x) + β·(x − x_пред),  η = Δt²/m,
+                        β = 1 − γΔt/m.
+   Первый есть шаг движения с сильным вязким трением, где скорость
+   пропорциональна силе; второй есть та же дискретная запись уравнения с
+   инерцией. Шаги до остановки считаются тем же критерием.
+
+   ПРЕСЕТЫ подобраны прогоном 15.09 (__demoRun, критерий выше):
+     без трения  γ = 0    шарик качается вечно, энергия стоит;
+     слабое      γ = 0,5  шарик переваливает барьер и ложится в глубокий
+                          минимум к t ≈ 26,8; спуск остаётся в мелком за
+                          8 шагов, тяжёлый шарик идёт за физическим, 533 шага;
+     умеренное   γ = 5    около критического затухания мелкой ямки
+                          (2√U'' ≈ 5,3): мелкий минимум к t ≈ 3,35, быстрее
+                          всех; спуск 78 шагов, тяжёлый шарик 59;
+     сильное     γ = 15   мелкий минимум к t ≈ 11,7; спуск 239 шагов,
+                          тяжёлый шарик 237: при сильном трении они совпадают.
+   При γ = 3 шарик ещё качается в ямке, и тяжёлому шарику нужно 98 шагов
+   против 45 у спуска; поэтому умеренное взято у критического. Что каждый
+   пресет показывает, демка печатает из счёта, а не из подписи. */
+
+var M = 1, X_START = 1.6, H = 1 / 1200, DT_ALG = 0.05, T_MAX = 60;
+var EPS_X = 1e-3, EPS_V = 1e-3;
+var PRESETY = [
+  { imya: 'без трения', g: 0 },
+  { imya: 'слабое', g: 0.5 },
+  { imya: 'умеренное', g: 5 },
+  { imya: 'сильное', g: 15 }
+];
+
+function U(x) { var a = x * x - 1; return a * a + 0.3 * x; }
+function dU(x) { return 4 * x * (x * x - 1) + 0.3; }
+
+/* Корни U'(x) = 0 методом Ньютона: два минимума и барьер между ними. */
+function koren(x) {
+  for (var i = 0; i < 60; i++) x -= dU(x) / (12 * x * x - 4);
+  return x;
+}
+var X_LEV = koren(-1), X_PRAV = koren(1), X_BAR = koren(0.1);
+
+function blizhMin(x) { return Math.abs(x - X_LEV) < Math.abs(x - X_PRAV) ? X_LEV : X_PRAV; }
+function imyaMin(x) { return blizhMin(x) === X_LEV ? 'левый' : 'правый'; }
+
+function novaya(g) {
+  return { g: g, t: 0, x: X_START, v: 0, settled: false, tSettle: null, minimum: null,
+           xg: X_START, kg: 0, gDone: null,
+           xh: X_START, xhPred: X_START, kh: 0, hDone: null,
+           tAlg: 0, zap: [U(X_START)] };
+}
+
+function uskor(x, v, g) { return (-dU(x) - g * v) / M; }
+
+function shag(m) {
+  if (m.t >= T_MAX) return;
+  var x = m.x, v = m.v, g = m.g, h = H;
+  var k1x = v, k1v = uskor(x, v, g);
+  var k2x = v + h / 2 * k1v, k2v = uskor(x + h / 2 * k1x, v + h / 2 * k1v, g);
+  var k3x = v + h / 2 * k2v, k3v = uskor(x + h / 2 * k2x, v + h / 2 * k2v, g);
+  var k4x = v + h * k3v, k4v = uskor(x + h * k3x, v + h * k3v, g);
+  m.x = x + h / 6 * (k1x + 2 * k2x + 2 * k3x + k4x);
+  m.v = v + h / 6 * (k1v + 2 * k2v + 2 * k3v + k4v);
+  m.t += h;
+  if (!m.settled && Math.abs(m.v) < EPS_V && Math.abs(m.x - blizhMin(m.x)) < EPS_X) {
+    m.settled = true; m.tSettle = m.t; m.minimum = imyaMin(m.x);
+  }
+  /* шаги алгоритмов на своей сетке времени */
+  while (m.tAlg + DT_ALG <= m.t + 1e-12) {
+    m.tAlg += DT_ALG;
+    if (g > 0 && m.gDone === null) {
+      m.xg -= DT_ALG / g * dU(m.xg);
+      m.kg++;
+      if (Math.abs(m.xg - blizhMin(m.xg)) < EPS_X) m.gDone = m.kg;
+    }
+    if (m.hDone === null) {
+      var beta = 1 - g * DT_ALG / M, eta = DT_ALG * DT_ALG / M;
+      var xn = m.xh - eta * dU(m.xh) + beta * (m.xh - m.xhPred);
+      m.xhPred = m.xh; m.xh = xn; m.kh++;
+      if (Math.abs(m.xh - blizhMin(m.xh)) < EPS_X && Math.abs(m.xh - m.xhPred) < EPS_V * DT_ALG) m.hDone = m.kh;
+    }
+    m.zap.push(U(m.x) + M * m.v * m.v / 2);
+  }
+}
+
+function energiya(m) { return M * m.v * m.v / 2 + U(m.x); }
+
+function svodka(m) {
+  return { gamma: m.g, t: m.t, x: m.x, v: m.v, E: energiya(m), E0: U(X_START),
+           settled: m.settled, tSettle: m.tSettle, minimum: m.minimum,
+           stepsGD: m.g > 0 ? m.gDone : null, stepsHB: m.hDone,
+           minGD: m.g > 0 && m.gDone !== null ? imyaMin(m.xg) : null,
+           minHB: m.hDone !== null ? imyaMin(m.xh) : null,
+           xGD: m.xg, xHB: m.xh, xLeft: X_LEV, xRight: X_PRAV, xBarrier: X_BAR };
+}
+
+/* Прогон без глаз до остановки шарика и обоих алгоритмов или до T_MAX. */
+function progon(g, tMax) {
+  var m = novaya(g), T = tMax || T_MAX;
+  while (m.t < T && !(m.settled && m.hDone !== null && (g === 0 || m.gDone !== null))) shag(m);
+  return m;
+}
+
+/* 1 шаг, 3 шага, 8 шагов, 21 шаг */
+function shagi(n) {
+  var d = n % 10, s = n % 100;
+  var w = d === 1 && s !== 11 ? 'шаг' : d >= 2 && d <= 4 && (s < 12 || s > 14) ? 'шага' : 'шагов';
+  return n + ' ' + w;
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева рельеф U(x) и шарик на нём, рядом полые значки двух алгоритмов на
+   той же кривой. Справа график полной энергии от времени и показания. */
+
+var W = 1000, HGT = 440;
+var RX0 = 60, RX1 = 600, RY0 = 60, RY1 = 380;       /* поле рельефа */
+var XMIN = -1.8, XMAX = 1.9, UMIN = -0.6, UMAX = 3.2;
+var GX0 = 660, GX1 = 960, GY0 = 70, GY1 = 250;      /* поле графика энергии */
+var TAU = 6.2832;
+var GLUB = { 'левый': 'глубокий', 'правый': 'мелкий' };
+var GLUB_P = { 'левый': 'глубоком', 'правый': 'мелком' };
+var GLUB_R = { 'левый': 'глубокого', 'правый': 'мелкого' };
+
+function num(v, d) {
+  if (v == null) return '—';
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+
+function Sharik() {
+  var ref0 = useRef(null);
+  if (!ref0.current) ref0.current = { preset: 2, m: novaya(PRESETY[2].g), run: false, tochki: true, sv: null };
+  var S = ref0.current;
+  var pair = useState(0), bump = function () { pair[1](function (k) { return k + 1; }); };
+
+  function pokazaniya() {
+    var s = svodka(S.m);
+    s.preset = S.preset == null ? null : PRESETY[S.preset].imya;
+    s.run = S.run;
+    S.sv = s; window.__demoState = s;
+  }
+  if (!S.sv) pokazaniya();
+
+  /* подпись под сценой перерисовывается, только когда меняется её смысл:
+     шарик тронулся, остановился, алгоритм дошёл, время вышло */
+  function podpis(m) { return [m.t === 0, m.settled, m.gDone, m.hDone].join('|'); }
+
+  function step(dt) {
+    if (!S.run) return;
+    var k = Math.round(dt / H), bylo = podpis(S.m);
+    for (var i = 0; i < k; i++) shag(S.m);
+    if (S.m.t >= T_MAX) S.run = false;
+    pokazaniya();
+    if (!S.run || bylo !== podpis(S.m)) bump();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    var ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var m = S.m, sv = S.sv;
+    var mut = 'rgba(' + muted + ',.95)';
+    function px(x) { return RX0 + (x - XMIN) / (XMAX - XMIN) * (RX1 - RX0); }
+    function py(u) { return RY1 - (u - UMIN) / (UMAX - UMIN) * (RY1 - RY0); }
+
+    /* рельеф */
+    ctx.strokeStyle = 'rgba(' + ink + ',.75)'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (var i = 0; i <= 300; i++) {
+      var x = XMIN + (XMAX - XMIN) * i / 300, y = py(U(x));
+      if (i) ctx.lineTo(px(x), y); else ctx.moveTo(px(x), y);
+    }
+    ctx.stroke();
+    /* уровень энергии: горизонталь, до которой шарик может подняться */
+    ctx.save(); ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = 'rgba(' + acc + ',.7)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(RX0, py(sv.E)); ctx.lineTo(RX1, py(sv.E)); ctx.stroke();
+    ctx.restore();
+    C.label(ctx, RX1, py(sv.E) - 8, 'E = ' + num(sv.E, 3), 17, 'rgb(' + acc + ')', 'right');
+    C.label(ctx, px(X_LEV), py(U(X_LEV)) + 30, 'глубокий', 17, mut);
+    C.label(ctx, px(X_PRAV), py(U(X_PRAV)) + 30, 'мелкий', 17, mut);
+
+    /* значки алгоритмов */
+    if (S.tochki) {
+      if (m.g > 0) {
+        ctx.strokeStyle = 'rgb(224,138,82)'; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(px(m.xg), py(U(m.xg)) - 10, 9, 0, TAU); ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgb(77,182,198)'; ctx.lineWidth = 2.5;
+      ctx.strokeRect(px(m.xh) - 8, py(U(m.xh)) - 18, 16, 16);
+    }
+    /* шарик */
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(px(m.x), py(U(m.x)) - 10, 10, 0, TAU); ctx.fill();
+
+    /* график энергии */
+    ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(GX0, GY0); ctx.lineTo(GX0, GY1); ctx.lineTo(GX1, GY1); ctx.stroke();
+    C.label(ctx, GX0, GY0 - 14, 'полная энергия от времени', 17, mut, 'left');
+    var E0 = U(X_START), tz = Math.max(10, Math.ceil(m.t / 10) * 10);
+    function ey(E) { return GY1 - (E - UMIN) / (E0 + 0.3 - UMIN) * (GY1 - GY0); }
+    ctx.strokeStyle = 'rgb(' + acc + ')'; ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    for (var j = 0; j < m.zap.length; j++) {
+      var gx = GX0 + j * DT_ALG / tz * (GX1 - GX0);
+      if (j) ctx.lineTo(gx, ey(m.zap[j])); else ctx.moveTo(gx, ey(m.zap[j]));
+    }
+    ctx.stroke();
+    C.label(ctx, GX1, GY1 + 22, num(tz, 0), 17, mut, 'right');
+    C.label(ctx, GX0, GY1 + 22, '0', 17, mut, 'left');
+
+    /* показания */
+    var st = sv.settled ? GLUB[sv.minimum] + ' минимум, t = ' + num(sv.tSettle, 1) : 'движется';
+    C.label(ctx, GX0, 300, 'шарик: ' + st, 17, 'rgb(' + ink + ')', 'left');
+    if (S.tochki) {
+      C.label(ctx, GX0, 330, m.g > 0 ? 'спуск: ' + (sv.stepsGD == null ? 'шагает' : shagi(sv.stepsGD) + ' до ' + GLUB_R[sv.minGD]) :
+              'спуск: без трения не определён', 17, 'rgb(224,138,82)', 'left');
+      C.label(ctx, GX0, 360, 'тяжёлый шарик: ' + (sv.stepsHB == null ? 'шагает' : shagi(sv.stepsHB) + ' до ' + GLUB_R[sv.minHB]),
+              17, 'rgb(77,182,198)', 'left');
+    }
+    C.label(ctx, GX0, 404, 't = ' + num(m.t, 1) + ', γ = ' + num(m.g, 2), 17, mut, 'left');
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  window.__demoModel = { U: U, dU: dU, novaya: novaya, shag: shag, progon: progon, svodka: svodka,
+                         X_LEV: X_LEV, X_PRAV: X_PRAV, X_BAR: X_BAR, PRESETY: PRESETY };
+  window.__demoRun = function (g, tMax) { return svodka(progon(g, tMax)); };
+
+  function sbros(g) {
+    S.m = novaya(g == null ? S.m.g : g); S.run = false; pokazaniya();
+  }
+  function preset(i) { S.preset = i; sbros(PRESETY[i].g); bump(); }
+  function trenie(g) { S.preset = null; sbros(Math.round(g * 100) / 100); bump(); }
+  function pusk() {
+    if (S.m.t >= T_MAX) sbros();
+    S.run = !S.run; pokazaniya(); bump();
+  }
+  function tochki() { S.tochki = !S.tochki; bump(); }
+
+  function slova() {
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var sv = S.sv, g = S.m.g;
+    if (S.m.t === 0) {
+      return 'Шарик отпускают из покоя на склоне справа. Слева яма глубже, справа мельче, между ними ' +
+        'барьер. Трение ' + A('γ = ' + num(g, 2)) + '. Полые значки идут шагами алгоритмов: ' +
+        'оранжевый кружок градиентным спуском, голубой квадрат тяжёлым шариком.';
+    }
+    if (g === 0) return 'Без трения энергия стоит, и шарик проскакивает дно и возвращается: ' +
+      'остановиться в минимуме ему нечем.';
+    if (!sv.settled) return 'Энергия убывает, пока шарик движется; где он остановится, решит трение.';
+    var tS = A('t = ' + num(sv.tSettle, 1)), s;
+    if (sv.minGD && sv.minGD !== sv.minimum) {
+      s = 'Шарик перевалил барьер и остановился в ' + A(GLUB_P[sv.minimum] + ' минимуме') + ' к моменту ' + tS +
+        '. Спуск без инерции остался в ' + GLUB_P[sv.minGD] + ': ' + A(shagi(sv.stepsGD)) + '.';
+    } else {
+      s = 'Шарик остановился в ' + A(GLUB_P[sv.minimum] + ' минимуме') + ' к моменту ' + tS + '.';
+      if (sv.stepsGD != null) s += ' Спуск пришёл туда за ' + A(shagi(sv.stepsGD)) + '.';
+    }
+    if (sv.stepsHB != null) {
+      s += ' Тяжёлый шарик ' + (sv.minHB === sv.minimum ? 'пришёл туда же' : 'остановился в ' + GLUB_P[sv.minHB] + ' минимуме') +
+        ' за ' + A(shagi(sv.stepsHB)) + '.';
+      if (sv.stepsGD != null && sv.minGD === sv.minHB) {
+        if (Math.abs(sv.stepsGD - sv.stepsHB) <= 0.05 * sv.stepsGD) s += ' При сильном трении спуск и тяжёлый шарик идут вместе.';
+        else if (sv.stepsHB < 0.9 * sv.stepsGD) s += ' Инерция помогла: тяжёлый шарик пришёл раньше спуска.';
+      }
+    }
+    return s;
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${S.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${function () { sbros(); bump(); }}>Сброс<//>
+        <//>
+        <${C.Group} label="Трение:">
+          ${PRESETY.map(function (p, i) {
+            return html`<${C.Btn} active=${S.preset === i} onClick=${function () { preset(i); }}>${p.imya}<//>`;
+          })}
+        <//>
+        <${C.Slider} label="γ:" min=${0.1} max=${30} log=${true}
+                     value=${Math.max(0.1, S.m.g)} onChange=${trenie} display=${num(S.m.g, 2)} />
+        <${C.Group}>
+          <${C.Btn} active=${S.tochki} onClick=${tochki}>значки алгоритмов<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(Sharik);
+</script>
+</body>
+</html>

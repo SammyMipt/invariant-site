@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Поезд с чашкой</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-03/">&larr; Неделя 03</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=poezd-s-chashkoj"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блоки главы `ot-kinematiki-k-dinamike` и `pervyj-zakon`: едет поезд,
+   на столе чашка, окна зашторены. Пока поезд идёт ровно, чашка стоит.
+   Потом без единой видимой причины она трогается и едет к краю стола.
+   С платформы видно другое: чашка идёт как шла, а стол вместе с вагоном
+   уезжает из-под неё, потому что поезд тормозит. Два тела отсчёта, и в
+   одном из них тело трогается без причины. Кинематика такое разрешала,
+   первый закон запрещает.
+
+   Модель одна, и считается она в системе платформы, инерциальной. Вдоль
+   хода поезда координата x, вперёд по ходу положительна. Поезд идёт со
+   скоростью V0 = 20 м/с и по кнопке тормозит с ускорением a (по умолчанию
+   2 м/с²) до полной остановки; назад не едет. Чашка массой m = 0,3 кг
+   стоит на столе, между ней и столом трение с μ = 0,1.
+
+   ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ЖИВЁТ ТРЕНИЕ, — uskorenieChashki. Пусть
+   u = v_чашки − v_поезда, скорость относительно стола. Пока u = 0, стол
+   пробует везти чашку со своим ускорением, и трение покоя это может,
+   пока |a_поезда| ≤ μg ≈ 0,98 м/с²: чашка идёт со столом, a_чашки =
+   a_поезда. Сильнее μg трение покоя не тянет: чашка отстаёт от стола, и
+   на неё действует трение скольжения, a_чашки = −μg·sign(u). Обе ветки
+   записаны одной формулой: при u = 0 ускорение чашки есть a_поезда,
+   обрезанное по ±μg, при u ≠ 0 это ±μg против u.
+
+   ЗНАКИ. При торможении a_поезда = −2 м/с². Чашка отстаёт от стола,
+   то есть уходит вперёд относительно него: u > 0. Трение скольжения
+   направлено против u, назад: a_чашки = −μg = −0,98 м/с² в системе
+   платформы. Относительно вагона a_отн = a_чашки − a_поезда =
+   −0,98 + 2 = +1,02 м/с², вперёд, к краю стола. Трение чашку тормозит,
+   а не толкает; к краю её несёт стол, уезжающий назад.
+
+   ЧИСЛА ГЛАВЫ. V0 = 20 м/с, a = 2 м/с², μ = 0,1, g = 9,81, m = 0,3 кг.
+   Сила, которую пришлось бы выдумать наблюдателю в вагоне: m·a_поезда =
+   0,6 Н. Стол длиной 1 м, чашка посередине, до края 0,5 м; глава
+   округляет μg до 1 м/с² и получает 1 с. Демка считает с g = 9,81:
+   a_отн = 1,02 м/с², время до края √(2·0,5/1,02) = 0,99 с. Округление
+   главы честное, и 0,99 в показаниях ему не противоречит.
+
+   ЧТО ПОСЛЕ КРАЯ. Модель на краю не замирает. Чашка сходит со стола,
+   когда её середина проходит кромку, падает с высоты стола (в полёте по
+   горизонтали на неё не действует ничего, и скорость относительно
+   платформы постоянна), приземляется на пол вагона и скользит по нему
+   с тем же трением до передней стенки. Удар о пол и о стенку неупругий:
+   коэффициента восстановления в главе нет, и выдумывать его незачем.
+   У стенки чашку держит стенка, и дальше она тормозит вместе с поездом.
+   Ни один из этих кусков не нарисован «примерно»: везде одна функция
+   шага.
+
+   ЧЕГО ЗДЕСЬ НЕТ. Опрокидывания: чашка шириной и высотой по 10 см
+   опрокидывается при относительном ускорении около g/2, а здесь оно не
+   выше 2 м/с². Сопротивления воздуха: за 0,4 с полёта оно ничего не
+   меняет. Ползунок тормоза начинается с 0,25 м/с², чтобы было видно,
+   как чашку держит трение покоя, пока торможение слабее μg. */
+
+/* ── числа модели ── */
+
+var G = 9.81;                      /* м/с² */
+var MU = 0.1;                      /* трение чашки о стол и о пол вагона */
+var M = 0.3;                       /* масса чашки, кг */
+var V0 = 20;                       /* скорость поезда до торможения, м/с */
+var A_NACH = 2;                    /* торможение по умолчанию, м/с²; число главы */
+var A_MIN = 0.25, A_MAX = 3, A_SHAG = 0.25;
+var STOL = 0.5;                    /* полудлина стола, м: чашка стартует посередине */
+var H_STOL = 0.75;                 /* высота столешницы над полом, м */
+var STENA = 1.6;                   /* стенки вагона, м от середины стола в обе стороны */
+var R_CH = 0.05;                   /* полуширина чашки, м */
+
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+function sgn(v) { return v > 0 ? 1 : v < 0 ? -1 : 0; }
+
+function novoe(a) {
+  return {
+    t: 0, a: a == null ? A_NACH : a, tormoz: false,
+    x: 0, v: V0,                   /* поезд: середина стола и его скорость, система платформы */
+    xc: 0, vc: V0,                 /* чашка, там же */
+    y: H_STOL, vy: 0,              /* чашка над полом вагона */
+    opora: true,                   /* стоит на столе или на полу, а не летит */
+    tTormoz: null, tKraj: null     /* когда нажат тормоз; сколько прошло до края стола */
+  };
+}
+
+/* Тормозит, пока едет; остановившись, стоит. Назад поезд не едет. */
+function uskoreniePoezda(s) { return (s.tormoz && s.v > 0) ? -s.a : 0; }
+
+function uStenki(xOtn) { return xOtn + R_CH >= STENA - 1e-9; }
+
+/* Ускорение чашки в системе платформы; разбор знаков в шапке. */
+function uskorenieChashki(aP, u, opora, stenka) {
+  if (!opora) return 0;
+  if (u !== 0) return -MU * G * sgn(u);
+  if (stenka && aP < 0) return aP;   /* стенка держит, сколько нужно */
+  return clamp(aP, -MU * G, MU * G);
+}
+
+/* Один шаг h по времени. Ускорения кусочно-постоянны, и полунеявный
+   Эйлер внутри куска точен; ошибка живёт только в моментах переключения
+   (срыв, кромка, пол, стенка) и не превышает h. При 20 подшагах на кадр
+   это меньше миллисекунды. */
+function shag(s, h) {
+  if (s.tormoz && s.tTormoz === null) s.tTormoz = s.t;
+  var aP = uskoreniePoezda(s);
+  var u = s.vc - s.v, xOtn = s.xc - s.x;
+  var aC = uskorenieChashki(aP, u, s.opora, uStenki(xOtn));
+  /* Чашка идёт со столом (трение покоя) или прижата к стенке: тогда её
+     скорость и координата приращаются теми же числами, что у поезда, и
+     относительная скорость остаётся нулём точно, а не с точностью до
+     округления. Иначе первый же кадр торможения дал бы ей u ~ 10⁻¹⁶ и
+     «срыв» на ровном месте. */
+  var vmeste = (u === 0 && aC === aP);
+
+  var v1 = s.v + aP * h;
+  if (v1 < 0) v1 = 0;                /* остановка внутри шага */
+  var dx = (s.v + v1) / 2 * h;
+  var vc1 = vmeste ? v1 : s.vc + aC * h;
+  /* Скольжение кончается, когда относительная скорость проходит через
+     ноль: чашка прилипает, а не начинает елозить взад-вперёд по столу. */
+  if (!vmeste && u !== 0 && (vc1 - v1) * u <= 0) vc1 = v1;
+  var dxc = vmeste ? dx : (s.vc + vc1) / 2 * h;
+
+  s.t += h; s.v = v1; s.x += dx; s.vc = vc1; s.xc += dxc;
+
+  /* Стенки: удар неупругий, чашка остаётся у стенки. Задняя стенка
+     здесь ни разу не понадобится, поезд не разгоняется; она стоит для
+     симметрии модели. */
+  xOtn = s.xc - s.x;
+  if (xOtn + R_CH > STENA) { s.xc = s.x + STENA - R_CH; s.vc = s.v; }
+  if (xOtn - R_CH < -STENA) { s.xc = s.x - STENA + R_CH; s.vc = s.v; }
+  xOtn = s.xc - s.x;
+
+  /* Кромка стола: середина чашки прошла край, опоры под ней нет. */
+  if (s.opora && s.y > 0 && Math.abs(xOtn) > STOL) {
+    s.opora = false;
+    if (s.tKraj === null) s.tKraj = s.t - (s.tTormoz === null ? 0 : s.tTormoz);
+  }
+  if (!s.opora) {
+    var vy1 = s.vy - G * h;
+    s.y += (s.vy + vy1) / 2 * h; s.vy = vy1;
+    var pol = Math.abs(xOtn) <= STOL ? H_STOL : 0;
+    if (s.y <= pol) { s.y = pol; s.vy = 0; s.opora = true; }
+  }
+}
+
+/* Показания: то, что демка утверждает. Пишутся в тот же объект, где живёт
+   модель, после каждого кадра и после сброса; автопроверка читает его как
+   window.__demoState. */
+function pokazaniya(s) {
+  var aP = uskoreniePoezda(s);
+  var u = s.vc - s.v, xOtn = s.xc - s.x, stenka = uStenki(xOtn);
+  var aC = uskorenieChashki(aP, u, s.opora, stenka);
+  s.aPoezda = aP;                  /* ускорение поезда со знаком, м/с² */
+  s.u = u;                         /* скорость чашки относительно стола, м/с */
+  s.xOtn = xOtn;                   /* чашка от середины стола, м */
+  s.stenka = stenka;
+  s.aChashki = aC;                 /* ускорение чашки с платформы, м/с² */
+  s.aOtn = aC - aP;                /* ускорение чашки в вагоне, м/с² */
+  s.sila = M * Math.abs(aP);       /* сила, которую пришлось бы выдумать в вагоне, Н */
+  s.tPosle = s.tTormoz === null ? 0 : s.t - s.tTormoz;
+  /* Время до края по формуле равноускоренного движения от середины
+     стола; верно, пока торможение не меняли на ходу. */
+  s.tKrajFormula = s.a > MU * G ? Math.sqrt(2 * STOL / (s.a - MU * G)) : Infinity;
+  s.faza = !s.tormoz ? 'rovno'
+         : !s.opora ? 'letit'
+         : stenka ? (s.v > 0 ? 'stenka' : 'stoit')
+         : u !== 0 ? 'skolzit'
+         : s.v > 0 ? 'derzhit' : 'stoit';
+  return s;
+}
+
+/* Прогон с нуля без экрана: тормоз включён с первого шага. Этим прогоном
+   модель проверяется числом (window.__demoProgon и проверка в node). */
+function progon(a, h, tmax) {
+  var s = novoe(a); s.tormoz = true;
+  var n = Math.round(tmax / h);
+  for (var i = 0; i < n; i++) shag(s, h);
+  return pokazaniya(s);
+}
+
+/* Русская запятая и настоящий минус; остатки счёта в последних знаках
+   печатались бы как «−0», а ноль есть ноль. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* Знак в показаниях говорит, куда по ходу поезда: вперёд плюс. */
+function znak(v, d) {
+  var s = num(v, d);
+  return s === num(0, d) ? s : (v > 0 ? '+' + s : s);
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Разрез вагона сбоку, ход поезда слева направо. Два вида, две камеры на
+   одну модель. «В вагоне»: камера привинчена к вагону, стены стоят, на
+   окнах шторы, снаружи не видно ничего; чашка сама трогается с места.
+   «На платформе»: камера стоит на платформе и ведёт чашку, как ведёт её
+   глаз; платформа под вагоном бежит мимо, а вагон уходит назад из-под
+   неподвижной на экране чашки. Переключение не трогает модель: меняется
+   только то, что вычитается из координат при переносе на экран (ekr).
+
+   Камера на платформе ведёт именно чашку, а не вагон. Будь к экрану
+   пришпилен вагон, единственной разницей между видами осталась бы
+   бегущая платформа под колёсами, а фраза главы «стол уезжает из-под
+   чашки» так и осталась бы фразой. Платформа при этом нарисована и бежит с той
+   скоростью, с какой идёт чашка: 20 м/с при ровном ходе, чуть меньше
+   при скольжении, и её плитки уходят под колёса на 67 px за кадр.
+
+   МАСШТАБ ЧЕСТНЫЙ: 200 px на метр в обе стороны. Стол 1 м = 200 px,
+   высота стола 0,75 м = 150 px, чашка 10 см = 20 px, и настоящая чашка на
+   такой сцене ровно такая. Стрелки скоростей в двух видах в разном
+   масштабе: в вагоне 1 м/с = 60 px, на платформе 10 м/с = 60 px, иначе
+   двадцать метров в секунду не помещаются в кадр. Оба масштаба объявлены
+   риской в левом верхнем углу. */
+
+var W = 1000, HGT = 440;
+var RX0 = 24, RX1 = 700, OKNO = RX1 - RX0;   /* окно сцены; правее столбец показаний */
+var ANCH = (RX0 + RX1) / 2;        /* что пришпилено к экрану: вагон или чашка */
+var SC = 200;                      /* px на метр */
+var Y_POL = 326;                   /* пол вагона */
+var Y_POTOLOK = 76;
+var Y_STOL = Y_POL - H_STOL * SC;  /* столешница, 176 */
+var KUZ = 14;                      /* толщина стенок, пола и крыши, px */
+var Y_RELS = 368, Y_PLATF = 372;   /* рельс и кромка платформы (вид с платформы) */
+var CH_W = 2 * R_CH * SC, CH_H = 24;         /* значок чашки, 20 × 24 px */
+var ARR_V = 60, ARR_P = 6;         /* px на м/с: в вагоне и на платформе */
+var SUB = 20;                      /* подшагов модели на кадр */
+
+var RXC = 968;                     /* правый край столбца показаний */
+var ROW = [80, 160, 240, 320];
+var TAU = 6.2832;
+
+/* Цвета данных от темы не зависят: охра чашке, бирюза стрелкам скоростей,
+   как в рисунках главы. Вагон, стол и платформа красятся чернилами темы. */
+var CCH = '224,138,82';
+var CV = '77,182,198';
+
+function strelka(ctx, x0, x1, y, color, w) {
+  var dl = Math.abs(x1 - x0), dir = x1 >= x0 ? 1 : -1;
+  /* Остриё ужимается вместе со стрелкой, иначе полметра в секунду
+     относительно стола выглядело бы как ноль. */
+  var gol = Math.min(13, Math.max(4, dl * 0.55));
+  ctx.save();
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  ctx.lineWidth = w; ctx.lineCap = 'round';
+  if (dl > gol) {
+    ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1 - dir * (gol - 1), y); ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(x1, y);
+  ctx.lineTo(x1 - dir * gol, y - gol * 0.5);
+  ctx.lineTo(x1 - dir * gol, y + gol * 0.5);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+/* Подпись не выпускается за кромку окна: у края она обрезалась бы на
+   середине числа. */
+function podpis(ctx, x, y, text, color) {
+  ctx.font = '17px "Golos Text", system-ui, sans-serif';
+  var pol = ctx.measureText(text).width / 2 + 6;
+  C.label(ctx, clamp(x, RX0 + pol, RX1 - pol), y, text, 17, color);
+}
+
+function Poezd() {
+  var st = useRef(pokazaniya(novoe())).current;
+  var got = useRef({ est: false }).current;
+  if (!got.est) {
+    got.est = true;
+    st.vid = 'vagon'; st.run = true;
+    st.fazaUi = st.faza; st.formulaVerna = true;
+  }
+  /* Пара из одного useState: два отдельных дают два независимых состояния,
+     и рейка перестаёт отзываться на кнопки. faza дублируется сюда из
+     модели, чтобы строка показаний перерисовывалась в момент события. */
+  var pair = useState({ vid: 'vagon', a: A_NACH, tormoz: false, run: true, faza: st.faza });
+  var ui = pair[0], setUi = pair[1];
+
+  function step(dt) {
+    if (!st.run) return;
+    var h = dt / SUB;
+    for (var i = 0; i < SUB; i++) shag(st, h);
+    pokazaniya(st);
+    if (st.faza !== st.fazaUi) {
+      st.fazaUi = st.faza;
+      setUi({ vid: st.vid, a: st.a, tormoz: st.tormoz, run: st.run, faza: st.faza });
+    }
+  }
+
+  /* ── кузов, стол, шторы ── */
+
+  function shtora(ctx, cx, ink, muted) {
+    var x = cx - 40, y = 86, w = 80, hh = 34;
+    ctx.fillStyle = 'rgba(' + muted + ',.3)';
+    ctx.fillRect(x, y, w, hh);
+    /* Складки: пять вертикальных линий, чтобы окно читалось задёрнутым,
+       а не тёмным пятном на стене. */
+    ctx.strokeStyle = 'rgba(' + ink + ',.28)'; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (var i = 1; i <= 5; i++) { ctx.moveTo(x + i * 13.3, y); ctx.lineTo(x + i * 13.3, y + hh); }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(' + ink + ',.45)'; ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, hh);
+  }
+
+  function korpus(ctx, xv, ink, muted, snaruzhi) {
+    var L = xv - STENA * SC, R = xv + STENA * SC;
+    /* Стены, пол и крыша одним контуром: кольцо между внешним и внутренним
+       прямоугольником. */
+    ctx.fillStyle = 'rgba(' + ink + ',.18)';
+    ctx.beginPath();
+    ctx.rect(L - KUZ, Y_POTOLOK - KUZ, R - L + 2 * KUZ, Y_POL - Y_POTOLOK + 2 * KUZ);
+    ctx.rect(L, Y_POTOLOK, R - L, Y_POL - Y_POTOLOK);
+    ctx.fill('evenodd');
+    ctx.fillStyle = 'rgba(' + ink + ',.035)';
+    ctx.fillRect(L, Y_POTOLOK, R - L, Y_POL - Y_POTOLOK);
+
+    shtora(ctx, xv - 260, ink, muted);
+    shtora(ctx, xv + 260, ink, muted);
+
+    /* Стол: столешница 1 м и две ножки. */
+    ctx.fillStyle = 'rgba(' + ink + ',.6)';
+    ctx.fillRect(xv - STOL * SC, Y_STOL, 2 * STOL * SC, 8);
+    ctx.fillRect(xv - STOL * SC + 5, Y_STOL + 8, 5, Y_POL - Y_STOL - 8);
+    ctx.fillRect(xv + STOL * SC - 10, Y_STOL + 8, 5, Y_POL - Y_STOL - 8);
+
+    /* Метка на столе там, где чашка стояла: по ней в вагоне видно, что
+       чашка сдвинулась, а на платформе, что сдвинулся стол. */
+    ctx.save();
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = 'rgba(' + muted + ',.85)'; ctx.lineWidth = 1.4;
+    ctx.strokeRect(xv - CH_W / 2, Y_STOL - CH_H, CH_W, CH_H);
+    ctx.restore();
+
+    if (!snaruzhi) return;
+    /* Снаружи у вагона есть колёса и рельс; изнутри их не видно. */
+    ctx.fillStyle = 'rgba(' + ink + ',.38)';
+    [-1, 1].forEach(function (d) {
+      ctx.beginPath(); ctx.arc(xv + d * 200, Y_RELS - 13, 13, 0, TAU); ctx.fill();
+    });
+  }
+
+  function chashka(ctx, x, y) {
+    /* Кружка: корпус и ручка сзади, чтобы к стенке она шла корпусом. */
+    ctx.strokeStyle = 'rgb(' + CCH + ')'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x - CH_W / 2, y - CH_H / 2, 6, Math.PI / 2, 3 * Math.PI / 2); ctx.stroke();
+    C.roundRect(ctx, x - CH_W / 2, y - CH_H, CH_W, CH_H, 3);
+    ctx.fillStyle = 'rgba(' + CCH + ',.94)'; ctx.fill();
+  }
+
+  /* ── кадр ── */
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    var ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var s = st, vagon = s.vid === 'vagon';
+    /* Камера: что стоит на экране. В вагоне это середина стола, на
+       платформе чашка. Всё остальное на экране — разность координат. */
+    var opora = vagon ? s.x : s.xc;
+    function ekr(X) { return ANCH + (X - opora) * SC; }
+    var xv = ekr(s.x), xch = ekr(s.xc);
+    var ych = Y_POL - s.y * SC;        /* дно чашки */
+    var mut = 'rgba(' + muted + ',.95)';
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(RX0, 0, OKNO, HGT); ctx.clip();
+
+    if (!vagon) {
+      /* Платформа принадлежит земле и бежит мимо со скоростью чашки.
+         Плитка по метру, период узора 2 м = 400 px: за кадр при 20 м/с
+         уходит 67 px, меньше половины периода, и полоса бежит, а не
+         мерцает. Шпалы через 0,6 м на такой скорости стробили бы. */
+      ctx.fillStyle = 'rgba(' + ink + ',.07)';
+      ctx.fillRect(RX0, Y_PLATF, OKNO, HGT - Y_PLATF);
+      ctx.strokeStyle = 'rgba(' + ink + ',.45)'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(RX0, Y_PLATF); ctx.lineTo(RX1, Y_PLATF);
+      ctx.moveTo(RX0, Y_RELS); ctx.lineTo(RX1, Y_RELS);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(' + muted + ',.55)';
+      var s0 = opora + (RX0 - ANCH) / SC, s1 = opora + (RX1 - ANCH) / SC;
+      for (var k = Math.floor(s0) - 1; k <= s1 + 1; k++) {
+        if (k % 2 === 0) ctx.fillRect(ekr(k), Y_PLATF + 7, SC, 7);
+      }
+      C.label(ctx, RX0 + 10, HGT - 12, 'платформа', 17, mut, 'left');
+    }
+
+    korpus(ctx, xv, ink, muted, !vagon);
+    chashka(ctx, xch, ych);
+
+    /* Подпись чашки: имя и число одной строкой над значком. В вагоне число
+       есть скорость относительно стен, на платформе относительно земли. */
+    var yp = ych - CH_H - 12;
+    var vCh = vagon ? s.u : s.vc;
+    podpis(ctx, xch, yp, 'чашка, ' + (vagon ? znak(s.u, 1) : num(s.vc, 1)) + ' м/с', 'rgb(' + CCH + ')');
+    var arr = vagon ? ARR_V : ARR_P, len = Math.abs(vCh) * arr, dir = vCh >= 0 ? 1 : -1;
+    if (len >= 3) strelka(ctx, xch + dir * (CH_W / 2 + 6), xch + dir * (CH_W / 2 + 6 + len),
+                          ych - CH_H / 2, 'rgb(' + CV + ')', 3.4);
+
+    if (!vagon) {
+      /* Вагон тоже участник: его скорость относительно земли, под потолком. */
+      podpis(ctx, xv, 116, 'вагон, ' + num(s.v, 1) + ' м/с', 'rgb(' + ink + ')');
+      if (s.v * ARR_P >= 3) strelka(ctx, xv - 30, xv - 30 + s.v * ARR_P, 94, 'rgb(' + CV + ')', 3.4);
+
+      /* Отвес камеры сквозь чашку, с разрывом под её подпись: сплошной
+         штрих через слово читался бы знаком внутри него. */
+      ctx.save();
+      ctx.setLineDash([7, 7]);
+      ctx.strokeStyle = 'rgba(' + acc + ',.4)'; ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      [[56, yp - 17], [yp + 7, Y_PLATF]].forEach(function (o) {
+        if (o[1] - o[0] >= 12) { ctx.moveTo(ANCH, o[0]); ctx.lineTo(ANCH, o[1]); }
+      });
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+
+    C.label(ctx, ANCH, 46, vagon ? 'камера в вагоне: стены стоят' : 'камера на платформе ведёт чашку',
+            17, 'rgba(' + acc + ',.95)');
+
+    /* Масштаб стрелок объявлен явно, свой в каждом виде. */
+    strelka(ctx, RX0, RX0 + 60, 38, 'rgb(' + muted + ')', 2.6);
+    C.label(ctx, RX0 + 72, 44, vagon ? '1 м/с' : '10 м/с', 17, mut, 'left');
+
+    /* ── показания ──
+       Ускорение чашки в двух системах, по строке на каждую; строка той
+       системы, откуда сейчас смотрит камера, обведена рамкой. Ниже сила,
+       которую в вагоне пришлось бы выдумать, и время до края стола. Рамка
+       меряется по своей строке, шрифты те же, что у C.readout. */
+    var kraj = s.tKraj !== null ? num(s.tKraj, 2)
+             : (s.faza === 'skolzit' && s.y > 0) ? num(s.tPosle, 2) : '—';
+    var stroki = [
+      ['ЧАШКА В ВАГОНЕ, М/С²', znak(s.aOtn, 2), vagon ? 'rgb(' + acc + ')' : 'rgb(' + ink + ')'],
+      ['ЧАШКА С ПЛАТФОРМЫ, М/С²', znak(s.aChashki, 2), vagon ? 'rgb(' + ink + ')' : 'rgb(' + acc + ')'],
+      ['ВЫДУМАННАЯ СИЛА, Н', num(s.sila, 2), s.sila > 0 ? 'rgb(' + ink + ')' : 'rgb(' + muted + ')'],
+      ['ДО КРАЯ СТОЛА, С', kraj, s.tKraj !== null ? 'rgb(' + CCH + ')' : 'rgb(' + muted + ')']
+    ];
+    var svoj = vagon ? 0 : 1, POLE = 14;
+    ctx.save();
+    ctx.font = '600 15px "JetBrains Mono", ui-monospace, monospace';
+    var w1 = ctx.measureText(stroki[svoj][0]).width;
+    ctx.font = '600 32px "JetBrains Mono", ui-monospace, monospace';
+    var w2 = ctx.measureText(stroki[svoj][1]).width;
+    ctx.restore();
+    var wr = Math.max(w1, w2);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(' + acc + ',.5)'; ctx.lineWidth = 1.4;
+    C.roundRect(ctx, RXC - wr - POLE, ROW[svoj] - 24, wr + 2 * POLE, 74, 10);
+    ctx.stroke(); ctx.restore();
+    stroki.forEach(function (r, i) { C.readout(ctx, RXC, ROW[i], r[0], r[1], r[2]); });
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Объект показаний живёт весь сеанс и правится на месте: автопроверка
+     читает его после __demoTick, когда рендера компонента не было. Тормоз
+     из проверки включается так же, как кнопкой: __demoState.tormoz = true. */
+  window.__demoState = st;
+
+  /* Прогон модели с нуля: при a = 0,5 чашка обязана стоять (faza
+     'derzhit', xOtn = 0), при a = 2 сойти со стола за 0,99 с с
+     относительным ускорением 1,02 м/с². */
+  window.__demoProgon = function (a, h, tmax) {
+    return progon(a == null ? st.a : a, h || 1 / 1200, tmax || 3);
+  };
+
+  function obnovit() {
+    setUi({ vid: st.vid, a: st.a, tormoz: st.tormoz, run: st.run, faza: st.faza });
+  }
+  function vid(v) { st.vid = v; obnovit(); }
+  function bump(d) {
+    st.a = clamp(Math.round((st.a + d * A_SHAG) * 100) / 100, A_MIN, A_MAX);
+    if (st.tormoz) st.formulaVerna = false;   /* формула считает торможение постоянным */
+    pokazaniya(st); obnovit();
+  }
+  function tormozit() { st.tormoz = true; pokazaniya(st); st.fazaUi = st.faza; obnovit(); }
+  function sbros() {
+    var n = novoe(st.a);
+    for (var k in n) st[k] = n[k];
+    st.formulaVerna = true;
+    pokazaniya(st); st.fazaUi = st.faza; obnovit();
+  }
+  function pusk() { st.run = !st.run; obnovit(); }
+
+  /* Строка показаний пересказывает кадр словами и меняется вместе с ним:
+     по виду и по фазе движения. Числа те же, что напечатаны на сцене. */
+  function slova(s, v) {
+    var A = function (x) { return '<span class="accent">' + x + '</span>'; };
+    var a = num(s.a, 2), mug = num(MU * G, 2), sila = num(s.sila, 2);
+    var kraj = s.tKraj === null ? ''
+      : 'Чашка сошла со стола через ' + A(num(s.tKraj, 2) + ' с') +
+        (s.formulaVerna ? ' (по формуле √(2s/a) при s = 0,5 м это ' + num(s.tKrajFormula, 2) + ' с). ' : '. ');
+    var kuda = s.y > 0 ? 'к краю стола' : 'по полу к стенке';
+    var stoit = 'Поезд остановился. ' +
+      (s.stenka ? 'Чашка лежит у передней стенки.'
+                : 'Чашка так и стоит на столе: трение покоя удержало её всю дорогу.') +
+      ' «Сброс» вернёт всё в начало.';
+    if (v === 'vagon') switch (s.faza) {
+      case 'rovno':
+        return 'Наблюдатель едет в вагоне, шторы задёрнуты. Чашка стоит посреди стола, ' +
+          'и ничто в вагоне не говорит, едет он или нет.';
+      case 'derzhit':
+        return 'Поезд тормозит с ' + A(a + ' м/с²') + ', слабее μg ≈ ' + mug + ' м/с². ' +
+          'Чашка не сдвинулась: её держит трение покоя. Но наблюдателю в вагоне уже ' +
+          'приходится выдумать силу ' + A(sila + ' Н') + ', чтобы объяснить, отчего чашку тянет вперёд.';
+      case 'skolzit':
+        return 'Стены стоят, а чашка тронулась и ползёт ' + kuda + ' с ускорением ' +
+          A(znak(s.aOtn, 2) + ' м/с²') + '. Ни одно тело её не толкает. Чтобы записать это ' +
+          'как закон, наблюдателю в вагоне пришлось бы выдумать силу ' + A(sila + ' Н') +
+          ', у которой нет источника.';
+      case 'letit':
+        return kraj + 'Теперь она летит к полу вагона, и относительно стен её ускорение ' +
+          A(znak(s.aOtn, 2) + ' м/с²') + ': всё оттого же, что стены тормозят, а чашка нет.';
+      case 'stenka':
+        return kraj + 'Чашку остановила передняя стенка. Пока поезд тормозит, стенка её и ' +
+          'держит, а наблюдатель в вагоне снова видит силу ' + A(sila + ' Н') + ' ниоткуда.';
+      default:
+        return stoit;
+    }
+    switch (s.faza) {
+      case 'rovno':
+        return 'Наблюдатель стоит на платформе, камера ведёт чашку. Чашка и вагон идут с ' +
+          'одной скоростью ' + A('20 м/с') + ', платформа бежит мимо.';
+      case 'derzhit':
+        return 'Поезд тормозит с ' + A(a + ' м/с²') + '. Чашка тормозит вместе с ним, и причина ' +
+          'на виду: стол тянет её назад трением покоя, на те же ' + a + ' м/с².';
+      case 'skolzit':
+        return 'Стол уезжает из-под чашки. Сама чашка почти не меняет хода: трение скольжения ' +
+          'замедляет её всего на ' + A(mug + ' м/с²') + ', а вагон тормозит на ' + a + '. ' +
+          'Выдумывать нечего: чашку тормозит стол, а стол тормозят тормоза.';
+      case 'letit':
+        return kraj + 'В полёте по горизонтали на чашку не действует ничего, и её скорость ' +
+          A(num(s.vc, 1) + ' м/с') + ' не меняется до самого пола.';
+      case 'stenka':
+        return kraj + 'Чашку остановила передняя стенка вагона: теперь её тормозит стенка, ' +
+          'на те же ' + A(a + ' м/с²') + ', что и поезд.';
+      default:
+        return stoit;
+    }
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Наблюдатель:">
+          <${C.Btn} active=${ui.vid === 'vagon'} onClick=${function () { vid('vagon'); }}>в вагоне<//>
+          <${C.Btn} active=${ui.vid === 'platforma'} onClick=${function () { vid('platforma'); }}>на платформе<//>
+        <//>
+        <${C.Group} cls="step" label="Тормоз:">
+          <${C.Btn} disabled=${ui.a <= A_MIN} onClick=${function () { bump(-1); }}>−<//>
+          <span class="control-value">${num(ui.a, 2)} м/с²</span>
+          <${C.Btn} disabled=${ui.a >= A_MAX} onClick=${function () { bump(1); }}>+<//>
+        <//>
+        <${C.Group}>
+          <${C.Btn} action=${true} disabled=${ui.tormoz} onClick=${tormozit}>Тормозить<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+          <${C.Btn} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova(st, ui.vid)} />
+    </div>`;
+}
+
+C.mount(Poezd);
+</script>
+</body>
+</html>

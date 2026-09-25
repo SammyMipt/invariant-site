@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Карта курса — Физика 1</title>
+  <link rel="stylesheet" href="../site.css">
+  <style>
+    /* Карта живёт во весь экран; стили только этой страницы, цвета — токены.
+       Рабочий драфт для дизайн-сессии: функциональность впереди красоты. */
+    html, body { height: 100%; }
+    body.map-body {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    }
+    .map-top {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      padding: .55rem 1rem;
+      border-bottom: 1px solid var(--line);
+      background: var(--card);
+      font-size: 13.5px;
+    }
+    .map-top .map-name { font-weight: 700; }
+    .map-top label {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .map-top select {
+      font: inherit;
+      color: var(--ink);
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 3px 6px;
+      max-width: 16rem;
+    }
+    .map-top button {
+      font: inherit;
+      color: var(--accent-ink);
+      background: var(--chip);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 3px 10px;
+      cursor: pointer;
+    }
+    .map-top button:hover { border-color: var(--accent); }
+    .map-hint { color: var(--muted); margin-left: auto; }
+
+    .map-wrap { position: relative; flex: 1; min-height: 0; }
+    #map { position: absolute; inset: 0; width: 100%; height: 100%;
+           touch-action: none; }
+
+    .map-legend {
+      position: absolute;
+      top: .8rem;
+      right: .8rem;
+      max-height: calc(100% - 1.6rem);
+      overflow-y: auto;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: .5rem .6rem;
+      font-size: 12.5px;
+      line-height: 1.35;
+      max-width: 16.5rem;
+    }
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: .45rem;
+      padding: .18rem .3rem;
+      border-radius: 5px;
+      cursor: pointer;
+      color: var(--ink);
+    }
+    .legend-row:hover { background: var(--chip); }
+    .legend-row.is-on { background: var(--chip); font-weight: 600; }
+    .legend-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex: none;
+    }
+    .legend-toggle {
+      position: absolute;
+      top: .8rem;
+      right: .8rem;
+      display: none;
+      font: inherit;
+      font-size: 12.5px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 4px 9px;
+      cursor: pointer;
+      color: var(--accent-ink);
+    }
+    @media (max-width: 760px) {
+      .map-legend { display: none; }
+      .map-legend.is-open { display: block; top: 2.6rem; }
+      .legend-toggle { display: block; }
+      .map-hint { display: none; }
+    }
+
+    .map-tip {
+      position: absolute;
+      pointer-events: none;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(32, 38, 43, .12);
+      padding: .45rem .65rem;
+      max-width: 17rem;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .map-tip .tip-title { font-weight: 600; }
+    .map-tip .tip-meta { color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body class="map-body">
+  <div class="map-top">
+    <a class="back-link" href="../index.html">&larr; Главная</a>
+    <a class="back-link" href="index.html">База знаний</a>
+    <span class="map-name">Карта курса</span>
+    <label><input type="checkbox" id="cross-only"> только межнедельные связи</label>
+    <select id="theme-filter" aria-label="Фильтр темы">
+      <option value="">все темы</option>
+    </select>
+    <button id="reset-view">Сбросить вид</button>
+    <span class="map-hint">наведите на узел, кликните — откроется блок;
+      узлы можно таскать, колесо — зум</span>
+  </div>
+
+  <div class="map-wrap" id="wrap">
+    <canvas id="map"></canvas>
+    <button class="legend-toggle" id="legend-toggle">Легенда</button>
+    <div class="map-legend" id="legend"></div>
+    <div class="map-tip" id="tip" hidden></div>
+  </div>
+
+<script src="../../shared/analytics.js"></script>
+<script src="../config.js"></script>
+<script src="../../shared/auth.js"></script>
+<script src="../../shared/topbar.js"></script>
+<script src="../../content/graph-data.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* Заголовки недель — из спек weekNN.js (поле title, дословно) */
+  var WEEK_TITLES = {
+    1: 'Предмет физики. Размерности',
+    2: 'Кинематика материальной точки',
+    3: 'Законы Ньютона. ЗСИ. Центр масс',
+    4: 'Работа и энергия. Столкновения',
+    5: 'Момент импульса. Гравитация',
+    6: 'Произвольное движение твёрдого тела',
+    7: 'Колебания',
+    8: 'Деформации и гидродинамика',
+    9: 'Введение в термодинамику',
+    10: 'Второе начало термодинамики. Энтропия',
+    11: 'Фазовые переходы и реальный газ',
+    12: 'Распределения Максвелла и Больцмана',
+    13: 'Явления переноса'
+  };
+  var WEEKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  /* ── палитра тем: четыре цвета из токенов + сгенерированные оттенки ── */
+
+  function cssVar(name, fb) {
+    var v = getComputedStyle(document.documentElement)
+      .getPropertyValue(name).trim();
+    return v || fb;
+  }
+  var COLORS = {
+    1: cssVar('--accent', '#0f7a8a'),
+    2: cssVar('--fig-b', '#c2571a'),
+    3: 'hsl(215, 45%, 46%)',
+    4: cssVar('--fig-const', '#8fae2e'),
+    5: 'hsl(265, 35%, 50%)',
+    6: 'hsl(45, 65%, 38%)',
+    7: cssVar('--fig-unit', '#c95f6a'),
+    8: 'hsl(160, 45%, 34%)',
+    9: 'hsl(232, 40%, 52%)',
+    10: 'hsl(14, 55%, 42%)',
+    11: 'hsl(315, 35%, 45%)',
+    12: 'hsl(110, 40%, 38%)',
+    13: 'hsl(28, 40%, 42%)'
+  };
+  var INK = cssVar('--ink', '#20262b');
+  var MUTED = cssVar('--muted', '#5e6a72');
+
+  /* ── данные: узлы и уникальные неориентированные рёбра ─────────── */
+
+  var nodes = window.GRAPH.nodes.map(function (n, i) {
+    return {
+      i: i, id: n.id, title: n.title, type: n.type,
+      slug: n.slug, week: n.week, page: n.page,
+      x: 0, y: 0, vx: 0, vy: 0, r: 3, deg: 0
+    };
+  });
+  var byId = {};
+  nodes.forEach(function (n) { byId[n.id] = n; });
+
+  var edges = [];
+  var pairSeen = {};
+  window.GRAPH.edges.forEach(function (e) {
+    var a = byId[e.from], b = byId[e.to];
+    if (!a || !b) return;
+    var key = a.i < b.i ? a.i + '_' + b.i : b.i + '_' + a.i;
+    var got = pairSeen[key];
+    if (got) { got.cross = got.cross || e.cross; return; }
+    var ed = { a: a, b: b, cross: e.cross };
+    pairSeen[key] = ed;
+    edges.push(ed);
+  });
+  edges.forEach(function (e) { e.a.deg++; e.b.deg++; });
+  nodes.forEach(function (n) {
+    n.r = Math.min(9, 2.6 + Math.sqrt(n.deg) * 1.15);
+  });
+
+  var adj = nodes.map(function () { return []; });
+  edges.forEach(function (e) {
+    adj[e.a.i].push(e); adj[e.b.i].push(e);
+  });
+
+  /* ── стартовая раскладка: темы по кругу, узлы вокруг центра темы ── */
+
+  var RING = 500;
+  var centers = {};
+  WEEKS.forEach(function (w, k) {
+    var ang = -Math.PI / 2 + 2 * Math.PI * k / WEEKS.length;
+    centers[w] = { x: RING * Math.cos(ang), y: RING * Math.sin(ang) };
+  });
+  var rnd = (function () {   /* детерминированный генератор: раскладка
+                                воспроизводится от загрузки к загрузке */
+    var s = 42;
+    return function () {
+      s = (s * 1103515245 + 12345) & 0x7fffffff;
+      return s / 0x7fffffff;
+    };
+  })();
+  nodes.forEach(function (n) {
+    var c = centers[n.week];
+    var a = rnd() * 2 * Math.PI, d = 20 + rnd() * 70;
+    n.x = c.x + d * Math.cos(a);
+    n.y = c.y + d * Math.sin(a);
+  });
+
+  /* ── силы: отталкивание, пружины рёбер, притяжение к центру темы ── */
+
+  var REPULSE = 950;      /* сила расталкивания узлов */
+  var CUTOFF2 = 150 * 150;/* дальше друг друга не видят */
+  var PULL = 0.016;       /* притяжение к центру своей темы */
+  var alpha = 1;          /* температура: затухает, раскладка замирает */
+
+  /* пружины: межнедельные длиннее и мягче, иначе они стягивают
+     кластеры тем в кашу посреди кольца */
+  edges.forEach(function (e) {
+    e.rest = e.cross ? 170 : 42;
+    e.k = e.cross ? 0.006 : 0.018;
+  });
+
+  function tick() {
+    var i, j, n, m, dx, dy, d2, d, f;
+    for (i = 0; i < nodes.length; i++) {
+      n = nodes[i];
+      var c = centers[n.week];
+      n.fx = (c.x - n.x) * PULL;
+      n.fy = (c.y - n.y) * PULL;
+    }
+    for (i = 0; i < nodes.length; i++) {
+      n = nodes[i];
+      for (j = i + 1; j < nodes.length; j++) {
+        m = nodes[j];
+        dx = m.x - n.x; dy = m.y - n.y;
+        d2 = dx * dx + dy * dy;
+        if (d2 > CUTOFF2) continue;
+        if (d2 < 1) { dx = rnd() - 0.5; dy = rnd() - 0.5; d2 = 1; }
+        f = REPULSE / d2;
+        d = Math.sqrt(d2);
+        dx /= d; dy /= d;
+        n.fx -= dx * f; n.fy -= dy * f;
+        m.fx += dx * f; m.fy += dy * f;
+      }
+    }
+    for (i = 0; i < edges.length; i++) {
+      var e = edges[i];
+      dx = e.b.x - e.a.x; dy = e.b.y - e.a.y;
+      d = Math.sqrt(dx * dx + dy * dy) || 1;
+      f = (d - e.rest) * e.k;
+      dx /= d; dy /= d;
+      e.a.fx += dx * f; e.a.fy += dy * f;
+      e.b.fx -= dx * f; e.b.fy -= dy * f;
+    }
+    for (i = 0; i < nodes.length; i++) {
+      n = nodes[i];
+      if (n === dragNode) { n.vx = 0; n.vy = 0; continue; }
+      n.vx = (n.vx + n.fx * alpha) * 0.72;
+      n.vy = (n.vy + n.fy * alpha) * 0.72;
+      if (n.vx > 12) n.vx = 12; else if (n.vx < -12) n.vx = -12;
+      if (n.vy > 12) n.vy = 12; else if (n.vy < -12) n.vy = -12;
+      n.x += n.vx; n.y += n.vy;
+    }
+    alpha *= 0.993;
+  }
+
+  /* прогрев до первого кадра: пусть узлы разойдутся из случайных куч */
+  for (var w0 = 0; w0 < 120; w0++) tick();
+
+  /* ── холст и вид ────────────────────────────────────────────────── */
+
+  var wrap = document.getElementById('wrap');
+  var canvas = document.getElementById('map');
+  var ctx = canvas.getContext('2d');
+  var dpr = window.devicePixelRatio || 1;
+  var view = { s: 1, tx: 0, ty: 0 };
+  var needsDraw = true;
+
+  function resize() {
+    var r = wrap.getBoundingClientRect();
+    var wasZero = !canvas.width || !canvas.height;
+    canvas.width = Math.round(r.width * dpr);
+    canvas.height = Math.round(r.height * dpr);
+    /* страница могла открыться в скрытой вкладке нулевого размера:
+       при первом настоящем размере вписать граф заново */
+    if (wasZero && canvas.width && canvas.height) fitView();
+    needsDraw = true;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function fitView() {
+    var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+    nodes.forEach(function (n) {
+      if (n.x < minX) minX = n.x;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.y > maxY) maxY = n.y;
+    });
+    var w = canvas.width / dpr, h = canvas.height / dpr;
+    var s = Math.min(w / (maxX - minX + 160), h / (maxY - minY + 160));
+    view.s = Math.min(1.6, s);
+    view.tx = w / 2 - view.s * (minX + maxX) / 2;
+    view.ty = h / 2 - view.s * (minY + maxY) / 2;
+    needsDraw = true;
+  }
+  fitView();
+
+  function toWorld(px, py) {
+    return { x: (px - view.tx) / view.s, y: (py - view.ty) / view.s };
+  }
+
+  /* ── состояние интерфейса ───────────────────────────────────────── */
+
+  var crossOnly = false;
+  var themePick = 0;        /* 0 — все темы, иначе номер недели */
+  var hover = null;
+  var hoverSet = null;      /* соседи подсвеченного узла */
+  var dragNode = null;
+
+  function nodeActive(n) { return !themePick || n.week === themePick; }
+
+  function edgeShown(e) { return !crossOnly || e.cross; }
+
+  function edgeActive(e) {
+    return !themePick || e.a.week === themePick || e.b.week === themePick;
+  }
+
+  /* ── отрисовка ──────────────────────────────────────────────────── */
+
+  function strokeBatch(list, style, width) {
+    if (!list.length) return;
+    ctx.strokeStyle = style;
+    ctx.lineWidth = width / view.s;
+    ctx.beginPath();
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      ctx.moveTo(e.a.x, e.a.y);
+      ctx.lineTo(e.b.x, e.b.y);
+    }
+    ctx.stroke();
+  }
+
+  function draw() {
+    var w = canvas.width, h = canvas.height;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s,
+                     dpr * view.tx, dpr * view.ty);
+
+    /* рёбра одним проходом на партию: тусклые, обычные, межнедельные,
+       подсвеченные — четыре beginPath на кадр, не по ребру */
+    var dim = [], plain = [], cross = [], hot = [];
+    for (var i = 0; i < edges.length; i++) {
+      var e = edges[i];
+      if (!edgeShown(e)) continue;
+      if (hoverSet && (e.a === hover || e.b === hover)) { hot.push(e); continue; }
+      if (!edgeActive(e)) { dim.push(e); continue; }
+      (e.cross ? cross : plain).push(e);
+    }
+    strokeBatch(dim, 'rgba(94, 106, 114, .07)', 1);
+    strokeBatch(plain, 'rgba(94, 106, 114, .22)', 1);
+    strokeBatch(cross, 'rgba(94, 106, 114, .5)', 1.2);
+    strokeBatch(hot, INK, 1.6);
+
+    /* узлы: сперва пригашенные, затем активные, поверх — соседи hover */
+    var k, n;
+    ctx.globalAlpha = 0.22;
+    for (k = 0; k < nodes.length; k++) {
+      n = nodes[k];
+      if (nodeActive(n) && !(hoverSet && !hoverSet.has(n))) continue;
+      ctx.fillStyle = COLORS[n.week];
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r, 0, 6.2832);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    for (k = 0; k < nodes.length; k++) {
+      n = nodes[k];
+      if (!nodeActive(n) || (hoverSet && !hoverSet.has(n))) continue;
+      ctx.fillStyle = COLORS[n.week];
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r, 0, 6.2832);
+      ctx.fill();
+    }
+    if (hoverSet) {
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1.4 / view.s;
+      hoverSet.forEach(function (n2) {
+        ctx.beginPath();
+        ctx.arc(n2.x, n2.y, n2.r + 1.5 / view.s, 0, 6.2832);
+        ctx.stroke();
+      });
+    }
+
+    /* номера недель у центров масс тем — ориентир при отдалении */
+    ctx.font = (13 / view.s) + 'px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    var sums = {};
+    for (k = 0; k < nodes.length; k++) {
+      n = nodes[k];
+      var s2 = sums[n.week] || (sums[n.week] = { x: 0, y: 0, c: 0 });
+      s2.x += n.x; s2.y += n.y; s2.c++;
+    }
+    WEEKS.forEach(function (w2) {
+      var s3 = sums[w2];
+      if (!s3) return;
+      ctx.fillStyle = (!themePick || themePick === w2) ? MUTED
+        : 'rgba(94, 106, 114, .25)';
+      ctx.fillText(pad2(w2),
+                   s3.x / s3.c, s3.y / s3.c - 96 / view.s);
+    });
+  }
+
+  /* ── цикл: физика до замирания, потом перерисовка по запросу ────── */
+
+  function frame() {
+    if (alpha > 0.012) {
+      tick(); tick();
+      needsDraw = true;
+    }
+    if (needsDraw) { draw(); needsDraw = false; }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  /* ── наведение, перетаскивание, клик, зум ───────────────────────── */
+
+  var tip = document.getElementById('tip');
+  var pointer = { down: false, moved: false, px: 0, py: 0, panning: false };
+
+  function pick(px, py) {
+    var p = toWorld(px, py);
+    var best = null, bestD = 1e9;
+    var slack = 4 / view.s;
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      var dx = n.x - p.x, dy = n.y - p.y;
+      var d = Math.sqrt(dx * dx + dy * dy) - n.r;
+      if (d < slack && d < bestD) { best = n; bestD = d; }
+    }
+    return best;
+  }
+
+  function setHover(n, px, py) {
+    if (n === hover && !n) return;
+    hover = n;
+    if (n) {
+      hoverSet = new Set([n]);
+      adj[n.i].forEach(function (e) {
+        hoverSet.add(e.a === n ? e.b : e.a);
+      });
+      tip.innerHTML = '<div class="tip-title"></div><div class="tip-meta"></div>';
+      tip.querySelector('.tip-title').textContent = n.title;
+      tip.querySelector('.tip-meta').textContent = n.type +
+        ' · неделя ' + pad2(n.week) +
+        ' · ' + WEEK_TITLES[n.week] +
+        (n.deg ? ' · связей: ' + n.deg : '');
+      tip.hidden = false;
+      var wr = wrap.getBoundingClientRect();
+      var tx = Math.min(px + 14, wr.width - tip.offsetWidth - 8);
+      var ty = Math.min(py + 14, wr.height - tip.offsetHeight - 8);
+      tip.style.left = Math.max(4, tx) + 'px';
+      tip.style.top = Math.max(4, ty) + 'px';
+      canvas.style.cursor = 'pointer';
+    } else {
+      hoverSet = null;
+      tip.hidden = true;
+      canvas.style.cursor = '';
+    }
+    needsDraw = true;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    /* указатель мог исчезнуть между down и capture — не падать */
+    try { canvas.setPointerCapture(ev.pointerId); } catch (e) {}
+    pointer.down = true;
+    pointer.moved = false;
+    pointer.px = ev.offsetX; pointer.py = ev.offsetY;
+    dragNode = pick(ev.offsetX, ev.offsetY);
+    pointer.panning = !dragNode;
+  });
+
+  canvas.addEventListener('pointermove', function (ev) {
+    var px = ev.offsetX, py = ev.offsetY;
+    if (pointer.down) {
+      if (Math.abs(px - pointer.px) + Math.abs(py - pointer.py) > 4) {
+        pointer.moved = true;
+      }
+      if (dragNode) {
+        var p = toWorld(px, py);
+        dragNode.x = p.x; dragNode.y = p.y;
+        if (alpha < 0.06) alpha = 0.06;  /* мягко подогреть соседей */
+        needsDraw = true;
+      } else if (pointer.panning) {
+        view.tx += px - pointer.px;
+        view.ty += py - pointer.py;
+        pointer.px = px; pointer.py = py;
+        needsDraw = true;
+      }
+      return;
+    }
+    setHover(pick(px, py), px, py);
+  });
+
+  canvas.addEventListener('pointerup', function (ev) {
+    if (dragNode && !pointer.moved) {
+      var n = dragNode;
+      window.track('map_node_open', { id: n.id });
+      var wdir = '../week' + pad2(n.week) + '/';
+      location.href = n.page === 'week'
+        ? wdir + 'index.html'
+        : wdir + 'chapter.html#blk-' + n.id;
+    }
+    pointer.down = false;
+    dragNode = null;
+    pointer.panning = false;
+  });
+
+  canvas.addEventListener('pointerleave', function () { setHover(null); });
+
+  canvas.addEventListener('wheel', function (ev) {
+    ev.preventDefault();
+    var factor = Math.exp(-ev.deltaY * 0.0012);
+    var s2 = Math.min(5, Math.max(0.15, view.s * factor));
+    factor = s2 / view.s;
+    view.tx = ev.offsetX - (ev.offsetX - view.tx) * factor;
+    view.ty = ev.offsetY - (ev.offsetY - view.ty) * factor;
+    view.s = s2;
+    needsDraw = true;
+  }, { passive: false });
+
+  /* ── панель: фильтр темы, межнедельные связи, легенда ───────────── */
+
+  var select = document.getElementById('theme-filter');
+  WEEKS.forEach(function (w2) {
+    var o = document.createElement('option');
+    o.value = w2;
+    o.textContent = pad2(w2) + ' · ' + WEEK_TITLES[w2];
+    select.appendChild(o);
+  });
+
+  var legend = document.getElementById('legend');
+  var rows = {};
+  WEEKS.forEach(function (w2) {
+    var row = document.createElement('div');
+    row.className = 'legend-row';
+    var dot = document.createElement('span');
+    dot.className = 'legend-dot';
+    dot.style.background = COLORS[w2];
+    row.appendChild(dot);
+    row.appendChild(document.createTextNode(
+      pad2(w2) + ' · ' + WEEK_TITLES[w2]));
+    row.addEventListener('click', function () {
+      setTheme(themePick === w2 ? 0 : w2);
+    });
+    legend.appendChild(row);
+    rows[w2] = row;
+  });
+
+  function setTheme(w2) {
+    themePick = w2;
+    select.value = w2 || '';
+    WEEKS.forEach(function (k) {
+      rows[k].classList.toggle('is-on', k === w2);
+    });
+    needsDraw = true;
+  }
+  select.addEventListener('change', function () {
+    setTheme(Number(select.value) || 0);
+  });
+
+  document.getElementById('cross-only').addEventListener('change', function (ev) {
+    crossOnly = ev.target.checked;
+    needsDraw = true;
+  });
+
+  document.getElementById('reset-view').addEventListener('click', function () {
+    setTheme(0);
+    document.getElementById('cross-only').checked = false;
+    crossOnly = false;
+    fitView();
+  });
+
+  document.getElementById('legend-toggle').addEventListener('click', function () {
+    legend.classList.toggle('is-open');
+  });
+
+  /* отладочная ручка: покрутить раскладку из консоли на дизайн-сессии.
+     step(n) гонит физику вручную (rAF в фоновой вкладке молчит),
+     render() перерисовывает кадр немедленно */
+  window.CORE_MAP = {
+    nodes: nodes, edges: edges, view: view, centers: centers,
+    alpha: function () { return alpha; },
+    step: function (k) {
+      for (var i = 0; i < (k || 1) && alpha > 0.012; i++) tick();
+      needsDraw = true;
+    },
+    render: function () { draw(); needsDraw = false; }
+  };
+
+  window.track('page_view', { page: 'core-map' });
+})();
+</script>
+</body>
+</html>

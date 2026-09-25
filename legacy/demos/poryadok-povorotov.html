@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Порядок поворотов</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-02/">&larr; Неделя 02</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=poryadok-povorotov"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `uglovaya-skorost`, четвёртый возврат вечера. Он единственный,
+   где язык возвращает отрицательный ответ: поворот выглядит вектором и
+   вектором не является. До сих пор это держалось словом лектора и одной
+   формулой про слагаемое второго порядка малости.
+
+   ЧТО СЧИТАЕТСЯ. Два поворота на один и тот же угол t вокруг двух
+   перпендикулярных осей — вертикальной (повернуть) и поперечной, вдоль
+   экрана (перевернуть), — в двух порядках. Это ровно то, что зал может
+   повторить телефоном в руке, не вставая:
+
+       A = R_поп(t) · R_верт(t),      сперва повернуть, потом перевернуть
+       B = R_верт(t) · R_поп(t),      сперва перевернуть, потом повернуть
+
+   Расхождение укладок — это поворот, переводящий одну в другую:
+
+       D = A · Bᵀ,     угол(D) = arccos( (след D − 1) / 2 ).
+
+   Матрицы перемножаются честно, угол снимается со следа, ось — с
+   антисимметричной части. Ничего не подгоняется под ответ: при t = 90°
+   угол(D) выходит равным 120°, а ось — диагональю, и это опорная точка из
+   текста главы, а не совпадение. Оси взяты вертикальная и поперечная,
+   а не продольная и поперечная, как у кирпича в главе: для двух любых
+   перпендикулярных осей ответ один и тот же, а телефоном зал повторяет
+   именно эту пару.
+
+   ПОЧЕМУ КВАДРАТ. Для малых t произведения A и B различаются коммутатором,
+   а он второго порядка: угол(D) ≈ t². Отсюда и число, которое демка
+   печатает третьим, — отношение угла расхождения к квадрату угла поворота,
+   оба в радианах. Оно выходит на единицу:
+
+       t = 90°   →   120,0°  и  0,849
+       t = 60°   →    57,9°  и  0,922
+       t = 30°   →    15,4°  и  0,978
+       t =  5°   →     0,44° и  0,999
+
+   Отсюда же и то, что видно глазом: вдвое меньший поворот даёт вчетверо
+   меньшее расхождение. Ползунок ведёт t от 90° до 5°, и разница между
+   укладками тает на глазах, не исчезая ни при каком угле.
+
+   ПРОВЕРКА. Угол расхождения считается ещё и вторым путём, через кватернионы
+   (__demoCheck): состав поворотов там перемножается иначе, и совпадение двух
+   путей до 1e−11 означает, что дело не в удачной матрице. Разложение по
+   малому углу проверяется отдельно — отношение обязано монотонно идти к
+   единице.
+
+   ЧЕГО ЗДЕСЬ НЕТ. Кватернионов и матриц на экране, слова «группа». Демка
+   показывает факт, объяснение живёт в главе. Осей нарисовано две: третья
+   никакой работы не делает и только загромождает кадр. */
+
+/* ── повороты ─────────────────────────────────────────────
+   Матрицы плоскими девятками: [m00 m01 m02 m10 … m22]. */
+
+function umn(A, B) {
+  var M = new Array(9);
+  for (var i = 0; i < 3; i++)
+    for (var j = 0; j < 3; j++) {
+      var s = 0;
+      for (var k = 0; k < 3; k++) s += A[i * 3 + k] * B[k * 3 + j];
+      M[i * 3 + j] = s;
+    }
+  return M;
+}
+
+function trans(A) {
+  return [A[0], A[3], A[6], A[1], A[4], A[7], A[2], A[5], A[8]];
+}
+
+function prim(M, p) {
+  return [
+    M[0] * p[0] + M[1] * p[1] + M[2] * p[2],
+    M[3] * p[0] + M[4] * p[1] + M[5] * p[2],
+    M[6] * p[0] + M[7] * p[1] + M[8] * p[2]
+  ];
+}
+
+/* Фигурка смотрит вдоль +x, стоит вдоль +z. Вертикальная ось — z
+   (обернуться вокруг себя), поперечная — y, через плечи (наклон вперёд). */
+function Rvert(t) {
+  var c = Math.cos(t), s = Math.sin(t);
+  return [c, -s, 0, s, c, 0, 0, 0, 1];
+}
+function Rpoper(t) {
+  var c = Math.cos(t), s = Math.sin(t);
+  return [c, 0, s, 0, 1, 0, -s, 0, c];
+}
+
+/* Угол поворота матрицы: след равен 1 + 2·cos(угол). Зажим нужен не для
+   красоты — при t близких к нулю след уходит за единицу на 1e−16, и
+   arccos возвращает NaN. */
+function ugolMatricy(M) {
+  var sled = M[0] + M[4] + M[8];
+  return Math.acos(Math.max(-1, Math.min(1, (sled - 1) / 2)));
+}
+
+/* Ось поворота — из антисимметричной части. При угле около нуля длина
+   вектора уходит в ноль вместе с ним, и оси просто нет: возвращаем null,
+   а не мусор от деления на малое. */
+function osMatricy(M) {
+  var a = [M[7] - M[5], M[2] - M[6], M[3] - M[1]];
+  var n = Math.hypot(a[0], a[1], a[2]);
+  if (n < 1e-9) return null;
+  return [a[0] / n, a[1] / n, a[2] / n];
+}
+
+/* ── второй путь: кватернионы ──
+   Нужны только проверке. Поворот на угол g вокруг единичной оси o —
+   это (cos g/2, o·sin g/2), состав поворотов — произведение. */
+function kvat(o, g) {
+  var s = Math.sin(g / 2);
+  return [Math.cos(g / 2), o[0] * s, o[1] * s, o[2] * s];
+}
+function kvatUmn(p, q) {
+  return [
+    p[0] * q[0] - p[1] * q[1] - p[2] * q[2] - p[3] * q[3],
+    p[0] * q[1] + p[1] * q[0] + p[2] * q[3] - p[3] * q[2],
+    p[0] * q[2] - p[1] * q[3] + p[2] * q[0] + p[3] * q[1],
+    p[0] * q[3] + p[1] * q[2] - p[2] * q[1] + p[3] * q[0]
+  ];
+}
+function kvatSopr(q) { return [q[0], -q[1], -q[2], -q[3]]; }
+function kvatUgol(q) {
+  return 2 * Math.acos(Math.min(1, Math.abs(q[0])));
+}
+
+/* ── карточка ─────────────────────────────────────────────
+   Поворачивается плоская карточка с картинкой на лицевой стороне: то же
+   самое, что зал держит в руках, когда крутит телефон. Толщина настоящая,
+   поэтому с ребра карточка не исчезает, а видна торцом.
+
+   КАКАЯ КАРТИНКА. Меняется одной строкой. Положите файл в
+   `platform/demos/img/` и впишите сюда `img/<имя>`; путь обязан быть
+   относительным, иначе демка перестанет открываться офлайн. По умолчанию
+   стоит наша же обложка лекции 02. Картинку демка не требует: если файла
+   нет или он не загрузился, лицевая сторона рисуется панелью, и всё
+   остальное работает как работало.
+
+   Пропорции карточки идут за картинкой: 16:9, как обложки лекций. Если
+   подставите вертикальную, поменяйте местами ширину и высоту в KARTA,
+   иначе изображение растянется. */
+var KARTINKA = '../assets/oblozhki/lekciya-02.png';
+var KARTA = { h: [0.035, 0.80, 0.45] };   /* полутолщина, полуширина, полувысота */
+var TOREC = [96, 104, 130], IZNANKA = [58, 66, 92];
+
+var kartinka = new Image();
+kartinka.src = KARTINKA;
+
+/* Углы и грани единичной коробки; для каждой части они масштабируются
+   полудлинами и сдвигаются центром. */
+var ZNAKI = [];
+for (var ix = -1; ix <= 1; ix += 2)
+  for (var iy = -1; iy <= 1; iy += 2)
+    for (var iz = -1; iz <= 1; iz += 2) ZNAKI.push([ix, iy, iz]);
+
+function nomerUgla(sx, sy, sz) {
+  return ((sx + 1) / 2) * 4 + ((sy + 1) / 2) * 2 + ((sz + 1) / 2);
+}
+
+/* Шесть граней: ось нормали, знак, и четыре угла по кругу. Обход по кругу
+   важен: полигон, обойдённый крест-накрест, заливается бабочкой. */
+var PARY = [[1, 2], [2, 0], [0, 1]];
+var KRUG = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+var GRANI = [];
+for (var k = 0; k < 3; k++)
+  for (var zn = -1; zn <= 1; zn += 2) {
+    var n = [0, 0, 0]; n[k] = zn;
+    var idx = KRUG.map(function (p) {
+      var s = [0, 0, 0];
+      s[k] = zn;
+      s[PARY[k][0]] = p[0];
+      s[PARY[k][1]] = p[1];
+      return nomerUgla(s[0], s[1], s[2]);
+    });
+    GRANI.push({ n: n, idx: idx });
+  }
+
+/* ── проекция ─────────────────────────────────────────────
+   Изометрия: взгляд вдоль (1,1,1). Тогда глубина точки — это x+y+z, а
+   грань видна ровно тогда, когда её нормаль смотрит в ту же сторону. */
+var COS30 = Math.sqrt(3) / 2;
+
+function proj(p, cx, cy, s) {
+  return [cx + s * (p[0] - p[1]) * COS30, cy + s * ((p[0] + p[1]) * 0.5 - p[2])];
+}
+
+/* ── постоянные сцены ─────────────────────────────────────── */
+var W = 1000, HGT = 440;
+var LEV = 235, PRAV = 620, CY = 190, MASSHTAB = 150;
+var PODPIS_Y = 348;
+var OS_VERT = '#7aa6ff', OS_POPER = '#4db6c6';
+var RX = 965, ROW = [78, 176, 274];
+
+var SVET = (function () {              /* направление света, нормированное */
+  var v = [0.35, 0.45, 1];
+  var n = Math.hypot(v[0], v[1], v[2]);
+  return [v[0] / n, v[1] / n, v[2] / n];
+})();
+
+var SKOROST = 0.85;                    /* доля поворота в секунду */
+
+function chislo(v, zn) {
+  return v.toFixed(zn).replace('.', ',');
+}
+
+/* ══════════════════ демка ══════════════════ */
+
+function PoryadokPovorotov() {
+  /* Модель живёт в ref и правится на месте: перерисовка кадра не должна
+     тянуть за собой перерисовку React-дерева. */
+  var mRef = useRef(null);
+  if (!mRef.current) {
+    mRef.current = {
+      ugol: 90,          /* градусы, ползунок */
+      t: 2,              /* 0…1 первый поворот, 1…2 второй */
+      run: false,
+      rashozhdenie: 0,   /* градусы, между укладками на экране */
+      itog: 0,           /* градусы, расхождение при обоих поворотах */
+      otnoshenie: 0,     /* итог/угол², оба в радианах */
+      os: null
+    };
+  }
+  var m = mRef.current;
+
+  var uiPara = useState({ ugol: 90, run: false });
+  var ui = uiPara[0], setUi = uiPara[1];
+
+  /* Матрицы обеих укладок на текущей фазе прогона. Первый поворот идёт от
+     нуля до полного угла, второй начинается, когда первый закончен. */
+  function ukladki(t, ugolRad) {
+    var f1 = Math.min(1, t) * ugolRad;
+    var f2 = Math.max(0, Math.min(1, t - 1)) * ugolRad;
+    return {
+      A: umn(Rpoper(f2), Rvert(f1)),   /* сперва повернуть, потом перевернуть */
+      B: umn(Rvert(f2), Rpoper(f1))    /* сперва перевернуть, потом повернуть */
+    };
+  }
+
+  /* Показания снимаются с тех же матриц, которые рисуются, а не считаются
+     отдельной формулой: иначе картинка и числа могли бы разойтись. */
+  function schitat() {
+    var g = m.ugol * Math.PI / 180;
+    var u = ukladki(m.t, g);
+    var D = umn(u.A, trans(u.B));
+    m.rashozhdenie = ugolMatricy(D) * 180 / Math.PI;
+
+    var it = ukladki(2, g);
+    var Dit = umn(it.A, trans(it.B));
+    var uit = ugolMatricy(Dit);
+    m.itog = uit * 180 / Math.PI;
+    m.otnoshenie = g > 1e-6 ? uit / (g * g) : 1;
+    m.os = osMatricy(Dit);
+    return u;
+  }
+
+  function step(dt) {
+    if (m.run) {
+      m.t = Math.min(2, m.t + dt * SKOROST);
+      if (m.t >= 2) { m.run = false; setUi({ ugol: m.ugol, run: false }); }
+    }
+    schitat();
+  }
+
+  /* ── рисование ─────────────────────────────────────────── */
+
+  function granCvet(rgb, nMir) {
+    var k = nMir[0] * SVET[0] + nMir[1] * SVET[1] + nMir[2] * SVET[2];
+    var yark = 0.46 + 0.54 * Math.max(0, k);
+    return 'rgb(' + rgb.map(function (c) {
+      return Math.round(Math.min(255, c * yark));
+    }).join(',') + ')';
+  }
+
+  /* Отрезок оси от параметра `ot` до `do_`, при надобности с наконечником.
+     Параметр меряется в тех же единицах, что и карточка. */
+  function osOtrezok(ctx, cx, cy, napr, ot, do_, cvet, yarko, nakonechnik) {
+    var a = proj([napr[0] * ot, napr[1] * ot, napr[2] * ot], cx, cy, MASSHTAB);
+    var b = proj([napr[0] * do_, napr[1] * do_, napr[2] * do_], cx, cy, MASSHTAB);
+    ctx.save();
+    ctx.globalAlpha = yarko ? 1 : 0.35;
+    ctx.strokeStyle = cvet;
+    ctx.lineWidth = yarko ? 3 : 2;
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+    ctx.stroke();
+
+    if (nakonechnik) {
+      var ug = Math.atan2(b[1] - a[1], b[0] - a[0]);
+      ctx.beginPath();
+      ctx.moveTo(b[0], b[1]);
+      ctx.lineTo(b[0] - 13 * Math.cos(ug - 0.32), b[1] - 13 * Math.sin(ug - 0.32));
+      ctx.lineTo(b[0] - 13 * Math.cos(ug + 0.32), b[1] - 13 * Math.sin(ug + 0.32));
+      ctx.closePath();
+      ctx.fillStyle = cvet;
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /* Ось протыкает карточку насквозь, и рисовать её целиком под карточкой
+     неправда: половина оси проходит перед ней.
+
+     Где проходит граница. Ось — прямая через центр карточки, а сама
+     карточка плоская, так что её плоскость делит ось ровно пополам в
+     нуле параметра. Ближняя половина та, у которой знак совпадает со
+     стороной, куда смотрит лицевая грань: `napr·n` того же знака, что и
+     `n·(1,1,1)`, где (1,1,1) — направление на наблюдателя.
+
+     Вырожденный случай: ось легла в плоскость карточки, `napr·n` около
+     нуля. Тогда «перед» и «за» неразличимы, и обе половины уходят под
+     карточку — иначе на переходе через ноль ось мигала бы. */
+  function osPolovina(ctx, M, cx, cy, napr, dlina, cvet, yarko, blizhnyaya) {
+    var n = prim(M, [1, 0, 0]);
+    var storona = (napr[0] * n[0] + napr[1] * n[1] + napr[2] * n[2]) *
+                  (n[0] + n[1] + n[2]);
+    var vplotnuyu = Math.abs(storona) < 0.09;
+    var plyusBlizhe = storona > 0;
+
+    var risovat = function (ot, do_, nak) {
+      osOtrezok(ctx, cx, cy, napr, ot, do_, cvet, yarko, nak);
+    };
+    /* хвост оси короче острия: ось нужна как ориентир, а не как крест */
+    var hvost = -0.55 * dlina;
+
+    if (blizhnyaya) {
+      if (vplotnuyu) return;
+      if (plyusBlizhe) risovat(0, dlina, true);
+      else risovat(0, hvost, false);
+    } else {
+      if (vplotnuyu) { risovat(hvost, dlina, true); return; }
+      if (plyusBlizhe) risovat(0, hvost, false);
+      else risovat(0, dlina, true);
+    }
+  }
+
+  /* Карточка. Грани отсекаются нормалью, лицевая заливается картинкой.
+
+     Почему картинку можно класть точным аффинным преобразованием, а не
+     подгонять на глаз: проекция здесь ортографическая, а она переводит
+     прямоугольник в параллелограмм, сохраняя параллельность сторон. Значит
+     достаточно трёх углов лицевой грани — из них собирается матрица, и
+     изображение садится на грань без искажений и без швов. */
+  function karta(ctx, M, cx, cy) {
+    var ekr = ZNAKI.map(function (z) {
+      return proj(prim(M, [z[0] * KARTA.h[0], z[1] * KARTA.h[1], z[2] * KARTA.h[2]]),
+                  cx, cy, MASSHTAB);
+    });
+
+    GRANI.forEach(function (g) {
+      var nMir = prim(M, g.n);
+      if (nMir[0] + nMir[1] + nMir[2] <= 1e-9) return;
+
+      var put = function () {
+        ctx.beginPath();
+        g.idx.forEach(function (i, j) {
+          if (j === 0) ctx.moveTo(ekr[i][0], ekr[i][1]);
+          else ctx.lineTo(ekr[i][0], ekr[i][1]);
+        });
+        ctx.closePath();
+      };
+
+      var lico = g.n[0] === 1;
+      var gotova = kartinka.complete && kartinka.naturalWidth > 0;
+
+      if (lico && gotova) {
+        /* Углы лицевой грани идут по кругу от (y−,z−); картинке нужны
+           левый верхний, правый верхний и левый нижний, то есть (y+,z+),
+           (y−,z+) и (y+,z−). Смотрящему на лицо ось y уходит влево. */
+        var A = ekr[g.idx[2]], B = ekr[g.idx[3]], D = ekr[g.idx[1]];
+        var w = kartinka.naturalWidth, h = kartinka.naturalHeight;
+        ctx.save();
+        put(); ctx.clip();               /* страховка от растекания на полпикселя */
+        ctx.transform((B[0] - A[0]) / w, (B[1] - A[1]) / w,
+                      (D[0] - A[0]) / h, (D[1] - A[1]) / h, A[0], A[1]);
+        ctx.drawImage(kartinka, 0, 0, w, h);
+        ctx.restore();
+      } else {
+        put();
+        ctx.fillStyle = granCvet(lico ? IZNANKA : (g.n[0] === -1 ? IZNANKA : TOREC),
+                                 nMir);
+        ctx.fill();
+      }
+
+      put();
+      ctx.strokeStyle = 'rgba(18,20,28,.5)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    });
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    var mut = 'rgba(' + tone.muted + ',.95)';
+    var ink = 'rgb(' + tone.ink + ')';
+    var u = schitat();
+
+    /* Какой поворот идёт прямо сейчас: подсвечиваем ту ось, вокруг которой
+       карточка поворачивается, и гасим вторую. */
+    var faza = m.t < 1 ? 1 : 2;
+
+    [[LEV, u.A, faza === 1, faza === 2, 'сперва поворот, потом переворот'],
+     [PRAV, u.B, faza === 2, faza === 1, 'сперва переворот, потом поворот']
+    ].forEach(function (s) {
+      var cx = s[0], M = s[1];
+      /* три захода: дальние половины осей, карточка, ближние половины */
+      osPolovina(ctx, M, cx, CY, [0, 0, 1], 1.30, OS_VERT, s[2], false);
+      osPolovina(ctx, M, cx, CY, [0, 1, 0], 1.55, OS_POPER, s[3], false);
+      karta(ctx, M, cx, CY);
+      osPolovina(ctx, M, cx, CY, [0, 0, 1], 1.30, OS_VERT, s[2], true);
+      osPolovina(ctx, M, cx, CY, [0, 1, 0], 1.55, OS_POPER, s[3], true);
+      C.label(ctx, cx, PODPIS_Y, s[4], 19, ink, 'center');
+    });
+
+    /* Подписи осей ставятся один раз: они общие для обеих укладок. */
+    C.label(ctx, LEV - 150, PODPIS_Y + 34, 'вертикальная ось', 17, OS_VERT, 'left');
+    C.label(ctx, LEV + 64, PODPIS_Y + 34, 'поперечная, вдоль экрана', 17, OS_POPER, 'left');
+
+    /* ── показания ──
+       Акцент отдан расхождению: оно здесь ответ, а угол поворота — то, что
+       задали ползунком. Цвет берётся из чернил темы, а не назначается: на
+       светлом полотне главы яркая заливка садится по контрасту. */
+    C.readout(ctx, RX, ROW[0], 'УГОЛ ПОВОРОТА', chislo(m.ugol, 0) + '°', ink);
+    C.readout(ctx, RX, ROW[1], 'РАСХОЖДЕНИЕ', chislo(m.rashozhdenie, 1) + '°',
+              'rgb(' + tone.accent + ')');
+    C.readout(ctx, RX, ROW[2], 'РАСХОЖДЕНИЕ / УГОЛ²', chislo(m.otnoshenie, 3), ink);
+
+    if (m.os) {
+      var d = m.os.map(function (v) { return Math.abs(v); });
+      var diag = Math.abs(d[0] - d[1]) < 0.02 && Math.abs(d[1] - d[2]) < 0.02;
+      C.label(ctx, RX, PODPIS_Y + 34,
+              diag ? 'ось расхождения — диагональ' : 'ось расхождения наклонена',
+              17, mut, 'right');
+    }
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Объект показаний живёт весь сеанс и правится на месте: автопроверка
+     читает его после __demoTick, когда рендера компонента не было. */
+  window.__demoState = m;
+
+  /* Проверка на месте. Первое: тот же угол расхождения считается через
+     кватернионы, то есть другим составом действий, и обязан совпасть.
+     Второе: разложение по малому углу — отношение расхождения к квадрату
+     угла обязано идти к единице, а не просто «быть похожим». */
+  window.__demoCheck = function (grad) {
+    var g = (grad == null ? m.ugol : grad) * Math.PI / 180;
+    var it = ukladki(2, g);
+    var poMatrice = ugolMatricy(umn(it.A, trans(it.B)));
+
+    var qz = kvat([0, 0, 1], g), qy = kvat([0, 1, 0], g);
+    var qA = kvatUmn(qy, qz), qB = kvatUmn(qz, qy);
+    var poKvaternionu = kvatUgol(kvatUmn(qA, kvatSopr(qB)));
+
+    return {
+      ugol: grad == null ? m.ugol : grad,
+      po_matrice: poMatrice * 180 / Math.PI,
+      po_kvaternionu: poKvaternionu * 180 / Math.PI,
+      rashozhdenie: Math.abs(poMatrice - poKvaternionu) * 180 / Math.PI,
+      otnoshenie: poMatrice / (g * g)
+    };
+  };
+
+  function pusk() {
+    if (m.run) { m.run = false; }
+    else { m.t = 0; m.run = true; }
+    setUi({ ugol: m.ugol, run: m.run });
+  }
+
+  /* Ползунок ведёт угол, не трогая прогон: если оба поворота уже сделаны,
+     укладки перестраиваются сразу и разница тает на глазах. */
+  function vzyatUgol(v) {
+    m.ugol = Math.round(v);
+    schitat();
+    setUi({ ugol: m.ugol, run: m.run });
+  }
+
+  function slova() {
+    var d = chislo(m.itog, 1);
+    if (m.ugol === 90) {
+      return 'Оба поворота на прямой угол. Укладки разошлись на <b>' + d +
+        '°</b>, и это поворот вокруг диагонали: порядок изменил результат ' +
+        'дальше некуда. Поворот на конечный угол выглядит вектором, ' +
+        'а складывается не как вектор.';
+    }
+    return 'Угол ' + m.ugol + '°: расхождение <b>' + d + '°</b>. Оно убывает ' +
+      'как квадрат угла, поэтому вдвое меньший поворот даёт вчетверо меньшее ' +
+      'расхождение. Отношение расхождения к квадрату угла, оба в радианах, ' +
+      'выходит на единицу — это и есть слагаемое второго порядка малости.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Slider} label="Угол поворота:" min=${5} max=${90} step=${5}
+                     value=${ui.ugol} display=${ui.ugol + '°'}
+                     onChange=${vzyatUgol} />
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Прокрутить'}<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(PoryadokPovorotov);
+</script>
+</body>
+</html>

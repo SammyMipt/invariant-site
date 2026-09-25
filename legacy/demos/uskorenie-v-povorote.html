@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Разложение ускорения в повороте</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+<style>
+/* Подписи векторов красятся в цвет своей стрелки: буква и стрелка обязаны
+   читаться как одна вещь, а demo.css красит весь слой подписей одним
+   muted. Цвета те же, что у стрелок на канве, и от темы не зависят —
+   это данные, а не чернила (см. tones в demo-core). Классы живут здесь,
+   а не в demo.css: там сейчас работают другие сборки. */
+/* Подписи красятся под свои стрелки. Значения обязаны совпадать с COL
+   в теле демки: цвета там по словарю рисунков главы, охряное семейство. */
+.stage-wrap .ax > span.lab-at { color: #e0a878; }
+.stage-wrap .ax > span.lab-an { color: #e08a52; }
+.stage-wrap .ax > span.lab-a  { color: #c96a2e; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-02/">&larr; Неделя 02</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=uskorenie-v-povorote"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Автомобиль на кривой дороге — мысленная демонстрация из всех трёх
+   прочтений лекции. Здесь она посчитана, а не нарисована.
+
+   ДОРОГА. Синусоида y = A sin(2πx/L), A = 30 м, L = 200 м. Радиус
+   кривизны плоской кривой берётся по формуле из radius-krivizny:
+
+       k = |y''| / (1 + y'^2)^{3/2},   R = 1/k
+
+   где y' = A(2π/L) cos(2πx/L), y'' = −A(2π/L)^2 sin(2πx/L). В вершине
+   (x = L/4) косинус ноль, синус единица, и радиус вырождается в
+   L^2/(4π^2 A) = 33,774 м — это минимум по всей дороге. В точке перегиба
+   (x = 0, L/2, L) синус ноль, кривизна ровно ноль, радиуса нет вовсе.
+   Поэтому счёт идёт через кривизну, а не через радиус: делить на ноль
+   негде, а R = 1/k на перегибе честно уходит в бесконечность и так и
+   печатается.
+
+   ДВИЖЕНИЕ. Педаль задаёт тангенциальное ускорение a_t = dv/dt, и
+   скорость интегрируется по нему шагами dt/8. Точка едет вдоль дороги,
+   то есть ds/dt = v, а по горизонтали это dx/dt = v/sqrt(1 + y'^2):
+   длина дуги ds = sqrt(1 + y'^2) dx. На краях диапазона скорости
+   (5…40 м/с) машина упирается, и тогда a_t честно равен нулю: dv/dt
+   и правда ноль, что бы ни показывал ползунок педали.
+
+   УСКОРЕНИЕ. Разложение из блока normalnoe-i-tangencialnoe:
+
+       a = a_t τ + a_n n,   a_t = dv/dt,   a_n = v^2/R = v^2 k
+
+   Нормаль n смотрит к центру кривизны, то есть в сторону знака y'':
+   n = sign(y'')·(−y', 1)/sqrt(1 + y'^2), а τ = (1, y')/sqrt(1 + y'^2).
+   На перегибе y'' = 0, направления у n нет (в блоке это оговорено
+   отдельно), и демка его не рисует. Полное |a| = sqrt(a_t^2 + a_n^2).
+
+   ЧТО ДОЛЖНО БЫТЬ ВИДНО. Отпущенная педаль даёт a_t = 0, а ускорение
+   остаётся — его держит руль. На перегибе a_n = 0 при любой скорости,
+   потому что дорога там не поворачивает. */
+
+var A = 30, ROAD_L = 200;              /* амплитуда и период дороги, м */
+var KW = 2 * Math.PI / ROAD_L;         /* волновое число синусоиды, 1/м */
+var K_MAX = A * KW * KW;               /* кривизна в вершине, 1/м */
+var V_MIN = 5, V_MAX = 40;             /* диапазон скорости, м/с */
+var PED = 3;                           /* предел педали, м/с² */
+var SUB = 8;                           /* подшагов интегрирования на кадр */
+
+function yOf(x)   { return A * Math.sin(KW * x); }
+function ypOf(x)  { return A * KW * Math.cos(KW * x); }
+function yppOf(x) { return -A * KW * KW * Math.sin(KW * x); }
+
+/* ══════════════════ сцена ══════════════════
+   Масштаб по x и по y один и тот же: иначе синусоида врала бы формой,
+   нормаль перестала бы выглядеть перпендикулярной, а окружность
+   кривизны — прилегать к дороге. 800 px на 200 м дают 4 px/м; при более
+   крупном масштабе дорога поднималась под самые показания, и подписи
+   векторов у вершины садились на подпись самой вершины. */
+
+var W = 1000, HGT = 460;
+var X0 = 100, SC = 4, YC = 268;        /* левый край дороги, px/м, экранный ноль по y */
+var CAR_L = 26, CAR_W = 11;            /* машина, px (примерно 6,5 × 2,7 м) */
+var UNIT = 76;                         /* длина ортов τ и n на экране, px */
+var RMAX_DRAW = 130;                   /* больший радиус кривизны не рисуем: не влезает */
+
+function sx(x) { return X0 + x * SC; }
+function sy(y) { return YC - y * SC; }
+
+/* Цвета данных: от темы не зависят, как и у остальных демок курса. */
+/* Цвета по словарю рисунков главы: ускорение и его составляющие охряные
+   (figb), как в parabola_krivizna и treugolnik_tau. Фиолетового в палитре
+   курса нет вовсе. Составляющие различает направление, а не цвет: вдоль
+   скорости и поперёк неё, — и подписи у каждой своя. */
+var COL = { at: '#e0a878', an: '#e08a52', a: '#c96a2e' };
+
+/* Шкала стрелок ускорения. Метром ускорение не измеришь, поэтому масштаб
+   объявляется отдельной риской в углу сцены. Ступени круглые, чтобы риска
+   подписывалась целым числом; выбираются по скорости и полному ходу
+   педали, а не по текущему месту машины — иначе стрелки дышали бы на
+   ходу и сравнивать их длины было бы нечем. */
+var UNITS = [1, 2, 5, 10, 20, 50];
+var REF_PX = 60, MAX_PX = 200;   /* самой длинной стрелке — 200 px: дальше она уходит со сцены */
+function accUnit(v) {
+  var worst = Math.sqrt(Math.pow(v * v * K_MAX, 2) + PED * PED);
+  for (var i = 0; i < UNITS.length; i++)
+    if (worst / UNITS[i] * REF_PX <= MAX_PX) return UNITS[i];
+  return UNITS[UNITS.length - 1];
+}
+
+/* Русский разделитель и настоящий минус: в показаниях рядом стоят числа
+   со знаком, и дефис среди них выглядит переносом. */
+function num(v, d) {
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function signed(v, d) {
+  return (v > 0 ? '+' : '') + num(v, d);
+}
+/* Радиус на перегибе бесконечен, и печатать вместо него 2,7·10^17 нечестно.
+   Крупные радиусы идут без десятых: «2788» вместо «2788,0», иначе показание
+   лезет на соседнее. */
+function fmtR(R) {
+  if (!isFinite(R) || R > 9999) return '∞';
+  return R < 100 ? num(R, 1) : num(R, 0);
+}
+
+function kx(tex) {
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+
+/* Латех-слой поверх канвы: буквы величин набираются KaTeX, канва их не
+   умеет. Подписи ездят вместе со стрелками, поэтому позиции им ставит
+   не React, а сам кадр — через сохранённые узлы. */
+var LABS = [
+  { id: 'tau', tex: '\\vec\\tau',        cls: '' },
+  { id: 'at',  tex: 'a_t\\vec\\tau',     cls: 'lab-at' },
+  { id: 'an',  tex: 'a_n\\vec n',        cls: 'lab-an' },
+  { id: 'aa',  tex: '\\vec a',           cls: 'lab-a' },
+  { id: 'rad', tex: 'R',                 cls: '' }
+];
+
+/* Стрелка с залитым остриём: длина остриё́м не удлиняется, чтобы
+   нарисованная длина отвечала числу. */
+function arrow(ctx, x0, y0, x1, y1, col, w, head) {
+  var dx = x1 - x0, dy = y1 - y0, len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 1.5) return;
+  var hl = Math.min(head || 13, len * 0.55), ux = dx / len, uy = dy / len;
+  ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round';
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * hl * 0.8, y1 - uy * hl * 0.8);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * hl - uy * hl * 0.42, y1 - uy * hl + ux * hl * 0.42);
+  ctx.lineTo(x1 - ux * hl + uy * hl * 0.42, y1 - uy * hl - ux * hl * 0.42);
+  ctx.closePath();
+  ctx.fillStyle = col; ctx.fill();
+}
+
+/* Строка показаний: шесть положений дел, и каждое проговаривает то, что
+   в этот момент видно на сцене. Меняется только при смене положения дел,
+   а не каждый кадр. Первая буква кода — про дорогу (поворот или прямая),
+   вторая про педаль (отпущена, работает, упёрлась в край диапазона). */
+var SAY = {
+  TN: 'Педаль отпущена, скорость держится, ' + kx('a_t = 0') +
+      '. Ускорение всё равно есть, и целиком поперёк: его создаёт руль.',
+  TP: 'Работают оба. Педаль даёт ' + kx('a_t') + ' вдоль скорости, поворот даёт ' +
+      kx('a_n = v^2/R') + ' поперёк, полное ускорение — их сумма.',
+  TL: 'Скорость упёрлась в край диапазона стенда, ' + kx('5\\ldots 40') +
+      ' м/с. Раз она больше не меняется, ' + kx('a_t = dv/dt = 0') +
+      ' при любом положении педали. Поперечное осталось: дорога-то поворачивает.',
+  SN: 'Перегиб: дорога здесь идёт прямо, ' + kx('R') + ' бесконечен и ' + kx('a_n = 0') +
+      '. Педаль отпущена, и ускорения нет вовсе.',
+  SP: 'Перегиб: ' + kx('a_n = 0') + ' при любой скорости, дорога здесь не поворачивает. ' +
+      'Осталось одно тангенциальное, от педали.',
+  SL: 'Перегиб, и скорость на краю диапазона стенда: ' + kx('a_n = 0') +
+      ' от дороги, ' + kx('a_t = 0') + ' от упора. Ускорения нет вовсе.'
+};
+
+function Demka() {
+  var st = useRef({
+    x: 30, v: 15, pedal: 0, running: true,
+    k: 0, R: Infinity, at: 0, an: 0, a: 0,
+    tau: [1, 0], n: [0, 0], sit: 'TN'
+  }).current;
+
+  var [ui, setUi] = useState({ v: 15, pedal: 0, running: true, sit: 'TN' });
+
+  var NODE = useRef({}).current;   /* узлы латех-подписей */
+  var tone = null;
+
+  /* Педаль на упоре диапазона перестаёт разгонять: скорость дальше не
+     идёт, значит dv/dt равен нулю, и показание обязано это признать. */
+  function pedalEff() {
+    if (st.pedal > 0 && st.v >= V_MAX - 1e-9) return 0;
+    if (st.pedal < 0 && st.v <= V_MIN + 1e-9) return 0;
+    return st.pedal;
+  }
+
+  /* Всё, что демка утверждает, считается здесь и только здесь. */
+  function measure() {
+    var p = ypOf(st.x), pp = yppOf(st.x);
+    var g = Math.sqrt(1 + p * p);
+    st.k = Math.abs(pp) / (g * g * g);
+    st.R = st.k > 0 ? 1 / st.k : Infinity;
+    st.at = pedalEff();
+    st.an = st.v * st.v * st.k;
+    st.a = Math.sqrt(st.at * st.at + st.an * st.an);
+    st.tau = [1 / g, p / g];
+    var s = pp < 0 ? -1 : (pp > 0 ? 1 : 0);   /* 0 — перегиб, нормали нет */
+    st.n = [-s * p / g, s / g];
+  }
+
+  /* Поворот считается по поперечному ускорению, а не по месту на дороге:
+     на перегибе a_n обращается в ноль при любой скорости, и порог в
+     0,15 м/с² отделяет «дорога прямая» от «дорога поворачивает».
+     Отдельный случай L — педаль нажата, а скорость упёрлась в край
+     диапазона: тангенциального ускорения нет, и сказать про это надо
+     прямо, иначе строка объявит отпущенной нажатую педаль. */
+  function situation() {
+    var p = Math.abs(st.at) > 1e-9 ? 'P' : (st.pedal !== 0 ? 'L' : 'N');
+    return (st.an > 0.15 ? 'T' : 'S') + p;
+  }
+
+  function step(dt) {
+    if (st.running && dt > 0) {
+      var h = dt / SUB;
+      for (var i = 0; i < SUB; i++) {
+        st.v = C.clamp(st.v + pedalEff() * h, V_MIN, V_MAX);
+        var p = ypOf(st.x);
+        st.x += st.v / Math.sqrt(1 + p * p) * h;   /* ds/dt = v вдоль дуги */
+        if (st.x >= ROAD_L) st.x -= ROAD_L;          /* дорога периодична */
+      }
+    }
+    measure();
+
+    /* Ползунок скорости обязан ехать вместе со скоростью, которую двигает
+       педаль, но перерисовывать рейку каждый кадр незачем: показание
+       печатается с одним знаком после запятой, порог под него и выбран. */
+    var s = situation();
+    if (s !== st.sit || Math.abs(st.v - ui.v) > 0.1 || st.running !== ui.running) {
+      st.sit = s;
+      setUi({ v: st.v, pedal: st.pedal, running: st.running, sit: s });
+    }
+  }
+
+  /* ── рисование ─────────────────────────────────────────── */
+
+  function drawRoad(ctx) {
+    ctx.beginPath();
+    for (var i = 0; i <= 400; i++) {
+      var xm = i / 400 * ROAD_L, X = sx(xm), Y = sy(yOf(xm));
+      if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+    }
+    ctx.lineCap = 'round'; ctx.setLineDash([]);
+    ctx.lineWidth = 5 * SC;                       /* полотно шириной 5 м */
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.13)';
+    ctx.stroke();
+    ctx.lineWidth = 1.6;                          /* осевая — она же траектория */
+    ctx.setLineDash([9, 11]);
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.55)';
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  /* Две точки дороги, ради которых она такая: вершина с самым тесным
+     поворотом и перегиб, где кривая на мгновение садится на прямую.
+     У перегиба эта прямая нарисована — по ней видно, что дорога здесь
+     не поворачивает, а не просто «поворачивает слабо». */
+  function drawMarks(ctx) {
+    C.label(ctx, sx(50), sy(A) - 44, 'вершина: поворот круче всего', 19,
+            'rgba(' + tone.muted + ',.95)');
+    C.label(ctx, sx(150), sy(-A) + 56, 'низ: тот же радиус, поворот в другую сторону', 19,
+            'rgba(' + tone.muted + ',.95)');
+
+    /* Прямая через перегиб берётся длинной, на 45 м в обе стороны, и
+       сплошной: у самого перегиба она лежит на дороге (потому там и нет
+       поворота), а к концам дорога уходит из-под неё. Короткий пунктир
+       целиком прятался под полотном и не говорил ничего. */
+    var p = ypOf(100), g = Math.sqrt(1 + p * p), L = 45;
+    ctx.setLineDash([]); ctx.lineWidth = 1.6;
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.5)';
+    ctx.beginPath();
+    ctx.moveTo(sx(100 - L / g), sy(-L * p / g));
+    ctx.lineTo(sx(100 + L / g), sy(L * p / g));
+    ctx.stroke();
+    /* подпись отнесена от точки перегиба на 30 м по нормали к дороге */
+    C.label(ctx, sx(100 + 30 * (-p / g)), sy(30 / g), 'перегиб: дорога идёт прямо', 19,
+            'rgba(' + tone.muted + ',.95)');
+  }
+
+  /* Окружность кривизны: та самая, что в ris-krivizna. Центр лежит на
+     нормали в R метрах от машины. Радиусы больше RMAX_DRAW не рисуются —
+     на перегибе центр уезжает в бесконечность, и рисовать там нечего. */
+  function drawCircle(ctx, px, py, nx, ny) {
+    if (!isFinite(st.R) || st.R > RMAX_DRAW) return;
+    var cx = px + nx * st.R * SC, cy = py + ny * st.R * SC;
+    ctx.setLineDash([6, 9]); ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.3)';
+    ctx.beginPath(); ctx.arc(cx, cy, st.R * SC, 0, 6.284); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(cx, cy); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.5)'; ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy);
+    ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6);
+    ctx.stroke();
+  }
+
+  function drawCar(ctx, px, py, ang) {
+    ctx.save();
+    ctx.translate(px, py); ctx.rotate(ang);
+    C.roundRect(ctx, -CAR_L / 2, -CAR_W / 2, CAR_L, CAR_W, 3.5);
+    ctx.fillStyle = 'rgba(' + tone.ink + ',.9)'; ctx.fill();
+    C.roundRect(ctx, -CAR_L / 2 + 6, -CAR_W / 2 + 2.5, 11, CAR_W - 5, 2);
+    ctx.fillStyle = 'rgba(' + tone.muted + ',.95)'; ctx.fill();
+    ctx.restore();
+  }
+
+  /* Масштабные риски: длина на дороге и длина стрелок ускорения. Без них
+     стрелка ничего не значит — у ускорения свои единицы. */
+  function drawLegend(ctx, unit) {
+    var x = sx(0);
+    arrow(ctx, x, 404, x + REF_PX, 404, 'rgba(' + tone.muted + ',.85)', 3, 11);
+    C.label(ctx, x + REF_PX + 12, 409, num(unit, 0) + ' м/с²', 18,
+            'rgba(' + tone.muted + ',.95)', 'left');
+
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.85)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, 444); ctx.lineTo(sx(50), 444);
+    ctx.moveTo(x, 438); ctx.lineTo(x, 450);
+    ctx.moveTo(sx(50), 438); ctx.lineTo(sx(50), 450);
+    ctx.stroke();
+    C.label(ctx, sx(50) + 12, 449, '50 м', 18, 'rgba(' + tone.muted + ',.95)', 'left');
+  }
+
+  function drawReadouts(ctx) {
+    var ink = 'rgb(' + tone.ink + ')';
+    C.readout(ctx, 400, 28, 'СКОРОСТЬ, М/С', num(st.v, 1), ink);
+    C.readout(ctx, 545, 28, 'РАДИУС, М', fmtR(st.R), ink);
+    C.readout(ctx, 690, 28, 'ВДОЛЬ, М/С²', signed(st.at, 2), COL.at);
+    C.readout(ctx, 835, 28, 'ПОПЕРЁК, М/С²', num(st.an, 2), COL.an);
+    C.readout(ctx, 980, 28, 'ПОЛНОЕ, М/С²', num(st.a, 2), COL.a);
+  }
+
+  /* Подпись латех-слоя ставится в точку логического кадра; проценты — тот
+     же приём, что в podobie, только адрес пересчитывается каждый кадр. */
+  function place(id, x, y, on) {
+    var el = NODE[id];
+    if (!el) return;
+    el.hidden = !on;
+    if (!on) return;
+    el.style.left = (x / W * 100) + '%';
+    el.style.top = (y / HGT * 100) + '%';
+  }
+
+  function draw(ctx) {
+    tone = C.tones(ctx);
+    var unit = accUnit(st.v), sca = REF_PX / unit;   /* px на 1 м/с² */
+
+    var px = sx(st.x), py = sy(yOf(st.x));
+    /* экранные орты: по вертикали экран смотрит вниз, мир — вверх */
+    var tx = st.tau[0], ty = -st.tau[1];
+    var nx = st.n[0], ny = -st.n[1];
+    var hasN = st.n[0] !== 0 || st.n[1] !== 0;
+
+    drawRoad(ctx);
+    drawMarks(ctx);
+    drawCircle(ctx, px, py, nx, ny);
+
+    /* Ось, севшая на точку: орт τ. Длина у него своя, единичная, и с
+       масштабом ускорений ничего общего не имеет — потому и рисуется
+       тонко, как разметка, а не как измеренная величина. Орт n отдельной
+       стрелкой не рисуется: вдоль него уже идут и a_n, и радиус кривизны,
+       четыре подписи на одном луче не разъехались бы. */
+    arrow(ctx, px, py, px + tx * UNIT, py + ty * UNIT, 'rgba(' + tone.ink + ',.5)', 1.8, 10);
+
+    var atL = st.at * sca, anL = st.an * sca;
+    var ax = px + tx * atL + nx * anL, ay = py + ty * atL + ny * anL;
+
+    /* Достройка параллелограмма: полное ускорение собирается из двух
+       составляющих на глазах, а не просто лежит третьей стрелкой. */
+    if (Math.abs(atL) > 8 && anL > 8) {
+      ctx.setLineDash([5, 6]); ctx.lineWidth = 1.4;
+      ctx.strokeStyle = 'rgba(' + tone.ink + ',.36)';
+      ctx.beginPath();
+      ctx.moveTo(px + tx * atL, py + ty * atL); ctx.lineTo(ax, ay);
+      ctx.moveTo(px + nx * anL, py + ny * anL); ctx.lineTo(ax, ay);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    /* Машина рисуется под стрелками, а не поверх: короткая стрелка (педаль
+       на прямом участке при большой скорости) целиком пряталась под
+       кузовом, и выходило, что тангенциального ускорения нет вовсе. */
+    drawCar(ctx, px, py, Math.atan2(ty, tx));
+    arrow(ctx, px, py, ax, ay, COL.a, 5.5, 15);
+    arrow(ctx, px, py, px + tx * atL, py + ty * atL, COL.at, 4.5, 13);
+    if (hasN) arrow(ctx, px, py, px + nx * anL, py + ny * anL, COL.an, 4.5, 13);
+    drawReadouts(ctx);
+    drawLegend(ctx, unit);
+
+    /* Подписи разведены по сторонам своего луча: вдоль τ буквы стоят по
+       разные стороны от касательной, вдоль n — по разные стороны от
+       нормали. Полное ускорение подписывается, только когда видны обе
+       составляющие: при отпущенной педали вектор a совпадает с a_n, и две
+       буквы легли бы одна на другую. На перегибе нормали нет, и сторону
+       берём любую перпендикулярную касательной — буква всё равно должна
+       куда-то встать. Отходит она от машины не меньше чем на 34 px, даже
+       когда стрелка короче: иначе подпись падает на кузов и пропадает.
+       Длину буква не обозначает, длину меряют риской в углу и показаниями. */
+    var mx = hasN ? nx : -ty, my = hasN ? ny : tx;
+    var atLab = Math.abs(atL) < 34 ? (atL < 0 ? -34 : 34) : atL;
+    var anLab = anL < 34 ? 34 : anL;
+    var anX = px + nx * anLab - tx * 36, anY = py + ny * anLab - ty * 36;
+    var aaX = ax + (ax - px) * 0.14 + 12, aaY = ay + (ay - py) * 0.14;
+    var rX = px + nx * st.R * SC * 0.5 + tx * 18, rY = py + ny * st.R * SC * 0.5 + ty * 18;
+
+    /* Радиус, поперечная и полная стрелки лежат на одном луче, когда педаль
+       мало что добавляет, и три буквы садятся в одно место. Уступает
+       радиус: его число всё равно стоит в показаниях, а линия и крестик
+       центра остаются на месте. */
+    var free = function (x, y) {
+      return Math.sqrt(Math.pow(x - anX, 2) + Math.pow(y - anY, 2)) > 40 &&
+             Math.sqrt(Math.pow(x - aaX, 2) + Math.pow(y - aaY, 2)) > 40;
+    };
+
+    place('tau', px + tx * (UNIT + 18) + mx * 12, py + ty * (UNIT + 18) + my * 12, true);
+    place('at', px + tx * atLab - mx * 20, py + ty * atLab - my * 20, Math.abs(atL) > 7);
+    place('an', anX, anY, hasN && anL > 7);
+    place('aa', aaX, aaY, Math.abs(atL) > 12 && anL > 12);
+    place('rad', rX, rY, isFinite(st.R) && st.R <= RMAX_DRAW && free(rX, rY));
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  measure();
+  window.__demoState = st;
+
+  function jump(x) { st.x = x; st.running = false; measure(); setUi({ v: st.v, pedal: st.pedal, running: false, sit: st.sit }); }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Скорость:">
+          <${C.Slider} min=${V_MIN} max=${V_MAX} step=${0.5} value=${ui.v}
+                       display=${num(ui.v, 1) + ' м/с'}
+                       onChange=${function (v) { st.v = v; measure(); setUi({ v: v, pedal: st.pedal, running: st.running, sit: st.sit }); }} />
+        <//>
+        <${C.Group} label="Педаль:">
+          <${C.Slider} min=${-PED} max=${PED} step=${0.25} value=${ui.pedal}
+                       display=${signed(ui.pedal, 2) + ' м/с²'}
+                       onChange=${function (v) { st.pedal = v; measure(); setUi({ v: st.v, pedal: v, running: st.running, sit: st.sit }); }} />
+        <//>
+        <${C.Group}>
+          <${C.Btn} action=${true}
+                    onClick=${function () { st.running = !st.running; setUi({ v: st.v, pedal: st.pedal, running: st.running, sit: st.sit }); }}>
+            ${ui.running ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${function () { jump(50); }}>В вершину<//>
+          <${C.Btn} onClick=${function () { jump(100); }}>В перегиб<//>
+        <//>
+      </div>
+      ${/* Сцена держит пропорцию и обязана влезать в колонку. Прежние
+            aspectRatio плюс flex: 0 0 auto считали высоту только от ширины,
+            и во врезке колоды сцена вылезала за кадр: полоса прокрутки на
+            шесть пикселей у поворота осей, сорок у кадрового интеграла,
+            шестьдесят шесть у ускорения в повороте (замеры 08.09).
+            Теперь ведёт высота, ширина выводится из неё: упирается в
+            высоту — сцена уходит в поля по бокам, упирается в ширину —
+            ведёт себя как раньше. */''}
+      <div class="stage-wrap"
+           style=${{ aspectRatio: W + ' / ' + HGT, flex: '0 1 auto', minHeight: 0,
+                     height: '100%', width: 'auto', maxWidth: '100%',
+                     alignSelf: 'center' }}>
+        <canvas class="stage" ref=${ref}></canvas>
+        <div class="ax is-on">
+          <span style=${{ left: (150 / W * 100) + '%', top: (47 / HGT * 100) + '%' }}
+                dangerouslySetInnerHTML=${{ __html: kx('\\vec a = a_t\\vec\\tau + a_n\\vec n') }}></span>
+          ${LABS.map(function (L) { return html`
+            <span key=${L.id} class=${L.cls || null} hidden=${true}
+                  ref=${function (el) { NODE[L.id] = el; }}
+                  dangerouslySetInnerHTML=${{ __html: kx(L.tex) }}></span>`; })}
+        </div>
+      </div>
+      <${C.Status} html=${SAY[ui.sit]} />
+    </div>`;
+}
+
+C.mount(Demka);
+</script>
+</body>
+</html>

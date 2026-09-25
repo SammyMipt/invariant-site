@@ -1,0 +1,545 @@
+/* Вид интерактивных демок — панель лабораторного прибора.
+
+   В JS демок инлайн-стилей нет вообще: весь вид задаётся здесь, поэтому
+   правка одного файла меняет сразу все демки, а логика и разметка не
+   трогаются. Структура у всех одна:
+
+       .demo
+         .controls  → .control-group → .control-label + .btn / .slider + .control-value
+         canvas.stage
+         .status
+
+   Замысел: сцена — это окно прибора (сетка, рамка, тёмное поле), сверху
+   рейка управления с сегментами вместо кнопок-таблеток, снизу строка
+   показаний. Ничего не выглядит как веб-форма.
+
+   Токены дублируют палитру колоды: демка живёт в отдельном iframe и
+   переменные слайда до неё не долетают. */
+
+:root {
+  --bg: #06080f;
+  --ink: #eceef6;
+  --muted: #8c93ac;
+  --accent: #ffb454;
+  --chip: #1b2233;
+  --line: rgba(236, 238, 246, .13);
+  --glow: rgba(255, 180, 84, .3);
+  --minus: #7aa6ff;
+  --plus: #ff7a66;
+  --radius: 8px;
+  --font: 'Golos Text', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* Палитра «Турбулентности». Токены выше сняты с «Электрона» — янтарный луч
+   в трубке, — и на бирюзовой колоде рейка управления спорила бы с тем, что
+   нарисовано на сцене. Демка объявляет class="turb" на <html>. */
+.turb {
+  --bg: #071316;
+  --ink: #e6f1f4;
+  --muted: #86a0a8;
+  --accent: #35c8d8;
+  --chip: #0e2128;
+  --line: rgba(230, 241, 244, .12);
+  --glow: rgba(53, 200, 216, .26);
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+}
+
+.demo {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- рейка управления ---------- */
+
+.controls {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(to bottom, rgba(255, 255, 255, .022), transparent);
+}
+
+/* Группы разделены линиями, как секции на передней панели */
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+}
+.control-group:first-child { padding-left: 0; }
+.control-group + .control-group { border-left: 1px solid var(--line); }
+
+.control-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ---------- сегменты вместо кнопок ---------- */
+
+.btn {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.2;
+  padding: 7px 13px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color .14s ease, color .14s ease, background-color .14s ease;
+}
+.btn:hover:not(:disabled) { border-color: rgba(255, 180, 84, .5); }
+.btn:disabled { opacity: .35; cursor: default; }
+
+/* Активный сегмент — подсвечен, а не залит: прибор показывает выбор, а не
+   перекрашивает кнопку */
+.btn.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(255, 180, 84, .1);
+  box-shadow: inset 0 0 0 1px rgba(255, 180, 84, .18);
+}
+
+/* Действие: то, что запускает опыт */
+.btn-action {
+  color: var(--accent);
+  border-color: rgba(255, 180, 84, .45);
+  font-weight: 500;
+}
+.btn-action:hover:not(:disabled) { background: rgba(255, 180, 84, .1); }
+.btn-action:disabled { color: var(--muted); border-color: var(--line); }
+
+/* ---------- ползунок ---------- */
+
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 190px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  outline: none;
+  cursor: pointer;
+}
+/* Ручка — риска, а не шарик: положение читается точнее */
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 6px;
+  height: 20px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--glow);
+  cursor: pointer;
+}
+.slider::-moz-range-thumb {
+  width: 6px;
+  height: 20px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--glow);
+  cursor: pointer;
+}
+.control-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: var(--accent);
+  min-width: 88px;
+}
+
+/* Шаговый регулятор «− значение +». Ширина в 88 px рассчитана на показания
+   ползунка вроде «1.00×», а здесь в значении два знака: рейка от такого
+   запаса ломалась на два ряда, и между буквами зияло пусто. */
+.control-group.step { padding: 10px 12px; gap: 6px; }
+.control-group.step .control-value {
+  min-width: 34px;
+  font-size: 17px;
+  text-align: center;
+}
+.control-group.step .btn { padding: 7px 11px; }
+
+/* ---------- сцена ---------- */
+
+/* Окно прибора: миллиметровка под прозрачной канвой и мягкая виньетка
+   по краям. Сетка даёт масштаб и сразу читается как измерительное поле. */
+.stage {
+  flex: 1;
+  min-height: 150px;
+  width: 100%;
+  display: block;
+  background-color: #04060c;
+  background-image:
+    radial-gradient(ellipse 80% 70% at 50% 45%, transparent 55%, rgba(0, 0, 0, .5) 100%),
+    linear-gradient(to right, rgba(236, 238, 246, .045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(236, 238, 246, .045) 1px, transparent 1px),
+    linear-gradient(to right, rgba(236, 238, 246, .022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(236, 238, 246, .022) 1px, transparent 1px);
+  background-size: 100% 100%, 80px 80px, 80px 80px, 16px 16px, 16px 16px;
+}
+
+/* ---------- рисунок вместо прибора ----------
+
+   Иногда на слайде нужна не демка, а картинка: она ничего не измеряет и
+   ничем не управляет, ей нечего показывать в рейке и в строке показаний.
+   Тогда страница объявляет class="bare" на <html>, фон отдаёт слайду, и
+   канва остаётся одна. Сетка со сцены тоже уходит — она означает
+   измерительное поле, а мерить здесь нечего. */
+
+.bare, .bare body, .bare #root { background: transparent; }
+/* .stage растянут через flex:1, и без flex-контейнера канва свернулась бы
+   в дефолтные 150 px: в .demo это делала обвязка, здесь делать некому. */
+.bare #root { display: flex; }
+
+.stage-plain {
+  background-color: transparent;
+  background-image: none;
+  min-height: 120px;
+}
+
+/* ---------- панель вместо сцены ----------
+
+   Конструктор размерностей ничего не анимирует: это формулы, и рисовать их
+   на канве значит набирать математику подручными средствами. Поэтому там,
+   где сцена была бы канвой, стоит .panel — тот же прямоугольник прибора,
+   но внутри DOM, и формулы набирает KaTeX. */
+
+/* Содержимое собрано в середине, а не расперто по краям: на высокой сцене
+   space-between разгонял четыре строки по углам, и панель выглядела пустой.
+   Центрируют auto-отступы крайних детей, а не justify-content: center с
+   overflow при нехватке высоты уводит верх контента за недосягаемый край.
+   Детям запрещено сжиматься — иначе карточки схлопывались в ноль и их
+   содержимое рисовалось поверх счётчиков (ловилось на телефоне). */
+.panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 12px 20px;
+  overflow: hidden auto;
+}
+.panel > * { flex: 0 0 auto; }
+.panel > :first-child { margin-top: auto; }
+.panel > :last-child { margin-bottom: auto; }
+.panel .katex { color: inherit; }
+
+.pi-count { text-align: center; color: var(--muted); font-size: 19px; }
+
+.pi-cards {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 12px;
+}
+.pi-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .028);
+  padding: 10px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: border-color .15s, background .15s;
+}
+/* Величина в деле подсвечивается: видно, что уже взято в комбинацию */
+.pi-card.is-on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.pi-sym { font-size: 36px; color: var(--ink); }
+.pi-card.is-on .pi-sym { color: var(--accent); }
+.pi-name { font-size: 16px; color: var(--muted); }
+.pi-unit { font-size: 15px; color: var(--muted); }
+
+/* Счётчики базовых единиц: каждый обязан прийти к нулю, и видно, какой ещё нет */
+.pi-tallies { display: flex; justify-content: center; gap: 14px; }
+.pi-tally {
+  min-width: 128px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 7px 14px;
+  text-align: center;
+  font-size: 21px;
+  color: var(--muted);
+}
+.pi-tally.is-zero {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* Высота под ответ зарезервирована: дробь выше строки-подсказки, и без
+   резерва панель на кульминации подпрыгивала бы и лезла за край. */
+.pi-result {
+  text-align: center;
+  flex: 0 0 auto;
+  min-height: 82px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+.pi-result .pi-hint { font-size: 19px; color: var(--muted); }
+.pi-result .pi-tag {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: .2em;
+  color: var(--muted);
+}
+.pi-result .pi-formula { font-size: 31px; color: var(--accent); margin-top: 2px; }
+
+/* ---------- строка показаний ---------- */
+
+/* Текст статуса обязан лежать в одном span: прямые текстовые узлы во
+   flex-контейнере становятся отдельными flex-элементами, и пробелы между
+   ними схлопываются («10 зарядов минусом» слипается в «зарядовминусом»). */
+.status {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(to top, rgba(255, 255, 255, .022), transparent);
+  padding: 12px 16px;
+  font-size: 17px;
+  line-height: 1.35;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+.status .neg { color: var(--minus); font-weight: 600; }
+.status .pos { color: var(--plus); font-weight: 600; }
+.status .accent { color: var(--accent); font-weight: 600; }
+
+/* ---------- узкая врезка ----------
+
+   Демка внутри блока row получает половину ширины и треть высоты слайда.
+   Обвязка сжимается, сцена остаётся. */
+
+@media (max-width: 760px), (max-height: 420px) {
+  .controls { padding: 0; }
+  /* В узком кадре группы переносятся, и разделитель-бордюр превращается
+     в висячую риску в начале строки. Здесь секции разделяет только пробел:
+     лишние отступы стоят целого ряда рейки, а ряд — это 30% высоты сцены. */
+  .control-group { padding: 6px 0; gap: 6px; }
+  .control-group + .control-group { border-left: 0; margin-left: 14px; }
+  .control-label { font-size: 12px; letter-spacing: .08em; }
+  .btn { font-size: 13px; padding: 5px 9px; }
+  .slider { width: 100px; }
+  .control-value { font-size: 13px; min-width: 72px; }
+  .stage { min-height: 110px; background-size: 100% 100%, 48px 48px, 48px 48px, 12px 12px, 12px 12px; }
+  .status {
+    font-size: 13px;
+    line-height: 1.28;
+    padding: 8px 10px;
+    min-height: 0;
+  }
+}
+
+/* [платформа] Ссылка возврата к странице недели: служебный хром демки.
+   Видна только когда демка открыта отдельной страницей; внутри iframe
+   колоды прячется скриптом самой демки. В печать не попадает. */
+.demo-back {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 50;
+  font-size: 13px;
+  line-height: 1;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  color: var(--muted);
+  background: rgba(0, 0, 0, .35);
+  text-decoration: none;
+  white-space: nowrap;
+  opacity: .5;
+  transition: opacity .15s ease;
+}
+.demo-back:hover, .demo-back:focus-visible { opacity: 1; color: var(--ink); }
+.demo-back[hidden] { display: none; }
+@media print { .demo-back { display: none; } }
+
+/* ---------- телефонный кадр ----------
+
+   Отдельная страница демки на телефоне (не врезка в колоду): рейке
+   возвращается боковой отступ, плашки Пи-теоремы делят ширину поровну
+   вместо жёсткой минималки, сцена с канвой перестаёт тянуться на всю
+   высоту экрана (кадр вписывается по ширине, и лишняя высота — пустота),
+   а ссылка возврата уезжает вниз, чтобы не лежать на пресетах. */
+
+/* ---------- латех-подписи поверх канвы ----------
+
+   Правило курса: буквы величин и формулы — только KaTeX, никаких
+   спецсимволов и обычных букв. Канва латех не умеет, поэтому тики и
+   названия осей живут DOM-слоем поверх неё; позиции — в процентах от
+   логического кадра канвы, слои переключаются прозрачностью синхронно
+   с канвенным фейдом. */
+.stage-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 150px;
+  /* контейнер меряет сам себя: шрифт подписей масштабируется с кадром */
+  container-type: inline-size;
+}
+.stage-wrap canvas.stage { width: 100%; height: 100%; }
+.stage-wrap .ax {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .8s;
+}
+.stage-wrap .ax.is-on { opacity: 1; }
+/* Только прямые дети слоя: внутри спанов живёт разметка KaTeX, и общий
+   селектор span разабсолютил бы её посимвольно. */
+.stage-wrap .ax > span {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  color: var(--muted);
+  /* Кегль привязан к ширине кадра: на телефоне подписи ужимаются вместе
+     с графиком, а не наезжают на него. Первая строка — фолбэк для
+     браузеров без контейнерных единиц. */
+  font-size: 15px;
+  font-size: clamp(9px, 2.15cqi, 17px);
+  white-space: nowrap;
+}
+.stage-wrap .ax > span.ax-y { transform: translate(-50%, -50%) rotate(-90deg); }
+/* В узком кадре полное имя оси Y ложится на тики: остаётся величина */
+.stage-wrap .ax > span.ax-y-short { display: none; }
+@container (max-width: 620px) {
+  .stage-wrap .ax > span.ax-y-full { display: none; }
+  .stage-wrap .ax > span.ax-y-short { display: block; }
+}
+.stage-wrap .ax > span.ax-right { transform: translate(-100%, -50%); }
+.stage-wrap .ax > span.ax-left { transform: translate(0, -50%); }
+.stage-wrap .ax > span.ax-accent { color: var(--accent); }
+.stage-wrap .ax .katex { color: inherit; }
+
+/* ---------- витринный режим ----------
+
+   Страница недели зовёт демку с ?flat (класс вешает demo-core): стенд
+   ведёт себя как маятниковый остров — без окна прибора, рейки-панели и
+   собственного фона, слайдеры нативные, палитра наследует тему сайта.
+   Канва тоже прозрачна: рисование в демках недели берёт чернила из
+   токенов темы (см. tones() в podobie), а не из жёстких констант. */
+
+/* color-scheme обязан совпадать с родительской страницей: при
+   несовпадении схем браузер подкладывает под прозрачный iframe белый
+   непрозрачный фон, и «прозрачности» не существует. */
+.flat { color-scheme: dark; }
+.flat.light { color-scheme: light; }
+.flat, .flat body, .flat #root { background: transparent; }
+
+.flat .controls {
+  border-bottom: 0;
+  background: none;
+  padding: 0;
+}
+.flat .control-group { padding: 8px 16px 8px 0; }
+.flat .control-group:first-child { padding-left: 0; }
+.flat .control-group + .control-group { border-left: 0; }
+
+.flat canvas.stage {
+  background-color: transparent;
+  background-image: none;
+}
+.flat .stage.panel {
+  background-color: transparent;
+  background-image: none;
+}
+
+.flat .status {
+  border-top: 0;
+  background: none;
+  padding: 8px 16px 0 16px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* Нативный ползунок: кастомная риска остаётся прибору в колоде */
+.flat .slider {
+  -webkit-appearance: auto;
+  appearance: auto;
+  height: auto;
+  background: none;
+  accent-color: var(--accent);
+}
+.flat .slider::-webkit-slider-thumb {
+  -webkit-appearance: auto;
+  appearance: auto;
+  width: auto;
+  height: auto;
+  background: none;
+  box-shadow: none;
+}
+.flat .slider::-moz-range-thumb {
+  width: auto;
+  height: auto;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+/* Светлая тема сайта: токены светлого слоя витрины. Жёсткие янтарные
+   rgba кнопок переопределяются бирюзой светлой ветки. */
+.flat.light {
+  --ink: #20262b;
+  --muted: #8a959b;
+  --accent: #0f7a8a;
+  --chip: #eef0ea;
+  --line: rgba(32, 38, 43, .18);
+  --glow: rgba(15, 122, 138, .25);
+}
+.flat.light .btn:hover:not(:disabled) { border-color: rgba(15, 122, 138, .5); }
+.flat.light .btn.is-active {
+  background: rgba(15, 122, 138, .08);
+  box-shadow: inset 0 0 0 1px rgba(15, 122, 138, .2);
+}
+.flat.light .btn-action { border-color: rgba(15, 122, 138, .45); }
+.flat.light .btn-action:hover:not(:disabled) { background: rgba(15, 122, 138, .08); }
+
+@media (max-width: 480px) {
+  .controls { padding: 0 10px; }
+  .control-group { flex-wrap: wrap; }
+  /* Конструктор размерностей: рейка съедает пол-экрана, поэтому панель
+     ужимается — карточки по две в ряд, шрифты и зазоры меньше. Бюджет
+     высоты считан под iframe в 78vh: три карточки помещаются без
+     прокрутки, пять («Вязкое трение») панель уже листает. */
+  .panel { gap: 10px; padding: 8px 12px; }
+  .pi-count { font-size: 14px; }
+  .pi-cards { grid-auto-flow: row; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .pi-card { padding: 6px 4px; gap: 3px; }
+  .pi-sym { font-size: 24px; }
+  .pi-name { font-size: 13px; }
+  .pi-unit { font-size: 13px; }
+  .pi-result { min-height: 44px; }
+  .pi-result .pi-hint { font-size: 15px; }
+  .pi-result .pi-formula { font-size: 24px; }
+  .pi-tallies { gap: 8px; padding: 0 10px; }
+  .pi-tally { min-width: 0; flex: 1 1 0; font-size: 17px; padding: 6px 8px; }
+  canvas.stage { flex: 0 0 auto; height: min(120vw, 58vh); min-height: 240px; }
+  /* Обёрнутая канва держит аспект кадра (инлайн aspect-ratio у демки):
+     латех-слой позиционируется процентами и обязан совпадать с рисунком. */
+  .stage-wrap canvas.stage { height: 100%; min-height: 0; }
+  .demo-back { top: auto; bottom: 12px; opacity: .8; }
+}

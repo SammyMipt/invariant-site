@@ -1,0 +1,205 @@
+<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script>
+      (function () {
+        var mode = 'dark';
+        try { mode = localStorage.getItem('themeMode') || 'dark'; } catch (e) {}
+        var dark = mode === 'dark' ||
+          (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+      })();
+    </script><title>Вход · Инвариант</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=STIX+Two+Text:wght@400;600;700&family=Onest:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"><link rel="stylesheet" href="/_astro/site.BedIDvA9.css"><style>.vhod[data-astro-cid-sjqh5bze]{max-width:23.6rem;margin:1.2rem auto 0}.vhod-kicker[data-astro-cid-sjqh5bze]{font-family:var(--font-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin:0 0 .7rem;font-size:11px}.vhod[data-astro-cid-sjqh5bze] h1[data-astro-cid-sjqh5bze]{letter-spacing:-.01em;margin:0 0 1.5rem;font-size:36px;font-weight:600}.login-card[data-astro-cid-sjqh5bze]{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:1.4rem 1.5rem 1.5rem}.login-error[data-astro-cid-sjqh5bze]{color:var(--err);margin:0 0 1rem;font-size:13.5px}.login-hint[data-astro-cid-sjqh5bze]{color:var(--muted);margin:0 0 1rem;font-size:13.5px}.login-input[data-astro-cid-sjqh5bze]{width:100%;font-family:var(--font-ui);color:var(--ink);background:var(--paper);border:1px solid var(--line-strong);border-radius:8px;margin:0 0 .9rem;padding:10px 12px;font-size:15px;line-height:1.4;display:block}.login-input[data-astro-cid-sjqh5bze]::placeholder{color:var(--faint)}.login-input[data-astro-cid-sjqh5bze]:focus{outline:2px solid var(--accent-border);outline-offset:0}.login-input--code[data-astro-cid-sjqh5bze]{font-family:var(--font-mono);letter-spacing:.08em}.login-remember[data-astro-cid-sjqh5bze]{color:var(--muted);cursor:pointer;align-items:center;gap:.45rem;margin:0 0 1rem;font-size:13px;display:flex}.login-remember[data-astro-cid-sjqh5bze] input[data-astro-cid-sjqh5bze]{accent-color:var(--accent)}.login-btn[data-astro-cid-sjqh5bze]{width:100%;font-family:var(--font-ui);color:var(--on-accent);background:var(--accent);cursor:pointer;border:0;border-radius:10px;padding:12px 16px;font-size:14.5px;font-weight:600;line-height:1;display:block}.login-btn[data-astro-cid-sjqh5bze]:hover{background:var(--accent-ink)}.login-row[data-astro-cid-sjqh5bze]{justify-content:space-between;margin:.9rem 0 0;display:flex}.login-minor[data-astro-cid-sjqh5bze]{font-family:var(--font-ui);color:var(--accent);cursor:pointer;background:0 0;border:0;padding:4px 0;font-size:13px;line-height:1}.login-minor[data-astro-cid-sjqh5bze]:hover{color:var(--accent-ink)}.login-minor[data-astro-cid-sjqh5bze]:disabled{color:var(--muted);cursor:default}#step-dev[data-astro-cid-sjqh5bze]{border-top:1px solid var(--line);margin-top:18px;padding-top:14px}.login-dev__hint[data-astro-cid-sjqh5bze]{color:var(--muted);margin:0 0 8px;font-size:12.5px}.login-btn--dev[data-astro-cid-sjqh5bze]{width:100%;font-family:var(--font-ui);color:var(--muted);border:1px solid var(--line-strong);cursor:pointer;background:0 0;border-radius:10px;padding:12px 16px;font-size:14.5px;font-weight:600;line-height:1;display:block}.login-btn--dev[data-astro-cid-sjqh5bze]:hover{border-color:var(--accent-border);color:var(--accent-ink)}.login-foot[data-astro-cid-sjqh5bze]{margin:1.6rem 0 0}.login-foot[data-astro-cid-sjqh5bze] a[data-astro-cid-sjqh5bze]{font-size:13px;text-decoration:none}.login-foot[data-astro-cid-sjqh5bze] a[data-astro-cid-sjqh5bze]:hover{color:var(--accent-ink)}
+</style><link rel="stylesheet" href="/_astro/fig-fonts.BdNQ2SXb.css"><link rel="stylesheet" href="/_astro/katex.AsTGkpx7.css"></head><body><header class="site-top"><a class="site-top__brand" href="/"><svg class="site-top__mark" viewBox="4 14 58 35" aria-hidden="true"><line x1="11" y1="42" x2="27" y2="27"></line><line x1="27" y1="27" x2="43" y2="40"></line><line x1="43" y1="40" x2="55" y2="22"></line><circle cx="11" cy="42" r="4.5" fill="#4fc3f7"></circle><circle cx="27" cy="27" r="6.5" fill="#ffb454"></circle><circle cx="43" cy="40" r="4.5" fill="#4dd0c4"></circle><circle cx="55" cy="22" r="5" fill="#9575cd"></circle></svg>Инвариант</a><nav><a href="/map">Карта физики</a><a href="/course">Курс</a></nav><span class="site-top__right"><button class="site-top__theme" type="button" data-top-theme title="Тема: тёмная" aria-label="Переключить тему">🌙</button><a class="site-top__login" href="/login?next=%2Flogin%2F" data-top-login>Вход</a><span class="site-top__who" data-top-who hidden><span class="site-top__who-txt" data-top-who-text></span><a class="site-top__cab" data-top-cab hidden>Кабинет</a><button class="site-top__out" type="button" data-top-out>Выйти</button></span></span></header><main class="page"><div class="vhod" data-astro-cid-sjqh5bze><p class="vhod-kicker" data-astro-cid-sjqh5bze>Платформа общей физики</p><h1 data-astro-cid-sjqh5bze>Вход</h1><div class="login-card" data-astro-cid-sjqh5bze><p class="login-error" id="error" hidden data-astro-cid-sjqh5bze></p><!-- Шаг 1: почта --><form id="step-email" data-astro-cid-sjqh5bze><p class="login-hint" data-astro-cid-sjqh5bze>Введите почту, на которую вас зарегистрировали. Мы пришлём одноразовый код входа.</p><input class="login-input" id="email" type="email" placeholder="Почта" autocomplete="email" required data-astro-cid-sjqh5bze><label class="login-remember" data-astro-cid-sjqh5bze><input type="checkbox" id="remember" checked data-astro-cid-sjqh5bze>Запомнить это устройство</label><button class="login-btn" id="btn-request" type="submit" data-astro-cid-sjqh5bze>Получить код</button></form><!-- Шаг 2: код из письма --><form id="step-code" hidden data-astro-cid-sjqh5bze><p class="login-hint" id="code-hint" data-astro-cid-sjqh5bze></p><input class="login-input login-input--code" id="code" inputmode="numeric" placeholder="Код из письма" autocomplete="one-time-code" data-astro-cid-sjqh5bze><button class="login-btn" id="btn-verify" type="submit" data-astro-cid-sjqh5bze>Войти</button><p class="login-row" data-astro-cid-sjqh5bze><button class="login-minor" id="btn-back" type="button" data-astro-cid-sjqh5bze>Назад</button><button class="login-minor" id="btn-resend" type="button" data-astro-cid-sjqh5bze>Отправить ещё раз</button></p></form><!-- Шаг 2, вариант: код из приложения-аутентификатора --><form id="step-totp" hidden data-astro-cid-sjqh5bze><p class="login-hint" data-astro-cid-sjqh5bze>Введите код из приложения-аутентификатора:</p><input class="login-input login-input--code" id="totp-code" inputmode="numeric" placeholder="6-значный код" autocomplete="one-time-code" data-astro-cid-sjqh5bze><button class="login-btn" id="btn-totp" type="submit" data-astro-cid-sjqh5bze>Войти</button><p class="login-row" data-astro-cid-sjqh5bze><button class="login-minor" id="btn-totp-back" type="button" data-astro-cid-sjqh5bze>Назад</button><button class="login-minor" id="btn-fallback" type="button" data-astro-cid-sjqh5bze>Не могу ввести код</button></p></form></div><!-- Стенд: вход без кода. Блок появляется, только если API отвечает
+         app_env=dev; на боевом сервере эндпоинта нет и блок остаётся скрыт. --><div id="step-dev" hidden data-astro-cid-sjqh5bze><p class="login-dev__hint" data-astro-cid-sjqh5bze>На стенде письма не уходят. Можно войти без кода — любой ролью, чтобы посмотреть систему с разных сторон.</p><button class="login-btn--dev" id="btn-dev" type="button" data-astro-cid-sjqh5bze>Войти без кода (Dev)</button></div><p class="login-foot" data-astro-cid-sjqh5bze><a href="/" data-astro-cid-sjqh5bze>&larr; На главную</a></p></div><script src="/legacy/site/config.js"></script><script src="/legacy/shared/analytics.js"></script><script src="/legacy/shared/auth.js"></script><script>
+    (function () {
+      'use strict';
+      var Auth = window.PlatformAuth;
+
+      var elError = document.getElementById('error');
+      var steps = {
+        email: document.getElementById('step-email'),
+        code: document.getElementById('step-code'),
+        totp: document.getElementById('step-totp')
+      };
+      var elEmail = document.getElementById('email');
+      var elCode = document.getElementById('code');
+      var elTotp = document.getElementById('totp-code');
+      var elRemember = document.getElementById('remember');
+      var btnResend = document.getElementById('btn-resend');
+
+      function show(step) {
+        for (var k in steps) steps[k].hidden = (k !== step);
+        setError('');
+      }
+
+      function setError(text) {
+        elError.textContent = text || '';
+        elError.hidden = !text;
+      }
+
+      /* Возврат туда, откуда пришли: только адреса этого же сайта,
+         чужой next молча заменяется главной. */
+      function nextUrl() {
+        var m = /[?&]next=([^&]+)/.exec(location.search);
+        if (m) {
+          try {
+            var u = new URL(decodeURIComponent(m[1]), location.href);
+            if (u.origin === location.origin) return u.href;
+          } catch (e) { /* битый next */ }
+        }
+        return '/';
+      }
+
+      /* Кулдаун повторной отправки */
+      var cooldownLeft = 0, cooldownTimer = null;
+      function startCooldown(sec) {
+        cooldownLeft = sec;
+        clearInterval(cooldownTimer);
+        tickCooldown();
+        cooldownTimer = setInterval(function () {
+          cooldownLeft -= 1;
+          tickCooldown();
+          if (cooldownLeft <= 0) clearInterval(cooldownTimer);
+        }, 1000);
+      }
+      function tickCooldown() {
+        btnResend.disabled = cooldownLeft > 0;
+        btnResend.textContent = cooldownLeft > 0
+          ? 'Отправить ещё раз (' + cooldownLeft + ')'
+          : 'Отправить ещё раз';
+      }
+
+      function requestCode(fallback) {
+        var email = elEmail.value.trim();
+        if (!email) return;
+        setError('');
+        Auth.requestCode(email, fallback)
+          .then(function (data) {
+            if (data.totp_enabled && !fallback) {
+              show('totp');
+              elTotp.focus();
+            } else {
+              document.getElementById('code-hint').textContent =
+                'Код отправлен на ' + email + '. Письмо иногда задерживается ' +
+                'на пару минут; проверьте и «Спам».';
+              show('code');
+              startCooldown(data.cooldown || 60);
+              elCode.focus();
+            }
+          })
+          .catch(function (e) {
+            setError(e.message || 'Не удалось отправить код');
+          });
+      }
+
+      function finish(user) {
+        window.track('login', { role: user.role });
+        location.href = nextUrl();
+      }
+
+      document.getElementById('step-email').addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        requestCode(false);
+      });
+
+      document.getElementById('step-code').addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var code = elCode.value.trim();
+        if (!code) return;
+        setError('');
+        Auth.verify(elEmail.value.trim(), code, elRemember.checked)
+          .then(finish)
+          .catch(function (e) { setError(e.message || 'Неверный код'); });
+      });
+
+      document.getElementById('step-totp').addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var code = elTotp.value.trim();
+        if (!code) return;
+        setError('');
+        Auth.verifyTotp(elEmail.value.trim(), code, elRemember.checked)
+          .then(finish)
+          .catch(function (e) { setError(e.message || 'Неверный код'); });
+      });
+
+      document.getElementById('btn-back').addEventListener('click', function () {
+        elCode.value = '';
+        show('email');
+      });
+      document.getElementById('btn-totp-back').addEventListener('click', function () {
+        elTotp.value = '';
+        show('email');
+      });
+      document.getElementById('btn-resend').addEventListener('click', function () {
+        if (cooldownLeft > 0) return;
+        requestCode(false);
+      });
+      document.getElementById('btn-fallback').addEventListener('click', function () {
+        requestCode(true); /* запасной код письмом для тех, у кого TOTP */
+      });
+
+      /* Стенд: вход без кода. Спрашиваем сам API, а не гадаем по адресу. */
+      Auth.isDev().then(function (dev) {
+        if (dev) document.getElementById('step-dev').hidden = false;
+      });
+
+      document.getElementById('btn-dev').addEventListener('click', function () {
+        var email = elEmail.value.trim();
+        if (!email) { setError('Введите почту'); elEmail.focus(); return; }
+        setError('');
+        Auth.devLogin(email, elRemember.checked)
+          .then(finish)
+          .catch(function (e) { setError(e.message || 'Не удалось войти'); });
+      });
+
+      /* Уже вошли — сразу назад */
+      Auth.getSession().then(function (user) {
+        if (user) location.href = nextUrl();
+      });
+
+    })();
+  </script><script>
+  /* На странице входа кнопка «Вход» в шапке — шум: человек уже здесь.
+     Скрыть надо после того, как скрипт каркаса её отрисует, поэтому ждём
+     конца очереди задач. */
+  setTimeout(function () {
+    var b = document.querySelector('[data-top-login]');
+    if (b) b.hidden = true;
+  }, 0);
+</script></main><script>
+      (function () {
+        var btn = document.querySelector('[data-top-theme]');
+        if (!btn) return;
+        var ICONS = { auto: '🌓', light: '☀️', dark: '🌙' };
+        var LABELS = { auto: 'авто', light: 'светлая', dark: 'тёмная' };
+        function stored() {
+          try { return localStorage.getItem('themeMode'); }
+          catch (e) { return null; }
+        }
+        var cur = stored() || 'dark';
+        function apply() {
+          var dark = cur === 'dark' ||
+            (cur === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+          btn.textContent = ICONS[cur] || ICONS.dark;
+          btn.title = 'Тема: ' + (LABELS[cur] || LABELS.dark);
+        }
+        btn.addEventListener('click', function () {
+          var order = ['auto', 'light', 'dark'];
+          cur = order[(order.indexOf(cur) + 1) % 3];
+          try { localStorage.setItem('themeMode', cur); } catch (e) {}
+          apply();
+        });
+        matchMedia('(prefers-color-scheme: dark)')
+          .addEventListener('change', apply);
+        /* Возврат из bfcache и смена темы в соседней вкладке. */
+        window.addEventListener('pageshow', function () {
+          cur = stored() || cur;
+          apply();
+        });
+        window.addEventListener('storage', function (e) {
+          if (e.key === 'themeMode') { cur = stored() || cur; apply(); }
+        });
+        apply();
+      })();
+    </script><script src="/legacy/site/config.js"></script><script src="/legacy/shared/analytics.js"></script><script>
+      window.track && window.track('page_view', { page: location.pathname });
+    </script><script type="module" src="/_astro/Base.astro_astro_type_script_index_0_lang.Dsa6W7T5.js"></script></body></html>
