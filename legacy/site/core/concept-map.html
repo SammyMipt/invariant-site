@@ -1,0 +1,1383 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Карта концептов — Физика 1</title>
+  <link rel="stylesheet" href="../site.css">
+  <style>
+    /* Карта концепт-слоя во весь экран. Приёмы те же, что у карты блоков
+       (map.html): холст, force-раскладка, токены вместо литеральных
+       цветов. Отличий два — кластеры собираются по теме концепта, а
+       карточка узла живёт слева отдельной панелью. */
+    html, body { height: 100%; }
+    body.cm-body {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    }
+    /* карта занимает весь экран, сквозной шапке нужна вся ширина
+       (в site.css то же самое сделано для .map-body) */
+    .cm-body .topbar-inner { max-width: none; }
+
+    /* ── верхняя полоса: навигация, сводка, фильтры ───────────────── */
+
+    .cm-top {
+      border-bottom: 1px solid var(--line);
+      background: var(--card);
+      font-size: 13.5px;
+      flex: none;
+    }
+    .cm-row {
+      display: flex;
+      align-items: center;
+      gap: .9rem;
+      flex-wrap: wrap;
+      padding: .5rem 1rem;
+    }
+    .cm-row + .cm-row { border-top: 1px solid var(--line); }
+    .cm-name { font-weight: 700; }
+    .cm-sum { color: var(--muted); font-size: 12.5px; }
+    .cm-hint { color: var(--muted); margin-left: auto; }
+    .cm-row label {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .cm-row select, .cm-row input[type="search"] {
+      font: inherit;
+      color: var(--ink);
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 4px 7px;
+    }
+    .cm-row select { max-width: 17rem; }
+    .cm-row input[type="search"] { width: 13rem; }
+    .cm-row input[type="search"]:focus { outline: 2px solid var(--accent); }
+    .cm-row button {
+      font: inherit;
+      color: var(--accent-ink);
+      background: var(--chip);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 3px 10px;
+      cursor: pointer;
+    }
+    .cm-row button:hover { border-color: var(--accent); }
+    .cm-found { color: var(--muted); font-size: 12.5px; min-width: 5rem; }
+
+    /* ── холст ────────────────────────────────────────────────────── */
+
+    .cm-wrap { position: relative; flex: 1; min-height: 0; }
+    #cmap { position: absolute; inset: 0; width: 100%; height: 100%;
+            touch-action: none; }
+
+    /* ── легенда ──────────────────────────────────────────────────── */
+
+    .cm-legend {
+      position: absolute;
+      top: .8rem;
+      right: .8rem;
+      max-height: calc(100% - 1.6rem);
+      overflow-y: auto;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: .5rem .6rem .6rem;
+      font-size: 12.5px;
+      line-height: 1.35;
+      width: 15.5rem;
+    }
+    .legend-head {
+      display: flex;
+      align-items: baseline;
+      gap: .5rem;
+      font-weight: 700;
+      color: var(--ink);
+      margin: .35rem .3rem .25rem;
+    }
+    .legend-head:first-child { margin-top: 0; }
+    .legend-head .legend-acts { margin-left: auto; font-weight: 400; }
+    .legend-act {
+      font: inherit;
+      color: var(--accent-ink);
+      background: none;
+      border: 0;
+      padding: 0 0 0 .5rem;
+      cursor: pointer;
+      text-decoration: underline dotted;
+    }
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: .45rem;
+      padding: .1rem .3rem;
+      border-radius: 5px;
+      color: var(--ink);
+    }
+    .legend-row.is-pick { cursor: pointer; }
+    .legend-row.is-pick:hover { background: var(--chip); }
+    .legend-row.is-on { font-weight: 600; }
+    .legend-row.is-off { color: var(--muted); opacity: .55; }
+    .legend-count { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+    .legend-dot {
+      width: 11px; height: 11px;
+      border-radius: 50%;
+      flex: none;
+      box-sizing: border-box;
+    }
+    .legend-dot.is-big { width: 15px; height: 15px; }
+    .legend-dot.is-plan { background: var(--paper) !important; }
+    .legend-line {
+      width: 24px;
+      flex: none;
+      border-top-width: 2px;
+    }
+    .legend-toggle {
+      position: absolute;
+      top: .8rem;
+      right: .8rem;
+      display: none;
+      font: inherit;
+      font-size: 12.5px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 4px 9px;
+      cursor: pointer;
+      color: var(--accent-ink);
+    }
+
+    /* ── тултип ───────────────────────────────────────────────────── */
+
+    .cm-tip {
+      position: absolute;
+      pointer-events: none;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(32, 38, 43, .12);
+      padding: .45rem .65rem;
+      max-width: 18rem;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .cm-tip .tip-title { font-weight: 600; }
+    .cm-tip .tip-meta { color: var(--muted); font-size: 12px; }
+
+    /* ── карточка узла ────────────────────────────────────────────── */
+
+    .cm-panel {
+      position: absolute;
+      top: .8rem;
+      left: .8rem;
+      bottom: .8rem;
+      width: 23rem;
+      overflow-y: auto;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(32, 38, 43, .1);
+      padding: .9rem 1rem 1.2rem;
+      font-size: 13.5px;
+      line-height: 1.5;
+    }
+    .cm-panel[hidden] { display: none; }
+    .panel-close {
+      float: right;
+      font: 400 18px/1 system-ui, sans-serif;
+      color: var(--muted);
+      background: none;
+      border: 0;
+      padding: 0 0 .3rem .5rem;
+      cursor: pointer;
+    }
+    .panel-close:hover { color: var(--ink); }
+    .panel-title {
+      font: 700 18px/1.25 system-ui, -apple-system, 'Segoe UI', sans-serif;
+      margin: 0 0 .3rem;
+    }
+    .panel-meta { color: var(--muted); font-size: 12.5px; margin: 0 0 .6rem; }
+    .panel-note { margin: .5rem 0 .9rem; }
+    .panel-sec {
+      margin: .9rem 0 0;
+      padding-top: .7rem;
+      border-top: 1px solid var(--line);
+    }
+    .panel-sec-name {
+      font: 700 11px/1.4 system-ui, sans-serif;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+      color: var(--accent-ink);
+      margin: 0 0 .45rem;
+    }
+    .panel-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin: 0 0 .5rem; }
+    .chip {
+      display: inline-block;
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: var(--muted);
+      background: var(--chip);
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 1px 7px;
+    }
+    .chip-plan {
+      color: var(--warn);
+      background: var(--paper);
+      border: 1px dashed var(--warn);
+      font-weight: 600;
+    }
+    button.chip { font-family: inherit; cursor: pointer; color: var(--accent-ink); }
+    button.chip:hover { border-color: var(--accent); }
+    .facet {
+      margin: 0 0 .55rem;
+    }
+    .facet-name {
+      font-weight: 600;
+      font-size: 12px;
+      letter-spacing: .02em;
+      color: var(--ink);
+    }
+    .facet ul, .gap-list { list-style: none; margin: .15rem 0 0; padding: 0; }
+    .facet li { padding: .07rem 0 .07rem .8rem; text-indent: -.8rem; }
+    .facet a { text-decoration: none; }
+    .facet a:hover { text-decoration: underline; }
+    .blk-kind { color: var(--muted); font-size: 11.5px; }
+    .gap-item {
+      margin: 0 0 .5rem;
+      padding-left: .6rem;
+      border-left: 2px solid var(--warn);
+    }
+    .gap-facet { font-weight: 600; font-size: 12px; color: var(--warn); }
+    .gap-note { color: var(--muted); font-size: 12.5px; }
+    .link-list { list-style: none; margin: 0; padding: 0; }
+    .link-item { margin: 0 0 .5rem; }
+    .link-head {
+      display: flex;
+      align-items: baseline;
+      gap: .4rem;
+      flex-wrap: wrap;
+    }
+    .link-type {
+      font-size: 11px;
+      line-height: 1.6;
+      border-radius: 3px;
+      padding: 0 5px;
+      color: #fff;
+      white-space: nowrap;
+    }
+    .link-to {
+      font: 600 13.5px/1.35 system-ui, sans-serif;
+      color: var(--accent-ink);
+      background: none;
+      border: 0;
+      padding: 0;
+      text-align: left;
+      cursor: pointer;
+    }
+    .link-to:hover { text-decoration: underline; }
+    .link-note { color: var(--muted); font-size: 12.5px; }
+    .panel-empty { color: var(--muted); font-size: 12.5px; }
+
+    @media (max-width: 900px) {
+      .cm-row { gap: .6rem; padding: .45rem .7rem; }
+      .cm-sum { font-size: 12px; line-height: 1.4; }
+      .cm-legend { display: none; }
+      .cm-legend.is-open { display: block; top: 2.6rem; }
+      .legend-toggle { display: block; }
+      .cm-hint { display: none; }
+      .cm-panel {
+        top: auto;
+        left: .5rem;
+        right: .5rem;
+        bottom: .5rem;
+        width: auto;
+        max-height: 62%;
+      }
+    }
+  </style>
+</head>
+<body class="cm-body">
+  <div class="cm-top">
+    <div class="cm-row">
+      <a class="back-link" href="../index.html">&larr; Главная</a>
+      <a class="back-link" href="index.html">База знаний</a>
+      <a class="back-link" href="map.html">Карта блоков</a>
+      <span class="cm-name">Карта концептов</span>
+      <span class="cm-sum" id="cm-sum">…</span>
+    </div>
+    <div class="cm-row">
+      <input type="search" id="cm-q" placeholder="поиск по заголовку"
+             aria-label="Поиск узла по заголовку">
+      <span class="cm-found" id="cm-found"></span>
+      <select id="axis-filter" aria-label="Фильтр по оси">
+        <option value="">все оси</option>
+      </select>
+      <label><input type="checkbox" id="plan-only"> только плановые</label>
+      <button id="reset-view">Сбросить</button>
+      <span class="cm-hint">клик по узлу открывает карточку; узлы таскаются,
+        колесо — зум</span>
+    </div>
+  </div>
+
+  <div class="cm-wrap" id="wrap">
+    <canvas id="cmap"></canvas>
+    <button class="legend-toggle" id="legend-toggle">Легенда</button>
+    <div class="cm-legend" id="legend"></div>
+    <div class="cm-tip" id="tip" hidden></div>
+    <aside class="cm-panel" id="panel" hidden></aside>
+  </div>
+
+<script src="../../shared/analytics.js"></script>
+<script src="../config.js"></script>
+<script src="../../shared/auth.js"></script>
+<script src="../../shared/topbar.js"></script>
+<script src="../../content/graph-data.js"></script>
+<script src="../../content/concepts-data.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var C = window.CONCEPTS, G = window.GRAPH;
+
+  /* Заголовки недель — из спек weekNN.js (поле title, дословно) */
+  var WEEK_TITLES = {
+    1: 'Предмет физики. Размерности',
+    2: 'Кинематика материальной точки',
+    3: 'Законы Ньютона. ЗСИ. Центр масс',
+    4: 'Работа и энергия. Столкновения',
+    5: 'Момент импульса. Гравитация',
+    6: 'Произвольное движение твёрдого тела',
+    7: 'Колебания',
+    8: 'Деформации и гидродинамика',
+    9: 'Введение в термодинамику',
+    10: 'Второе начало термодинамики. Энтропия',
+    11: 'Фазовые переходы и реальный газ',
+    12: 'Распределения Максвелла и Больцмана',
+    13: 'Явления переноса'
+  };
+
+  var FORMS = {
+    'узел': ['узел', 'узла', 'узлов'],
+    'связь': ['связь', 'связи', 'связей'],
+    'блок': ['блок', 'блока', 'блоков'],
+    'пробел': ['пробел', 'пробела', 'пробелов']
+  };
+  function plural(n, word) {
+    var f = FORMS[word] || [word, word, word];
+    var d = n % 10, h = n % 100;
+    if (d === 1 && h !== 11) return n + ' ' + f[0];
+    if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return n + ' ' + f[1];
+    return n + ' ' + f[2];
+  }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function cssVar(name, fb) {
+    var v = getComputedStyle(document.documentElement)
+      .getPropertyValue(name).trim();
+    return v || fb;
+  }
+  var INK = cssVar('--ink', '#20262b');
+  var MUTED = cssVar('--muted', '#5e6a72');
+  var PAPER = cssVar('--paper', '#fbfaf7');
+  var WARN = cssVar('--warn', '#b4530a');
+
+  /* ── палитры: четыре цвета из токенов, остальные — оттенки той же
+        светлоты, чтобы узлы и линии читались на светлой бумаге ────── */
+
+  var TYPE_ORDER = ['концепт', 'модель', 'метод', 'ось', 'демонстрация',
+                    'сюжет', 'анти-миф'];
+  var TYPE_COLOR = {
+    'концепт': cssVar('--accent', '#0f7a8a'),
+    'модель': cssVar('--fig-b', '#c2571a'),
+    'метод': 'hsl(80, 45%, 32%)',
+    'ось': 'hsl(265, 38%, 48%)',
+    'демонстрация': 'hsl(160, 42%, 34%)',
+    'сюжет': 'hsl(215, 48%, 46%)',
+    'анти-миф': cssVar('--fig-unit', '#c95f6a')
+  };
+
+  /* Типы связей в порядке онтологии. ls — как рисовать штрих в легенде,
+     d — рисунок пунктира на холсте (пустой массив даёт сплошную).
+     Излом и опровержение нарочно уведены в тёплый пунктир: скелет
+     вывода должен читаться отдельно от мест, где модель ломается. */
+  var EDGE_ORDER = ['выводится-из', 'пререквизит', 'обобщает', 'граница-модели',
+                    'пример-к', 'альтернативное-прочтение', 'применяется-в',
+                    'использует-метод', 'аналогия', 'неявно-использует',
+                    'контрпример-к', 'мост-в-ml', 'демонстрирует'];
+  var EDGE_STYLE = {
+    'выводится-из':             { c: cssVar('--accent', '#0f7a8a'), w: 1.3, d: [], ls: 'solid' },
+    'пререквизит':              { c: 'hsl(215, 40%, 54%)', w: 1.0, d: [], ls: 'solid' },
+    'обобщает':                 { c: 'hsl(265, 38%, 52%)', w: 1.2, d: [], ls: 'solid' },
+    'граница-модели':           { c: cssVar('--fig-b', '#c2571a'), w: 1.7, d: [7, 4], ls: 'dashed' },
+    'пример-к':                 { c: 'hsl(160, 42%, 36%)', w: 1.1, d: [2, 3], ls: 'dotted' },
+    'альтернативное-прочтение': { c: 'hsl(45, 62%, 36%)', w: 1.1, d: [5, 4], ls: 'dashed' },
+    'применяется-в':            { c: 'hsl(28, 45%, 44%)', w: 1.2, d: [], ls: 'solid' },
+    'использует-метод':         { c: 'hsl(80, 45%, 32%)', w: 1.0, d: [4, 3], ls: 'dashed' },
+    'аналогия':                 { c: 'hsl(315, 38%, 46%)', w: 1.2, d: [8, 3, 2, 3], ls: 'dashed' },
+    'неявно-использует':        { c: 'hsl(205, 10%, 50%)', w: 1.0, d: [1.5, 4], ls: 'dotted' },
+    'контрпример-к':            { c: cssVar('--fig-unit', '#c95f6a'), w: 1.7, d: [3, 3], ls: 'dashed' },
+    'мост-в-ml':                { c: 'hsl(232, 45%, 54%)', w: 1.4, d: [9, 4], ls: 'dashed' },
+    'демонстрирует':            { c: 'hsl(110, 40%, 34%)', w: 1.2, d: [2, 3], ls: 'dotted' }
+  };
+  /* Рабочий вид онтологии: скелет вывода плюс линии моделей и аналогий */
+  var WORK_VIEW = ['выводится-из', 'обобщает', 'граница-модели', 'аналогия'];
+
+  /* Порядок граней — из онтологии, от формулировки к справке.
+     Незнакомая грань не теряется: уходит в хвост списка. */
+  var FACET_ORDER = ['формулировка', 'интуиция', 'идейный-вывод', 'строгий-вывод',
+                     'альтернативное-прочтение', 'границы-применимости',
+                     'демонстрация', 'демка', 'рисунок', 'пример', 'задача',
+                     'вопрос', 'ml-мост', 'историческая-справка'];
+  function facetLabel(f) { return f === 'ml-мост' ? 'ML-мост' : f.replace(/-/g, ' '); }
+  function edgeLabel(t) { return t === 'мост-в-ml' ? 'мост-в-ML' : t; }
+
+  /* ── реестр блоков: заголовок и адрес страницы, где блок свёрстан ── */
+
+  var blockById = {};
+  var slugWeek = {};      /* тема → неделя: берём у первого блока темы */
+  G.nodes.forEach(function (b) {
+    blockById[b.id] = b;
+    if (slugWeek[b.slug] === undefined) slugWeek[b.slug] = b.week;
+  });
+  function blockHref(b) {
+    var w = '../week' + pad2(b.week) + '/';
+    return b.page === 'week' ? w + 'index.html' : w + 'chapter.html#blk-' + b.id;
+  }
+  function themeTitle(slug) {
+    if (slug === 'axes') return 'оси ядра';
+    if (slug === 'cross') return 'сквозное, вне одной темы';
+    /* После перерезки 22.08 слой сам знает имена областей (CONCEPTS.areas);
+       недельные подписи остаются только как совместимость со старой сборкой. */
+    var areas = (C && C.areas) || [];
+    for (var i = 0; i < areas.length; i++) {
+      if (areas[i].id === slug) return areas[i].title;
+    }
+    var w = slugWeek[slug];
+    return w ? pad2(w) + ' · ' + WEEK_TITLES[w] : slug;
+  }
+
+  /* ── узлы и связи ─────────────────────────────────────────────── */
+
+  var nodes = C.nodes.map(function (n, i) {
+    return {
+      i: i, id: n.id, type: n.type, title: n.title, slug: n.slug,
+      tags: n.tags || [], axes: n.axes || [], facets: n.facets || {},
+      gaps: n.gaps || [], note: n.note || '', kind: n.kind || '',
+      plan: n.status === 'план',
+      low: n.title.toLowerCase(),
+      x: 0, y: 0, vx: 0, vy: 0, fx: 0, fy: 0, r: 4, deg: 0, pin: false
+    };
+  });
+  var byId = {};
+  nodes.forEach(function (n) { byId[n.id] = n; });
+
+  var edges = [];
+  C.edges.forEach(function (e) {
+    var a = byId[e.from], b = byId[e.to];
+    if (!a || !b) return;
+    edges.push({ a: a, b: b, type: e.type, note: e.note || '',
+                 cross: a.slug !== b.slug });
+    a.deg++; b.deg++;
+  });
+  var adj = nodes.map(function () { return []; });
+  edges.forEach(function (e) { adj[e.a.i].push(e); adj[e.b.i].push(e); });
+
+  /* Онтология дорастает, данные пересобираются скриптом: тип, которого нет
+     в списках выше, не должен молча пропасть с карты. Даём ему серый цвет
+     и строку в легенде — на карте сразу видно, что появилось новое. */
+  edges.forEach(function (e) {
+    if (EDGE_STYLE[e.type]) return;
+    EDGE_STYLE[e.type] = { c: MUTED, w: 1.1, d: [], ls: 'solid' };
+    EDGE_ORDER.push(e.type);
+  });
+  nodes.forEach(function (n) {
+    if (TYPE_COLOR[n.type]) return;
+    TYPE_COLOR[n.type] = MUTED;
+    TYPE_ORDER.push(n.type);
+  });
+
+  /* Оси рёбер не имеют вовсе: их место в модели — членство узлов.
+     Собираем обратный указатель, он же наполняет карточку оси. */
+  var axisNodes = nodes.filter(function (n) { return n.type === 'ось'; });
+  var axisMembers = {};
+  axisNodes.forEach(function (a) { axisMembers[a.id] = []; });
+  nodes.forEach(function (n) {
+    n.axes.forEach(function (id) {
+      if (axisMembers[id]) axisMembers[id].push(n);
+    });
+  });
+
+  /* размер — по числу связей; у осей он фиксирован, они хабы по смыслу,
+     а не по степени, и должны быть видны с любого масштаба */
+  nodes.forEach(function (n) {
+    n.r = n.type === 'ось' ? 15 : Math.min(11, 3.4 + Math.sqrt(n.deg) * 1.45);
+    /* плановому узлу добавляем радиуса: полый кружок с пунктиром читается
+       хуже залитого, а не заметить дыру ядра нельзя */
+    if (n.plan) n.r += 1.8;
+  });
+
+  /* ── сводка: всё считается по данным ──────────────────────────── */
+
+  var refBlocks = {}, refCount = 0, gapCount = 0, planCount = 0;
+  nodes.forEach(function (n) {
+    gapCount += n.gaps.length;
+    if (n.plan) planCount++;
+    Object.keys(n.facets).forEach(function (f) {
+      n.facets[f].forEach(function (id) {
+        if (!refBlocks[id]) { refBlocks[id] = true; if (blockById[id]) refCount++; }
+      });
+    });
+  });
+  /* покрытие меряем по темам, которые концепт-слой уже разобрал:
+     доля от всего ядра ничего не сказала бы о качестве пересборки */
+  var themeSlugs = {};
+  nodes.forEach(function (n) {
+    if (slugWeek[n.slug] !== undefined) themeSlugs[n.slug] = true;
+  });
+  var poolTotal = 0, poolHit = 0;
+  G.nodes.forEach(function (b) {
+    if (!themeSlugs[b.slug]) return;
+    poolTotal++;
+    if (refBlocks[b.id]) poolHit++;
+  });
+  var crossCount = edges.filter(function (e) { return e.cross; }).length;
+
+  document.getElementById('cm-sum').textContent =
+    'В концепт-слое ' + plural(nodes.length, 'узел') + ' и ' +
+    plural(edges.length, 'связь') + ', межтемных из них ' + crossCount + '. ' +
+    'Гранями накрыто ' + plural(refCount, 'блок') + ' ядра из ' + G.nodes.length +
+    (poolHit === poolTotal
+      ? ', и в пересобранных темах непокрытых не осталось: '
+      : ', в пересобранных темах покрыто ') + poolHit + ' из ' + poolTotal + '. ' +
+    'Плановых узлов ' + planCount + ', отмечено ' + plural(gapCount, 'пробел') + '.';
+
+  /* ── раскладка: кластер на тему, оси приколоты внешним кольцом ─── */
+
+  /* кольца приплюснуты: экран шире, чем выше, и на круге граф пришлось бы
+     ужимать до нечитаемого масштаба */
+  var RX = 700, RY = 390, AX = 1150, AY = 640;
+  var themeList = Object.keys(themeSlugs).sort(function (a, b) {
+    return slugWeek[a] - slugWeek[b];
+  });
+  var centers = {};
+  themeList.forEach(function (s, k) {
+    var ang = -Math.PI / 2 + 2 * Math.PI * k / themeList.length;
+    centers[s] = { x: RX * Math.cos(ang), y: RY * Math.sin(ang) };
+  });
+  /* сквозной узел тянет к центру: он и по смыслу между темами */
+  centers.cross = { x: 0, y: 0 };
+  centers.axes = { x: 0, y: 0 };
+
+  var rnd = (function () {   /* детерминированный генератор: раскладка
+                                воспроизводится от загрузки к загрузке */
+    var s = 42;
+    return function () {
+      s = (s * 1103515245 + 12345) & 0x7fffffff;
+      return s / 0x7fffffff;
+    };
+  })();
+  nodes.forEach(function (n) {
+    var c = centers[n.slug] || centers.cross;
+    var a = rnd() * 2 * Math.PI, d = 18 + rnd() * 78;
+    n.x = c.x + d * Math.cos(a);
+    n.y = c.y + d * Math.sin(a);
+  });
+  /* оси стоят на внешнем кольце и в физике не участвуют: без рёбер их
+     бы вытолкнуло расталкиванием куда попало. Кольцо повёрнуто на
+     полшага, чтобы ось не села ровно на кластер темы */
+  axisNodes.forEach(function (n, k) {
+    var ang = -Math.PI / 2 + 2 * Math.PI * (k + 0.5) / axisNodes.length;
+    n.x = AX * Math.cos(ang);
+    n.y = AY * Math.sin(ang);
+    n.pin = true;
+  });
+
+  var REPULSE = 750;        /* расталкивание узлов */
+  var CUTOFF2 = 140 * 140;  /* дальше друг друга не видят */
+  var PULL = 0.042;         /* притяжение к центру своей темы: держим сильным,
+                               иначе кластеры расплываются и середина карты
+                               зарастает узлами вместо межтемных связей */
+  var alpha = 1;            /* температура: затухает, раскладка замирает */
+
+  /* межтемные пружины длиннее и мягче, иначе кластеры тем стянет
+     в общую кучу посреди кольца */
+  edges.forEach(function (e) {
+    e.rest = e.cross ? 200 : 46;
+    e.k = e.cross ? 0.004 : 0.02;
+  });
+
+  var dragNode = null;
+
+  function tick() {
+    var i, j, n, m, dx, dy, d2, d, f;
+    for (i = 0; i < nodes.length; i++) {
+      n = nodes[i];
+      var c = centers[n.slug] || centers.cross;
+      n.fx = (c.x - n.x) * PULL;
+      n.fy = (c.y - n.y) * PULL;
+    }
+    for (i = 0; i < nodes.length; i++) {
+      n = nodes[i];
+      for (j = i + 1; j < nodes.length; j++) {
+        m = nodes[j];
+        dx = m.x - n.x; dy = m.y - n.y;
+        d2 = dx * dx + dy * dy;
+        if (d2 > CUTOFF2) continue;
+        if (d2 < 1) { dx = rnd() - 0.5; dy = rnd() - 0.5; d2 = 1; }
+        f = REPULSE / d2;
+        d = Math.sqrt(d2);
+        dx /= d; dy /= d;
+        n.fx -= dx * f; n.fy -= dy * f;
+        m.fx += dx * f; m.fy += dy * f;
+      }
+    }
+    for (i = 0; i < edges.length; i++) {
+      var e = edges[i];
+      dx = e.b.x - e.a.x; dy = e.b.y - e.a.y;
+      d = Math.sqrt(dx * dx + dy * dy) || 1;
+      f = (d - e.rest) * e.k;
+      dx /= d; dy /= d;
+      e.a.fx += dx * f; e.a.fy += dy * f;
+      e.b.fx -= dx * f; e.b.fy -= dy * f;
+    }
+    for (i = 0; i < nodes.length; i++) {
+      n = nodes[i];
+      if (n.pin || n === dragNode) { n.vx = 0; n.vy = 0; continue; }
+      n.vx = (n.vx + n.fx * alpha) * 0.72;
+      n.vy = (n.vy + n.fy * alpha) * 0.72;
+      if (n.vx > 12) n.vx = 12; else if (n.vx < -12) n.vx = -12;
+      if (n.vy > 12) n.vy = 12; else if (n.vy < -12) n.vy = -12;
+      n.x += n.vx; n.y += n.vy;
+    }
+    alpha *= 0.993;
+  }
+
+  /* прогрев до первого кадра: узлы расходятся из стартовых куч */
+  for (var w0 = 0; w0 < 150; w0++) tick();
+
+  /* ── холст и вид ──────────────────────────────────────────────── */
+
+  var wrap = document.getElementById('wrap');
+  var canvas = document.getElementById('cmap');
+  var ctx = canvas.getContext('2d');
+  var dpr = window.devicePixelRatio || 1;
+  var view = { s: 1, tx: 0, ty: 0 };
+  var needsDraw = true;
+
+  function resize() {
+    var r = wrap.getBoundingClientRect();
+    var wasZero = !canvas.width || !canvas.height;
+    canvas.width = Math.round(r.width * dpr);
+    canvas.height = Math.round(r.height * dpr);
+    /* страница могла открыться в скрытой вкладке нулевого размера:
+       при первом настоящем размере вписать граф заново */
+    if (wasZero && canvas.width && canvas.height) fitView();
+    needsDraw = true;
+  }
+  window.addEventListener('resize', resize);
+  /* Окно может и не меняться, а контейнер — получить размер позже: вкладку
+     показали, панель раскрыли, шапка перенеслась на вторую строку. Событие
+     resize при этом не приходит, и холст остался бы нулевым навсегда. */
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(wrap);
+  resize();
+
+  function fitView() {
+    var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+    nodes.forEach(function (n) {
+      if (n.x < minX) minX = n.x;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.y > maxY) maxY = n.y;
+    });
+    var w = canvas.width / dpr, h = canvas.height / dpr;
+    var s = Math.min(w / (maxX - minX + 190), h / (maxY - minY + 190));
+    view.s = Math.min(1.6, s);
+    view.tx = w / 2 - view.s * (minX + maxX) / 2;
+    view.ty = h / 2 - view.s * (minY + maxY) / 2;
+    needsDraw = true;
+  }
+  fitView();
+
+  function toWorld(px, py) {
+    return { x: (px - view.tx) / view.s, y: (py - view.ty) / view.s };
+  }
+
+  /* центрируем узел в свободной части холста: открытая карточка
+     съедает левый край, и без поправки узел уезжает под неё */
+  function centerOn(n) {
+    var w = canvas.width / dpr, h = canvas.height / dpr;
+    var left = (!panel.hidden && w > 900) ? panel.offsetWidth + 24 : 0;
+    view.tx = left + (w - left) / 2 - view.s * n.x;
+    view.ty = h / 2 - view.s * n.y;
+    needsDraw = true;
+  }
+
+  /* ── состояние интерфейса ─────────────────────────────────────── */
+
+  var typeOn = {};
+  EDGE_ORDER.forEach(function (t) { typeOn[t] = true; });
+  var axisPick = '';        /* '' — все оси */
+  var planOnly = false;
+  var query = '';
+  var matchSet = null;      /* узлы, попавшие под поиск */
+  var hover = null;
+  var selected = null;
+
+  function passFilters(n) {
+    if (planOnly && !n.plan) return false;
+    if (axisPick) {
+      return n.type === 'ось' ? n.id === axisPick : n.axes.indexOf(axisPick) >= 0;
+    }
+    return true;
+  }
+  function nodeAlpha(n) {
+    if (!passFilters(n)) return 0.16;
+    if (matchSet && !matchSet.has(n)) return 0.4;
+    return 1;
+  }
+
+  /* ── отрисовка ────────────────────────────────────────────────── */
+
+  function strokeBatch(list, st, alphaVal, boost) {
+    if (!list.length) return;
+    ctx.globalAlpha = alphaVal;
+    ctx.strokeStyle = st.c;
+    ctx.lineWidth = (st.w * boost) / view.s;
+    ctx.setLineDash(st.d.map(function (v) { return v / view.s; }));
+    ctx.beginPath();
+    for (var i = 0; i < list.length; i++) {
+      ctx.moveTo(list[i].a.x, list[i].a.y);
+      ctx.lineTo(list[i].b.x, list[i].b.y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
+  /* Занятые подписями места кадра. Подписи узлов близких находок иначе
+     слипаются в нечитаемый ворох: рисуем те, что находят себе место. */
+  var placed = [];
+  function drawLabel(x, y, text, color, alphaVal, size, align, guard) {
+    ctx.globalAlpha = alphaVal;
+    ctx.font = (size / view.s) + 'px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = align || 'center';
+    var w = ctx.measureText(text).width, h = size * 1.35 / view.s;
+    var cx = align === 'left' ? x + w / 2 : (align === 'right' ? x - w / 2 : x);
+    var cy = y - h / 2;
+    if (guard) {
+      for (var i = 0; i < placed.length; i++) {
+        var p = placed[i];
+        if (Math.abs(cx - p.x) * 2 < w + p.w && Math.abs(cy - p.y) * 2 < h + p.h) {
+          ctx.globalAlpha = 1;
+          return false;
+        }
+      }
+    }
+    placed.push({ x: cx, y: cy, w: w, h: h });
+    ctx.lineWidth = 3.4 / view.s;      /* подложка цветом бумаги, иначе
+                                          подпись тонет в линиях связей */
+    ctx.strokeStyle = PAPER;
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y);
+    ctx.globalAlpha = 1;
+    return true;
+  }
+
+  function draw() {
+    placed.length = 0;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s,
+                     dpr * view.tx, dpr * view.ty);
+
+    /* связи: на тип по три партии — пригашенные, обычные, связи
+       выбранного узла. Один beginPath на партию, не на ребро. */
+    var buckets = {};
+    var i, e, n, k;
+    for (i = 0; i < edges.length; i++) {
+      e = edges[i];
+      if (!typeOn[e.type]) continue;
+      var b = buckets[e.type] || (buckets[e.type] = { dim: [], on: [], hot: [] });
+      if (selected && (e.a === selected || e.b === selected)) b.hot.push(e);
+      else if (passFilters(e.a) && passFilters(e.b)) b.on.push(e);
+      else b.dim.push(e);
+    }
+    EDGE_ORDER.forEach(function (t) {
+      var b = buckets[t];
+      if (!b) return;
+      strokeBatch(b.dim, EDGE_STYLE[t], 0.08, 1);
+      strokeBatch(b.on, EDGE_STYLE[t], matchSet ? 0.3 : 0.55, 1);
+    });
+    EDGE_ORDER.forEach(function (t) {   /* горячие поверх всех остальных */
+      if (buckets[t]) strokeBatch(buckets[t].hot, EDGE_STYLE[t], 1, 1.7);
+    });
+
+    /* подписи тем — ориентир при отдалении. Кладём их не над центром масс,
+       а за краем кластера по радиусу от середины карты: над центром подпись
+       ложится прямо на узлы соседней темы */
+    var sums = {};
+    for (k = 0; k < nodes.length; k++) {
+      n = nodes[k];
+      if (n.type === 'ось') continue;
+      var s2 = sums[n.slug] || (sums[n.slug] = { x: 0, y: 0, c: 0, max: 0 });
+      s2.x += n.x; s2.y += n.y; s2.c++;
+    }
+    Object.keys(sums).forEach(function (slug) {
+      var s3 = sums[slug];
+      s3.x /= s3.c; s3.y /= s3.c;
+    });
+    for (k = 0; k < nodes.length; k++) {
+      n = nodes[k];
+      if (n.type === 'ось') continue;
+      var s4 = sums[n.slug];
+      var d4 = Math.sqrt((n.x - s4.x) * (n.x - s4.x) + (n.y - s4.y) * (n.y - s4.y));
+      if (d4 > s4.max) s4.max = d4;
+    }
+    Object.keys(sums).forEach(function (slug) {
+      var s5 = sums[slug];
+      var len = Math.sqrt(s5.x * s5.x + s5.y * s5.y);
+      var ux = len > 1 ? s5.x / len : 0;
+      var uy = len > 1 ? s5.y / len : -1;
+      var off = s5.max + 30 + 14 / view.s;
+      /* у боковых кластеров подпись прижимается краем к узлам: по центру
+         она половиной длины легла бы на свою же тему */
+      var align = ux > 0.6 ? 'left' : (ux < -0.6 ? 'right' : 'center');
+      drawLabel(s5.x + ux * off, s5.y + uy * off + (uy > 0 ? 11 : -2) / view.s,
+                themeTitle(slug), MUTED, 0.85, 13, align);
+    });
+
+    /* узлы: плановые полым кружком с пунктиром — дыры ядра видны сразу */
+    for (k = 0; k < nodes.length; k++) {
+      n = nodes[k];
+      var a = nodeAlpha(n);
+      var col = TYPE_COLOR[n.type] || MUTED;
+      ctx.globalAlpha = a;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r, 0, 6.2832);
+      if (n.plan) {
+        ctx.fillStyle = PAPER;
+        ctx.fill();
+        ctx.setLineDash([2.5 / view.s, 2.5 / view.s]);
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1.6 / view.s;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (n.type === 'ось') {
+        ctx.fillStyle = col;
+        ctx.globalAlpha = a * 0.16;
+        ctx.fill();
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2.2 / view.s;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = col;
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    /* обводки: соседи выбранного узла, сам выбранный, находки поиска */
+    if (selected) {
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1.4 / view.s;
+      adj[selected.i].forEach(function (ed) {
+        if (!typeOn[ed.type]) return;
+        var o = ed.a === selected ? ed.b : ed.a;
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, o.r + 2.2 / view.s, 0, 6.2832);
+        ctx.stroke();
+      });
+      ctx.lineWidth = 2.4 / view.s;
+      ctx.beginPath();
+      ctx.arc(selected.x, selected.y, selected.r + 4 / view.s, 0, 6.2832);
+      ctx.stroke();
+    }
+    if (matchSet) {
+      ctx.strokeStyle = cssVar('--accent', '#0f7a8a');
+      ctx.lineWidth = 2.2 / view.s;
+      matchSet.forEach(function (m) {
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, m.r + 5 / view.s, 0, 6.2832);
+        ctx.stroke();
+      });
+    }
+
+    /* подписи: оси и выбранный узел всегда, находки — сколько влезет */
+    axisNodes.forEach(function (n2) {
+      drawLabel(n2.x, n2.y + n2.r + 15 / view.s, n2.title,
+                TYPE_COLOR['ось'], Math.max(0.25, nodeAlpha(n2)), 13);
+    });
+    if (selected && selected.type !== 'ось') {
+      drawLabel(selected.x, selected.y - selected.r - 8 / view.s,
+                selected.title, INK, 1, 13);
+    }
+    if (matchSet && matchSet.size <= 30) {
+      matchSet.forEach(function (m) {
+        if (m !== selected) {
+          drawLabel(m.x, m.y - m.r - 7 / view.s, m.title, INK, 1, 12.5,
+                    'center', true);
+        }
+      });
+    }
+    /* режим «только плановые» — это карта дыр, и дыры стоит звать по имени */
+    if (planOnly) {
+      for (k = 0; k < nodes.length; k++) {
+        n = nodes[k];
+        if (n.plan && n !== selected) {
+          drawLabel(n.x, n.y - n.r - 7 / view.s, n.title, WARN, 1, 12.5,
+                    'center', true);
+        }
+      }
+    }
+  }
+
+  /* ── цикл: физика до замирания, дальше перерисовка по запросу ──── */
+
+  function frame() {
+    if (alpha > 0.012) {
+      tick(); tick();
+      needsDraw = true;
+    }
+    if (needsDraw) { draw(); needsDraw = false; }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  /* ── наведение, перетаскивание, клик, зум ─────────────────────── */
+
+  var tip = document.getElementById('tip');
+  var pointer = { down: false, moved: false, px: 0, py: 0, panning: false };
+
+  function pick(px, py) {
+    var p = toWorld(px, py);
+    var best = null, bestD = 1e9;
+    var slack = 5 / view.s;
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      var dx = n.x - p.x, dy = n.y - p.y;
+      var d = Math.sqrt(dx * dx + dy * dy) - n.r;
+      if (d < slack && d < bestD) { best = n; bestD = d; }
+    }
+    return best;
+  }
+
+  function setHover(n, px, py) {
+    if (n === hover && !n) return;
+    hover = n;
+    if (n) {
+      tip.innerHTML = '<div class="tip-title"></div><div class="tip-meta"></div>';
+      tip.querySelector('.tip-title').textContent = n.title;
+      var meta = [n.type + (n.kind ? ' · ' + n.kind : '')];
+      meta.push(themeTitle(n.slug));
+      if (n.type === 'ось') meta.push('узлов на оси: ' + axisMembers[n.id].length);
+      else if (n.deg) meta.push('связей: ' + n.deg);
+      if (n.plan) meta.push('план, блоков ещё нет');
+      if (n.gaps.length) meta.push(plural(n.gaps.length, 'пробел'));
+      tip.querySelector('.tip-meta').textContent = meta.join(' · ');
+      tip.hidden = false;
+      var wr = wrap.getBoundingClientRect();
+      var tx = Math.min(px + 14, wr.width - tip.offsetWidth - 8);
+      var ty = Math.min(py + 14, wr.height - tip.offsetHeight - 8);
+      tip.style.left = Math.max(4, tx) + 'px';
+      tip.style.top = Math.max(4, ty) + 'px';
+      canvas.style.cursor = 'pointer';
+    } else {
+      tip.hidden = true;
+      canvas.style.cursor = '';
+    }
+    needsDraw = true;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    /* указатель мог исчезнуть между down и capture — не падать */
+    try { canvas.setPointerCapture(ev.pointerId); } catch (e) {}
+    pointer.down = true;
+    pointer.moved = false;
+    pointer.px = ev.offsetX; pointer.py = ev.offsetY;
+    dragNode = pick(ev.offsetX, ev.offsetY);
+    pointer.panning = !dragNode;
+  });
+
+  canvas.addEventListener('pointermove', function (ev) {
+    var px = ev.offsetX, py = ev.offsetY;
+    if (pointer.down) {
+      if (Math.abs(px - pointer.px) + Math.abs(py - pointer.py) > 4) {
+        pointer.moved = true;
+      }
+      if (dragNode) {
+        var p = toWorld(px, py);
+        dragNode.x = p.x; dragNode.y = p.y;
+        if (!dragNode.pin && alpha < 0.06) alpha = 0.06;  /* подогреть соседей */
+        needsDraw = true;
+      } else if (pointer.panning) {
+        view.tx += px - pointer.px;
+        view.ty += py - pointer.py;
+        pointer.px = px; pointer.py = py;
+        needsDraw = true;
+      }
+      return;
+    }
+    setHover(pick(px, py), px, py);
+  });
+
+  canvas.addEventListener('pointerup', function () {
+    if (!pointer.moved) {
+      if (dragNode) openNode(dragNode);
+      else closePanel();
+    }
+    pointer.down = false;
+    dragNode = null;
+    pointer.panning = false;
+  });
+
+  canvas.addEventListener('pointerleave', function () { setHover(null); });
+
+  canvas.addEventListener('wheel', function (ev) {
+    ev.preventDefault();
+    var factor = Math.exp(-ev.deltaY * 0.0012);
+    var s2 = Math.min(5, Math.max(0.12, view.s * factor));
+    factor = s2 / view.s;
+    view.tx = ev.offsetX - (ev.offsetX - view.tx) * factor;
+    view.ty = ev.offsetY - (ev.offsetY - view.ty) * factor;
+    view.s = s2;
+    needsDraw = true;
+  }, { passive: false });
+
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') { closePanel(); q.blur(); }
+  });
+
+  /* ── карточка узла ────────────────────────────────────────────── */
+
+  var panel = document.getElementById('panel');
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function section(name) {
+    var s = el('div', 'panel-sec');
+    s.appendChild(el('div', 'panel-sec-name', name));
+    return s;
+  }
+
+  function closePanel() {
+    if (panel.hidden && !selected) return;
+    panel.hidden = true;
+    selected = null;
+    needsDraw = true;
+  }
+
+  function openNode(n, recenter) {
+    selected = n;
+    renderPanel(n);
+    panel.hidden = false;
+    if (recenter) centerOn(n);
+    needsDraw = true;
+    window.track('concept_node_open', { id: n.id });
+  }
+
+  function renderPanel(n) {
+    panel.innerHTML = '';
+    var close = el('button', 'panel-close', '×');
+    close.title = 'Закрыть';
+    close.addEventListener('click', closePanel);
+    panel.appendChild(close);
+
+    panel.appendChild(el('h2', 'panel-title', n.title));
+    var meta = [n.type + (n.kind ? ', ' + n.kind : ''), themeTitle(n.slug)];
+    panel.appendChild(el('p', 'panel-meta', meta.join(' · ')));
+
+    /* метки: план, теги, оси. Ось кликабельна и уводит на свою карточку */
+    var chips = el('div', 'panel-chips');
+    if (n.plan) chips.appendChild(el('span', 'chip chip-plan', 'план'));
+    n.tags.forEach(function (t) { chips.appendChild(el('span', 'chip', t)); });
+    n.axes.forEach(function (id) {
+      var a = byId[id];
+      if (!a) return;
+      var btn = el('button', 'chip', 'ось: ' + a.title);
+      btn.addEventListener('click', function () { openNode(a, true); });
+      chips.appendChild(btn);
+    });
+    if (chips.childNodes.length) panel.appendChild(chips);
+
+    if (n.note) panel.appendChild(el('p', 'panel-note', n.note));
+
+    /* ось: вместо граней и связей — список узлов, которые на ней стоят */
+    if (n.type === 'ось') {
+      var mem = axisMembers[n.id] || [];
+      var sec = section('На оси стоят: ' + mem.length);
+      var only = el('button', 'chip', axisPick === n.id
+        ? 'снять фильтр оси' : 'показать только эту ось');
+      only.addEventListener('click', function () {
+        setAxis(axisPick === n.id ? '' : n.id);
+        renderPanel(n);
+      });
+      sec.appendChild(only);
+      var ul = el('ul', 'link-list');
+      mem.slice().sort(function (a, b) {
+        return a.slug === b.slug ? a.title.localeCompare(b.title)
+                                 : (slugWeek[a.slug] || 99) - (slugWeek[b.slug] || 99);
+      }).forEach(function (m) {
+        var li = el('li', 'link-item');
+        var head = el('div', 'link-head');
+        var btn = el('button', 'link-to', m.title);
+        btn.addEventListener('click', function () { openNode(m, true); });
+        head.appendChild(btn);
+        li.appendChild(head);
+        li.appendChild(el('div', 'link-note', m.type + ' · ' + themeTitle(m.slug)));
+        ul.appendChild(li);
+      });
+      sec.appendChild(ul);
+      panel.appendChild(sec);
+      panel.scrollTop = 0;
+      return;
+    }
+
+    /* грани: блок ведёт на страницу, где он свёрстан */
+    var facetKeys = Object.keys(n.facets).sort(function (a, b) {
+      var ia = FACET_ORDER.indexOf(a), ib = FACET_ORDER.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+    var fsec = section('Грани и блоки');
+    if (!facetKeys.length) {
+      fsec.appendChild(el('p', 'panel-empty',
+        n.plan ? 'Узел плановый: блоков под ним пока нет.'
+               : 'Ни один блок ядра к узлу не приписан.'));
+    }
+    facetKeys.forEach(function (f) {
+      var fd = el('div', 'facet');
+      fd.appendChild(el('div', 'facet-name', facetLabel(f)));
+      var ul = el('ul');
+      n.facets[f].forEach(function (id) {
+        var li = el('li');
+        var b = blockById[id];
+        if (b) {
+          var a = el('a', null, b.title);
+          a.href = blockHref(b);
+          li.appendChild(a);
+          li.appendChild(document.createTextNode(' '));
+          li.appendChild(el('span', 'blk-kind', b.type));
+        } else {
+          li.appendChild(el('span', 'blk-missing', id + ' — нет в реестре блоков'));
+        }
+        ul.appendChild(li);
+      });
+      fd.appendChild(ul);
+      fsec.appendChild(fd);
+    });
+    panel.appendChild(fsec);
+
+    if (n.gaps.length) {
+      var gsec = section('Пробелы: ' + n.gaps.length);
+      n.gaps.forEach(function (g) {
+        var d = el('div', 'gap-item');
+        d.appendChild(el('div', 'gap-facet', facetLabel(g.facet || '')));
+        d.appendChild(el('div', 'gap-note', g.note || ''));
+        gsec.appendChild(d);
+      });
+      panel.appendChild(gsec);
+    }
+
+    /* связи: направление у ребра значимое, поэтому две группы */
+    var out = [], inc = [];
+    adj[n.i].forEach(function (e) {
+      (e.a === n ? out : inc).push(e);
+    });
+    function linkList(list, name, otherOf) {
+      if (!list.length) return;
+      var sec2 = section(name + ': ' + list.length);
+      var ul = el('ul', 'link-list');
+      list.slice().sort(function (a, b) {
+        return EDGE_ORDER.indexOf(a.type) - EDGE_ORDER.indexOf(b.type);
+      }).forEach(function (e) {
+        var o = otherOf(e);
+        var li = el('li', 'link-item');
+        var head = el('div', 'link-head');
+        var chip = el('span', 'link-type', edgeLabel(e.type));
+        chip.style.background = EDGE_STYLE[e.type] ? EDGE_STYLE[e.type].c : MUTED;
+        head.appendChild(chip);
+        var btn = el('button', 'link-to', o.title);
+        btn.addEventListener('click', function () { openNode(o, true); });
+        head.appendChild(btn);
+        li.appendChild(head);
+        if (o.slug !== n.slug) {
+          li.appendChild(el('div', 'link-note', 'тема: ' + themeTitle(o.slug)));
+        }
+        if (e.note) li.appendChild(el('div', 'link-note', e.note));
+        ul.appendChild(li);
+      });
+      sec2.appendChild(ul);
+      panel.appendChild(sec2);
+    }
+    linkList(out, 'Связи отсюда', function (e) { return e.b; });
+    linkList(inc, 'Связи сюда', function (e) { return e.a; });
+    if (!out.length && !inc.length) {
+      var esec = section('Связи');
+      esec.appendChild(el('p', 'panel-empty', 'Узел пока ни с чем не связан.'));
+      panel.appendChild(esec);
+    }
+    panel.scrollTop = 0;
+  }
+
+  /* ── легенда ──────────────────────────────────────────────────── */
+
+  var legend = document.getElementById('legend');
+  var typeCount = {}, edgeCount = {};
+  nodes.forEach(function (n) { typeCount[n.type] = (typeCount[n.type] || 0) + 1; });
+  edges.forEach(function (e) { edgeCount[e.type] = (edgeCount[e.type] || 0) + 1; });
+
+  function legendHead(text, acts) {
+    var h = el('div', 'legend-head');
+    h.appendChild(el('span', null, text));
+    if (acts) h.appendChild(acts);
+    legend.appendChild(h);
+  }
+
+  legendHead('Узлы');
+  TYPE_ORDER.forEach(function (t) {
+    if (!typeCount[t]) return;
+    var row = el('div', 'legend-row');
+    var dot = el('span', 'legend-dot' + (t === 'ось' ? ' is-big' : ''));
+    dot.style.background = TYPE_COLOR[t];
+    row.appendChild(dot);
+    row.appendChild(el('span', null, t));
+    row.appendChild(el('span', 'legend-count', String(typeCount[t])));
+    legend.appendChild(row);
+  });
+  var planRow = el('div', 'legend-row');
+  var planDot = el('span', 'legend-dot is-plan');
+  planDot.style.border = '1.5px dashed ' + MUTED;
+  planRow.appendChild(planDot);
+  planRow.appendChild(el('span', null, 'плановый, блоков нет'));
+  planRow.appendChild(el('span', 'legend-count', String(planCount)));
+  legend.appendChild(planRow);
+
+  var edgeActs = el('span', 'legend-acts');
+  var actAll = el('button', 'legend-act', 'все');
+  var actWork = el('button', 'legend-act', 'рабочий вид');
+  edgeActs.appendChild(actAll);
+  edgeActs.appendChild(actWork);
+  legendHead('Связи', edgeActs);
+
+  var edgeRows = {};
+  EDGE_ORDER.forEach(function (t) {
+    var row = el('div', 'legend-row is-pick is-on');
+    row.title = 'показать или скрыть связи этого типа';
+    var line = el('span', 'legend-line');
+    var st = EDGE_STYLE[t];
+    line.style.borderTop = '2px ' + st.ls + ' ' + st.c;
+    row.appendChild(line);
+    row.appendChild(el('span', null, edgeLabel(t)));
+    row.appendChild(el('span', 'legend-count', String(edgeCount[t] || 0)));
+    row.addEventListener('click', function () { setEdgeType(t, !typeOn[t]); });
+    legend.appendChild(row);
+    edgeRows[t] = row;
+  });
+
+  function setEdgeType(t, on) {
+    typeOn[t] = on;
+    edgeRows[t].classList.toggle('is-on', on);
+    edgeRows[t].classList.toggle('is-off', !on);
+    needsDraw = true;
+  }
+  actAll.addEventListener('click', function () {
+    EDGE_ORDER.forEach(function (t) { setEdgeType(t, true); });
+  });
+  actWork.addEventListener('click', function () {
+    EDGE_ORDER.forEach(function (t) {
+      setEdgeType(t, WORK_VIEW.indexOf(t) >= 0);
+    });
+  });
+
+  document.getElementById('legend-toggle').addEventListener('click', function () {
+    legend.classList.toggle('is-open');
+  });
+
+  /* ── фильтры и поиск ──────────────────────────────────────────── */
+
+  var axisSel = document.getElementById('axis-filter');
+  axisNodes.forEach(function (a) {
+    var o = document.createElement('option');
+    o.value = a.id;
+    o.textContent = a.title + ' (' + axisMembers[a.id].length + ')';
+    axisSel.appendChild(o);
+  });
+  function setAxis(id) {
+    axisPick = id;
+    axisSel.value = id;
+    needsDraw = true;
+  }
+  axisSel.addEventListener('change', function () { setAxis(axisSel.value); });
+
+  var planBox = document.getElementById('plan-only');
+  planBox.addEventListener('change', function () {
+    planOnly = planBox.checked;
+    needsDraw = true;
+  });
+
+  var q = document.getElementById('cm-q');
+  var found = document.getElementById('cm-found');
+  function runSearch() {
+    query = q.value.trim().toLowerCase();
+    if (query.length < 2) {
+      matchSet = null;
+      found.textContent = '';
+    } else {
+      matchSet = new Set(nodes.filter(function (n) {
+        return n.low.indexOf(query) >= 0;
+      }));
+      found.textContent = matchSet.size
+        ? 'найдено ' + plural(matchSet.size, 'узел')
+        : 'ничего не найдено';
+    }
+    needsDraw = true;
+  }
+  q.addEventListener('input', runSearch);
+  q.addEventListener('keydown', function (ev) {
+    /* Enter доводит до первой находки: искать глазами по холсту долго */
+    if (ev.key !== 'Enter' || !matchSet || !matchSet.size) return;
+    var first = null;
+    matchSet.forEach(function (m) { if (!first) first = m; });
+    openNode(first, true);
+  });
+
+  document.getElementById('reset-view').addEventListener('click', function () {
+    EDGE_ORDER.forEach(function (t) { setEdgeType(t, true); });
+    setAxis('');
+    planBox.checked = false;
+    planOnly = false;
+    q.value = '';
+    runSearch();
+    closePanel();
+    fitView();
+  });
+
+  /* отладочная ручка для дизайн-сессии: rAF в фоновой вкладке молчит,
+     step(n) гонит физику вручную, render() рисует кадр немедленно */
+  window.CORE_CONCEPT_MAP = {
+    nodes: nodes, edges: edges, view: view, centers: centers,
+    open: function (id) { if (byId[id]) openNode(byId[id], true); },
+    alpha: function () { return alpha; },
+    step: function (k) {
+      for (var i = 0; i < (k || 1) && alpha > 0.012; i++) tick();
+      needsDraw = true;
+    },
+    render: function () { draw(); needsDraw = false; }
+  };
+
+  window.track('page_view', { page: 'core-concept-map' });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Эллипс и спираль: три режима</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-07/">&larr; Неделя 07</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/demo-osc.js"></script>
+<script src="../shared/analytics.js?demo=ellips-i-spiral"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html, O = window.DemoOsc;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блоки главы `zatuhayushchie-kolebaniya` и `rezhimy-zatuhaniya` (бриф
+   briefs/demki_nedelya07.md, № 3; карточка 1 описи
+   lekciya07_demki_minuty.md §1.3; рамка §6, демка 3). Второй пункт
+   тезиса: затухание мерят числом колебаний системы.
+
+   УРАВНЕНИЕ. Груз главы, m = 0,1 кг на пружине k = 10 Н/м, с вязким
+   трением: mẍ + βẋ + kx = 0, то есть ẍ + 2γẋ + ω₀²x = 0, ω₀ = 10 рад/с,
+   T₀ = 0,6283 с, γ = β/2m. Ползунок задаёт γ/ω₀ (от 0 до 3), строка
+   показаний переводит его в β = 2mγ. Затухание пишется динамическим
+   методом (решения автора, п. 2): энергия здесь не сохраняется и входит
+   только мерой потерь, dE/dt = −βẋ², и как граница «навсегда» ниже.
+   Комплексных чисел нет ни в тексте, ни в коде (вводная автора 09.10).
+
+   СЧЁТ. Уравнение линейно, и шаг его решения есть умножение состояния
+   (x, ẋ) на матрицу P = e^{Ah}, A = [0, 1; −ω₀², −2γ]: точный шаг из
+   shared/demo-osc.js (ряд Тейлора с масштабированием и возведением в
+   квадрат), шаг h = T₀/100. Один код на все режимы: режим не задаётся
+   формулой, он выходит из следа. Время идёт целыми шагами, остаток кадра
+   копится, поэтому числа не зависят от частоты кадров и совпадают с
+   прогоном без кадров (__demoCheck).
+
+   ЧТО СНИМАЕТСЯ С ДВИЖЕНИЯ. Заходы за ноль: смена знака x, момент корнем
+   кубики Эрмита. Максимумы: смена знака скорости сверху вниз, момент
+   корнем кубики по скорости и ускорению, значение кубикой Эрмита по x и
+   ẋ; отпущенный из покоя груз стоит в максимуме в момент t = 0. Декремент
+   d = ln(xₙ/xₙ₊₁) по двум последним соседним максимумам, период T по ним
+   же, N = 1/d колебаний до падения в e раз, Q = π/d. Перелёт: первый
+   экстремум после первого захода за ноль, в долях начального отклонения.
+   Коридор: момент, после которого |x| навсегда меньше 5 % (и 1 %, для
+   сверки с карточкой) начального отклонения x₀. «Навсегда» доказывает
+   сама энергия: |x| ≤ √(x² + ẋ²/ω₀²) = √(2E/k), а E не растёт; как только
+   √(2E/k) стало меньше полосы, из полосы груз уже не выйдет, и последний
+   вход в неё есть ответ. До этого демка ждёт.
+
+   ПУНКТИР КРИТИЧЕСКОГО. Рядом с тем же стартом считается критический
+   режим, γ = ω₀, той же матрицей: из покоя он ниже любого апериодического
+   во всех точках, а в коридор 5 % колебательный с γ/ω₀ = 0,7 входит раньше
+   него (2,90/ω₀ против 4,74/ω₀) с перелётом 4,6 %. Подпись «быстрее всех
+   без захода за ноль» стоит у критического, как в главе.
+
+   ТОЛЧОК. Старт из x₀ = 5 см со скоростью к равновесию. Критический
+   перелетает при толчке быстрее ω₀x₀ = 50 см/с, при γ = 2ω₀ быстрее
+   (γ + √(γ² − ω₀²))x₀ = 186,6 см/с: определение режима первым незаходом
+   за ноль верно только для старта из покоя.
+
+   ЯВНЫЙ ЭЙЛЕР (кнопка). Та же система, тот же старт, тот же шаг T₀/100,
+   но схема x += hẋ, ẋ += h·ẍ. Без трения её спираль идёт наружу, соседние
+   максимумы растут в (1 + (ω₀h)²)^{50} ≈ 1,22 раза: это спираль третьей
+   недели (`demka-shag-ejlera`), её рисует шаг. Физическую спираль рисует
+   трение, она идёт внутрь и от шага не зависит: матрица e^{Ah} точна при
+   любом h.
+
+   СЧЁТ ЗАХОДОВ «ПО СЛЕДУ» кончается, когда состояние меньше 10⁻¹² x₀
+   (0,05 пм, меньше атома): у γ/ω₀ = 0,98 и 0,99 второй размах уже ниже, и
+   след показывает один заход при колебательном знаке. Это граница
+   определения режима по следу, а не ошибка счёта.
+
+   ПРОВЕРКА (09.10, node с demo-osc.js и hcheck на порту 49823: чтение
+   __demoState после __demoTick, прогон __demoCheck совпал с живой сценой
+   до бита; отчёт briefs/demki_nedelya07_ellips-i-spiral_REPORT.md).
+   Матрица против решений главы в действительном виде за 20 с: не хуже
+   1,6·10⁻¹¹ x₀ при γ/ω₀ = 0,0016 и 9·10⁻¹⁵ при 0,25; 0,7; 1; 2, из покоя
+   и с толчком. d = 0,3: максимумы 0,7408, d = 0,30000001, N = 3,333,
+   Q = π/d = 10,472, ω₀/2γ = 10,484, β = 0,0954 кг/с. d = 0,01: d до
+   10⁻¹¹, Q = 314,16, N = 100, β = 0,00318 кг/с, 1/γ = 62,8 с. Коридор 5 %
+   против последнего выхода из полосы по решению главы (сетка 10⁻⁵ с и
+   деление пополам): γ/ω₀ = 0,7 0,28998 с (2,90/ω₀), критический 0,47439
+   (4,74/ω₀), γ = 2ω₀ 1,14583, γ = 3ω₀ 1,76346, все до 6·10⁻⁹ с; коридор
+   1 %: критический 0,66384, γ = 2ω₀ 1,74648, γ = 0,5ω₀ 0,87806 (карточка
+   0,664; 1,746; 0,878). Перелёт при 0,7: 4,5988 % против
+   e^{−πζ/√(1−ζ²)} = 4,5988 %. Лучшее трение перебором: коридор 5 % 0,2859 с
+   у γ/ω₀ = 0,6902, где перелёт равен 5 % (глава: 0,690 и 2,859/ω₀),
+   коридор 1 % 0,4192 с у 0,8261 (карточка: 0,423 у 0,83, при 0,83 демка
+   даёт 0,4234). Толчок: критический при 45 и 50 см/с без захода, при
+   55 см/с один заход с перелётом 1,67·10⁻⁶ x₀ = 0,1·e^{−11}; при 100 см/с
+   перелёт e^{−2} = 13,5 %; γ = 2ω₀ при 185 см/с без захода, при 190 один
+   (порог 186,6). Без трения за 1000 периодов энергия уходит на 2·10⁻¹¹,
+   соседние максимумы равны до 10⁻¹⁴. Явный Эйлер без трения: отношение
+   максимумов 1,21806 против |λ|^{2π/arg λ} = 1,21806 собственного числа
+   его матрицы; при d = 0,01 1,206 (спираль наружу, хотя трение есть), при
+   d = 0,3 0,903 против точных 0,741. Числа одни при кадре 1/60, 1/144 и
+   0,05 с. Отрицательный контроль: трение в матрице на процент больше даёт
+   d = 0,3030 против γT = 0,3000 и сдвигает коридоры на 3·10⁻³–2·10⁻² с. */
+
+/* ── чистая физика ──────────────────────────────────────────────
+   Отсюда до пометки «конец чистой физики» код не знает о браузере и
+   прогоняется в node вместе с demo-osc.js. */
+
+var M = 0.1, K = 10;
+var W0 = Math.sqrt(K / M);               /* 10 рад/с */
+var T0 = 2 * Math.PI / W0;               /* 0,6283 с */
+var X0 = 0.05;                           /* начальное отклонение, м */
+var SHAGOV = 100;                        /* шагов на период T₀ */
+var H = T0 / SHAGOV;
+var POLOSY = [0.05, 0.01];               /* коридоры: 5 % на экране, 1 % для сверки */
+var TIHO = 1e-12;                        /* состояние меньше TIHO·x₀: груз стоит, счёт заходов и максимумов кончен */
+var ZMIN = 1e-3, ZMAX = 3;               /* ползунок γ/ω₀, логарифмический, и ноль в левом краю */
+
+/* γ/ω₀ по декременту: d = γT = 2πζ/√(1 − ζ²) */
+function zetaIzD(d) { return d / Math.sqrt(4 * Math.PI * Math.PI + d * d); }
+
+var PRESETS = [
+  { id: 'bez', knopka: 'без трения', zeta: 0 },
+  { id: 'd001', knopka: 'd = 0,01', zeta: zetaIzD(0.01) },
+  { id: 'd03', knopka: 'd = 0,3', zeta: zetaIzD(0.3) },
+  { id: 'z07', knopka: 'γ = 0,7 ω₀', zeta: 0.7 },
+  { id: 'krit', knopka: 'критический', zeta: 1 },
+  { id: 'aper', knopka: 'апериодический', zeta: 2 }
+];
+var PO_ID = {};
+PRESETS.forEach(function (p) { PO_ID[p.id] = p; });
+var NACH = 'd03';
+
+/* Точный шаг. Подменяется только отрицательным контролем проверки. */
+var FIZ = { propagator: function (w0, g, h) { return O.propagator(w0, g, h); } };
+
+function energiya(s) { return 0.5 * M * s.v * s.v + 0.5 * K * s.x * s.x; }
+function zn(a) { return a > 0 ? 1 : a < 0 ? -1 : 0; }
+
+/* След одного режима: состояние и всё, что с него снимается. */
+function novyjSled(zeta, push) {
+  var g = zeta * W0;
+  var tr = {
+    zeta: zeta, gamma: g, P: FIZ.propagator(W0, g, H),
+    s: { t: 0, x: X0, v: -push },
+    nuli: O.crossing(0),            /* заходы за ноль */
+    ekstr: O.crossing(0),           /* нули скорости: экстремумы x */
+    maks: [], pervyjNol: null, perelet: null, stoit: false, dE: 0,
+    polosy: POLOSY.map(function (b) { return { b: b, c: O.crossing(0), vhod: null, vnutri: false, t: null }; })
+  };
+  tr.E0 = energiya(tr.s);
+  if (push === 0) tr.maks.push([0, X0]);     /* из покоя t = 0 уже максимум */
+  return tr;
+}
+
+function uskor(tr, x, v) { return -W0 * W0 * x - 2 * tr.gamma * v; }
+
+function shagSled(tr) {
+  var s = tr.s, t0 = s.t, x0 = s.x, v0 = s.v, a0 = uskor(tr, x0, v0);
+  tr.P.step(s);
+  var t1 = s.t, x1 = s.x, v1 = s.v, a1 = uskor(tr, x1, v1);
+  if (tr.gamma === 0) {
+    var e = Math.abs(energiya(s) - tr.E0) / tr.E0;
+    if (e > tr.dE) tr.dE = e;
+  }
+  if (tr.stoit) return;
+  if (tr.nuli.feed(t0, x0, t1, x1, v0, v1) != null && tr.pervyjNol == null) tr.pervyjNol = tr.nuli.last;
+  var te = tr.ekstr.feed(t0, v0, t1, v1, a0, a1);
+  if (te != null) {
+    var xe = O.hermite(t0, x0, v0, t1, x1, v1, te);
+    if (tr.ekstr.lastDir < 0) { tr.maks.push([te, xe]); if (tr.maks.length > 3) tr.maks.shift(); }
+    if (tr.perelet == null && tr.pervyjNol != null) tr.perelet = { t: te, x: xe, dolya: Math.abs(xe) / X0 };
+  }
+  /* коридоры: |x| − b·x₀ меняет знак; вход сверху вниз, выход снизу вверх */
+  var r = Math.sqrt(x1 * x1 + v1 * v1 / (W0 * W0));
+  for (var i = 0; i < tr.polosy.length; i++) {
+    var p = tr.polosy[i];
+    if (p.t != null) continue;
+    var lim = p.b * X0;
+    var tc = p.c.feed(t0, Math.abs(x0) - lim, t1, Math.abs(x1) - lim, zn(x0) * v0, zn(x1) * v1);
+    if (tc != null) {
+      if (p.c.lastDir < 0) { p.vhod = tc; p.vnutri = true; } else p.vnutri = false;
+    }
+    /* √(2E/k) < полосы, а E не растёт: из полосы груз уже не выйдет */
+    if (p.vnutri && r < lim) p.t = p.vhod;
+  }
+  if (r < TIHO * X0) tr.stoit = true;
+}
+
+function dekrement(tr) {
+  var n = tr.maks.length;
+  if (n < 2) return { d: null, T: null };
+  var a = tr.maks[n - 2], b = tr.maks[n - 1];
+  return { d: Math.log(a[1] / b[1]), T: b[0] - a[0] };
+}
+
+/* Явный Эйлер с тем же шагом: спираль, которую рисует схема. */
+function novyjEjler(zeta, push) {
+  return { g: zeta * W0, t: 0, x: X0, v: -push, prob: [[0, X0]], maks: [], ushel: false };
+}
+function shagEjler(e) {
+  if (e.ushel) return;
+  var x = e.x, v = e.v;
+  e.x = x + H * v;
+  e.v = v + H * (-W0 * W0 * x - 2 * e.g * v);
+  e.t += H;
+  e.prob.push([e.t, e.x]);
+  if (e.prob.length > 3) e.prob.shift();
+  var p = e.prob;
+  /* дискретный максимум: вершина параболы по трём отсчётам */
+  if (p.length === 3 && p[1][1] >= p[0][1] && p[1][1] > p[2][1] && p[1][1] > 0) {
+    var vr = O.vertex3(p[0][0], p[0][1], p[1][0], p[1][1], p[2][0], p[2][1]);
+    if (vr) { e.maks.push([vr.t, vr.y]); if (e.maks.length > 3) e.maks.shift(); }
+  }
+  if (Math.abs(e.x) > 1e6 * X0 || !isFinite(e.x)) e.ushel = true;
+}
+
+/* Окна по размаху. Фазовая плоскость: |x| и |ẋ|/ω₀ не больше √(2E₀/k),
+   энергия не растёт, так что окно задаёт эллипс без трения через старт.
+   x(t): короткий прогон на два периода T₀ с пунктиром критического. */
+function razmah(zeta, push) {
+  var a = novyjSled(zeta, push), b = zeta === 1 ? null : novyjSled(1, push);
+  var Rx = 1;
+  for (var i = 0; i < 2 * SHAGOV; i++) {
+    shagSled(a);
+    Rx = Math.max(Rx, Math.abs(a.s.x) / X0);
+    if (b) { shagSled(b); Rx = Math.max(Rx, Math.abs(b.s.x) / X0); }
+  }
+  return { Rx: 1.12 * Rx, Rf: 1.15 * Math.sqrt(2 * a.E0 / K) / X0 };
+}
+
+/* Опыт: основной режим, пунктир критического, явный Эйлер. */
+function novyjOpyt(zeta, push) {
+  var op = {
+    zeta: zeta, push: push,
+    tr: novyjSled(zeta, push),
+    kr: zeta === 1 ? null : novyjSled(1, push),
+    eu: novyjEjler(zeta, push),
+    L: zeta < 0.15 ? 10 * T0 : 4 * T0,        /* окно x(t), с */
+    nakop: 0,
+    ryad0: [[0, X0, X0]],                      /* первое окно [0, L], не урезается */
+    ryad: [[0, X0, X0]], faza: [[X0, -push]], fazaEu: [[X0, -push]]
+  };
+  var R = razmah(zeta, push);
+  op.Rx = R.Rx; op.Rf = R.Rf;
+  return op;
+}
+
+var MAX_FAZA = 3000;
+function shagOpyt(op) {
+  shagSled(op.tr);
+  if (op.kr) shagSled(op.kr);
+  shagEjler(op.eu);
+  var t = op.tr.s.t, tochka = [t, op.tr.s.x, op.kr ? op.kr.s.x : op.tr.s.x];
+  if (t <= op.L + H) op.ryad0.push(tochka);
+  op.ryad.push(tochka);
+  while (op.ryad.length > 2 && op.ryad[1][0] < t - op.L - H) op.ryad.shift();
+  op.faza.push([op.tr.s.x, op.tr.s.v]);
+  if (op.faza.length > MAX_FAZA) op.faza.shift();
+  if (!op.eu.ushel) {
+    op.fazaEu.push([op.eu.x, op.eu.v]);
+    if (op.fazaEu.length > MAX_FAZA) op.fazaEu.shift();
+  }
+}
+
+/* Продвинуть на dt модельного времени целыми шагами; остаток копится. */
+function prodvinut(op, dt) {
+  op.nakop += dt;
+  var n = Math.floor(op.nakop / H + 1e-9);
+  if (n > 20000) n = 20000;
+  for (var i = 0; i < n; i++) shagOpyt(op);
+  op.nakop -= n * H;
+  if (op.nakop < 0) op.nakop = 0;
+}
+
+/* Окно x(t) стоит на [0, L], пока не кончилось. Дальше оно едет за
+   временем, кроме случая, когда груз уже навсегда вошёл в коридор 5 %
+   внутри первого окна: тогда на экране остаётся весь переход. */
+function okno(op) {
+  var t = op.tr.s.t, ts = op.tr.polosy[0].t;
+  if (t <= op.L) return { t0: 0, ryad: op.ryad, stoit: false };
+  if (ts != null && ts <= op.L) return { t0: 0, ryad: op.ryad0, stoit: true };
+  return { t0: t - op.L, ryad: op.ryad, stoit: false };
+}
+
+function rezhimPoZnaku(zeta) { return zeta < 1 ? 'колебательный' : zeta === 1 ? 'критический' : 'апериодический'; }
+
+/* Сводка опыта: то, что демка утверждает, в СИ. */
+function svodka(op) {
+  var tr = op.tr, z = op.zeta, g = tr.gamma, kr = op.kr || tr;
+  var w = z < 1 ? W0 * Math.sqrt(1 - z * z) : null;
+  var dm = dekrement(tr), n = tr.nuli.count;
+  var em = op.eu.maks, eRat = em.length >= 2 ? em[em.length - 1][1] / em[em.length - 2][1] : null;
+  return {
+    zeta: z, gamma: g, omega0: W0, beta: 2 * M * g, omega: w, push: op.push, h: H,
+    t: tr.s.t, x: tr.s.x, v: tr.s.v, E: energiya(tr.s), E0: tr.E0,
+    energyDrift: g === 0 ? tr.dE : null,
+    regimeByD: rezhimPoZnaku(z),
+    crossings: n,
+    regimeByTrace: n === 0 ? 'без захода за ноль' : n === 1 ? 'один заход за ноль' : 'колеблется',
+    overshoot: tr.perelet ? tr.perelet.dolya : null,
+    d: dm.d, T: dm.T,
+    dFormula: w ? g * 2 * Math.PI / w : null,
+    Tformula: w ? 2 * Math.PI / w : null,
+    Ne: dm.d != null && dm.d > 1e-9 ? 1 / dm.d : null,
+    Q: dm.d != null && dm.d > 1e-9 ? Math.PI / dm.d : null,
+    QOmega: z > 0 ? 1 / (2 * z) : null,
+    envelopeTime: g > 0 ? 1 / g : null,
+    tSettle: tr.polosy[0].t, tSettle1: tr.polosy[1].t,
+    tSettleCrit: kr.polosy[0].t, tSettleCrit1: kr.polosy[1].t,
+    crossingsCrit: kr.nuli.count,
+    eulerRatio: eRat, eulerD: eRat ? -Math.log(eRat) : null,
+    window: op.L
+  };
+}
+
+/* Прогон без кадров на tEnd секунд модельного времени. */
+function progon(zeta, push, tEnd) {
+  var op = novyjOpyt(zeta, push || 0), n = Math.round((tEnd || 20) / H);
+  for (var i = 0; i < n; i++) shagOpyt(op);
+  return svodka(op);
+}
+/* ── конец чистой физики ── */
+
+/* Русская запятая и настоящий минус; крохи печатаются нулём. */
+function num(v, d) {
+  if (v == null || !isFinite(v)) return '—';
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* n значащих цифр без множителя 10ⁿ */
+function znach(v, n) {
+  if (v == null || !isFinite(v)) return '—';
+  if (v === 0) return '0';
+  var a = Math.abs(v) * (1 + 5e-5);
+  return num(v, Math.max(0, n - 1 - Math.floor(Math.log10(a))));
+}
+/* Малое число множителем 10ⁿ: 2·10⁻¹⁴ */
+var SUP = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻' };
+function stepen(v) {
+  if (v == null || !isFinite(v)) return '—';
+  if (v <= 0) return '0';
+  var p = Math.floor(Math.log10(v)), m = Math.round(v / Math.pow(10, p));
+  if (m >= 10) { m = 1; p++; }
+  return m + '·10' + String(p).split('').map(function (c) { return SUP[c]; }).join('');
+}
+function zIzP(p) {
+  if (p <= 0) return 0;
+  var z = Math.pow(10, Math.log10(ZMIN) + p * (Math.log10(ZMAX) - Math.log10(ZMIN)));
+  return Math.min(ZMAX, Number(z.toPrecision(2)));
+}
+function pIzZ(z) {
+  if (z <= 0) return 0;
+  return C.clamp((Math.log10(z) - Math.log10(ZMIN)) / (Math.log10(ZMAX) - Math.log10(ZMIN)), 0, 1);
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева x(t) в окне: коридор 5 %, огибающие ±Ce^{−γt} по формуле главы
+   (только в колебательном режиме), пунктир критического режима с тем же
+   стартом и сам след. Окно 10 T₀ при γ/ω₀ < 0,15 и 4 T₀ при большем трении,
+   дальше оно едет за временем. Справа фазовая плоскость (x, ẋ) в своих
+   единицах: эллипс без трения через начальную энергию пунктиром, спираль
+   следом, по кнопке след явного Эйлера. Внизу четыре показания. */
+
+var W = 1000, HGT = 400;
+var XT0 = 78, XT1 = 590, YT0 = 52, YT1 = 262;      /* x(t) */
+var FX0 = 650, FX1 = 980, FY0 = 52, FY1 = 262;     /* фазовая плоскость */
+var RY = 322, RX = [262, 504, 748, 990];           /* показания */
+var CV_DV = '77,182,198';                          /* движение */
+var CV_PAR = '224,138,82';                         /* формула главы: огибающая, эллипс без трения */
+var CV_EU = '255,122,102';                         /* явный Эйлер */
+
+var pokaz = {};
+window.__demoState = pokaz;
+
+function ElipsSpiral() {
+  var ref0 = useRef(null);
+  if (!ref0.current) {
+    var p0 = PO_ID[NACH];
+    ref0.current = { id: p0.id, zeta: p0.zeta, push: 0, run: true, eu: false, slow: false,
+                     op: novyjOpyt(p0.zeta, 0), faza: '' };
+  }
+  var S = ref0.current;
+  var pair = useState({ id: S.id, zeta: S.zeta, push: 0, run: true, eu: false, slow: false, faza: '' });
+  var ui = pair[0], setUi = pair[1];
+
+  /* строка показаний перерисовывается, когда меняется то, что она печатает */
+  function faza(sv) {
+    return [sv.crossings, sv.d != null ? num(sv.d, 4) : '', sv.tSettle, sv.tSettleCrit,
+            sv.overshoot != null ? num(sv.overshoot, 3) : '', sv.eulerRatio != null ? num(sv.eulerRatio, 2) : ''].join('|');
+  }
+  function snyat() {
+    var sv = svodka(S.op);
+    Object.assign(pokaz, sv, { preset: S.id, running: S.run, euler: S.eu, slow: S.slow });
+    var f = faza(sv);
+    if (f !== S.faza) {
+      S.faza = f;
+      setUi(function (u) { return Object.assign({}, u, { faza: f }); });
+    }
+  }
+  if (pokaz.zeta == null) Object.assign(pokaz, svodka(S.op), { preset: S.id, running: S.run, euler: S.eu, slow: S.slow });
+
+  function step(dt) {
+    if (!S.run) return;
+    prodvinut(S.op, dt * (S.slow ? 0.25 : 1));
+    snyat();
+  }
+
+  /* ── примитивы ── */
+
+  function punktir(ctx, x0, y0, x1, y1, color, w, dash) {
+    ctx.save(); ctx.setLineDash(dash || [5, 5]); ctx.strokeStyle = color; ctx.lineWidth = w || 1.4;
+    ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.restore();
+  }
+  function shar(ctx, x, y, r, rgb) {
+    ctx.fillStyle = 'rgb(' + rgb + ')';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fill();
+  }
+  /* Прибор: подпись капсом 17 px, число крупно; word — значение словом. */
+  function pribor(ctx, x, y, capt, value, color, mut, word) {
+    ctx.textAlign = 'right';
+    ctx.font = '600 17px "JetBrains Mono", ui-monospace, monospace';
+    ctx.fillStyle = 'rgba(' + mut + ',.95)';
+    ctx.fillText(capt, x, y);
+    ctx.font = word ? '600 27px "Golos Text", system-ui, sans-serif' : '600 31px "JetBrains Mono", ui-monospace, monospace';
+    ctx.fillStyle = color;
+    ctx.fillText(String(value), x, y + 37);
+    ctx.textAlign = 'center';
+  }
+  function legenda(ctx, xRight, y, text, rgb, dash) {
+    C.label(ctx, xRight, y, text, 17, 'rgb(' + rgb + ')', 'right');
+    var wl = ctx.measureText(text).width;
+    punktir(ctx, xRight - wl - 36, y - 6, xRight - wl - 8, y - 6, 'rgb(' + rgb + ')', 2.4, dash);
+    return xRight - wl - 52;
+  }
+
+  /* ── x(t) ── */
+
+  function grafikX(ctx, op, ink, mut, acc) {
+    var tr = op.tr, z = op.zeta, t = tr.s.t, mutS = 'rgba(' + mut + ',.95)';
+    var ok = okno(op), t0 = ok.t0, t1 = t0 + op.L;
+    var ym = op.Rx * X0, yc = (YT0 + YT1) / 2, hh = (YT1 - YT0) / 2;
+    function X(tt) { return XT0 + (tt - t0) / op.L * (XT1 - XT0); }
+    function Y(x) { return yc - x / ym * hh; }
+    var i, tt;
+
+    C.label(ctx, XT0, 30, 'отклонение x(t)', 17, mutS, 'left');
+    var xl = XT1;
+    if (op.kr) xl = legenda(ctx, xl, 30, 'критический', mut, [4, 5]);
+    if (z < 1) legenda(ctx, xl, 30, 'огибающая', CV_PAR, [9, 6]);
+
+    /* коридор 5 % */
+    var b = POLOSY[0] * X0;
+    ctx.fillStyle = 'rgba(' + acc + ',.16)';
+    ctx.fillRect(XT0, Y(b), XT1 - XT0, Y(-b) - Y(b));
+    ctx.strokeStyle = 'rgba(' + acc + ',.6)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(XT0, Y(b)); ctx.lineTo(XT1, Y(b)); ctx.moveTo(XT0, Y(-b)); ctx.lineTo(XT1, Y(-b)); ctx.stroke();
+
+    /* оси: ноль и ±x₀ */
+    ctx.strokeStyle = 'rgba(' + ink + ',.25)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(XT0, Y(X0)); ctx.lineTo(XT0 - 6, Y(X0)); ctx.moveTo(XT0, Y(-X0)); ctx.lineTo(XT0 - 6, Y(-X0));
+    ctx.moveTo(XT0, YT0); ctx.lineTo(XT0, YT1); ctx.stroke();
+    C.label(ctx, XT0 - 10, Y(X0) + 6, '5 см', 17, mutS, 'right');
+    C.label(ctx, XT0 - 10, Y(-X0) + 6, '−5 см', 17, mutS, 'right');
+    C.label(ctx, XT0 - 10, Y(0) + 6, '0', 17, mutS, 'right');
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(XT0, YT0 - 8, XT1 - XT0 + 2, YT1 - YT0 + 16); ctx.clip();
+
+    /* огибающие ±Ce^{−γt} по формуле главы, C из начальных условий */
+    if (z < 1) {
+      var g = tr.gamma, w = W0 * Math.sqrt(1 - z * z), v0 = -op.push;
+      var Ce = Math.sqrt(X0 * X0 + Math.pow((v0 + g * X0) / w, 2));
+      ctx.save(); ctx.setLineDash([9, 6]); ctx.strokeStyle = 'rgb(' + CV_PAR + ')'; ctx.lineWidth = 2;
+      [1, -1].forEach(function (sg) {
+        ctx.beginPath();
+        for (i = 0; i <= 120; i++) {
+          tt = t0 + op.L * i / 120;
+          var y = Y(sg * Ce * Math.exp(-g * tt));
+          if (i) ctx.lineTo(X(tt), y); else ctx.moveTo(X(tt), y);
+        }
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+
+    var ryad = ok.ryad;
+    /* пунктир критического */
+    if (op.kr) {
+      ctx.save(); ctx.setLineDash([4, 5]); ctx.strokeStyle = 'rgba(' + mut + ',.95)'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (i = 0; i < ryad.length; i++) { if (i) ctx.lineTo(X(ryad[i][0]), Y(ryad[i][2])); else ctx.moveTo(X(ryad[i][0]), Y(ryad[i][2])); }
+      ctx.stroke(); ctx.restore();
+    }
+    /* сам след */
+    ctx.strokeStyle = 'rgb(' + CV_DV + ')'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (i = 0; i < ryad.length; i++) { if (i) ctx.lineTo(X(ryad[i][0]), Y(ryad[i][1])); else ctx.moveTo(X(ryad[i][0]), Y(ryad[i][1])); }
+    ctx.stroke();
+
+    /* моменты входа в коридор навсегда */
+    var tk = op.kr ? op.kr.polosy[0].t : null, ts = tr.polosy[0].t;
+    if (tk != null && tk >= t0) punktir(ctx, X(tk), YT0, X(tk), YT1, 'rgba(' + mut + ',.9)', 1.6, [2, 4]);
+    if (ts != null && ts >= t0) punktir(ctx, X(ts), YT0, X(ts), YT1, 'rgb(' + CV_DV + ')', 1.6, [2, 4]);
+
+    if (!ok.stoit) shar(ctx, X(t), Y(tr.s.x), 7, CV_DV);
+    ctx.restore();
+
+    /* подписи в поле */
+    C.label(ctx, XT1 - 4, Y(b) - 7, 'коридор 5 %', 17, 'rgb(' + acc + ')', 'right');
+    var pe = tr.perelet;
+    if (pe && pe.dolya < 0.5 && pe.t >= t0)
+      C.label(ctx, X(pe.t), Y(pe.x) + (pe.x < 0 ? 26 : -12), 'перелёт ' + num(100 * pe.dolya, 1) + ' %', 17, 'rgb(' + CV_DV + ')', 'left');
+    /* подпись критического: из покоя быстрее всех без захода; толчок,
+       перелетевший ноль, называется, а про незашедший молчим, пока
+       заход ещё возможен */
+    if (z === 1) {
+      var txt = op.push === 0 ? 'быстрее всех без захода за ноль' : tr.nuli.count > 0 ? 'с толчком: один заход за ноль' : '';
+      if (txt) C.label(ctx, XT1 - 4, YT0 + 18, txt, 17, 'rgb(' + CV_DV + ')', 'right');
+    }
+
+    /* ось времени */
+    var ya = YT1 + 12, dtk = op.L > 3 ? 1 : 0.5;
+    ctx.strokeStyle = 'rgba(' + mut + ',.7)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(XT0, ya); ctx.lineTo(XT1, ya);
+    var ticks = [];
+    for (var k = Math.ceil(t0 / dtk - 1e-9); k * dtk <= t1 + 1e-9; k++) {
+      ctx.moveTo(X(k * dtk), ya); ctx.lineTo(X(k * dtk), ya + 7); ticks.push(k * dtk);
+    }
+    ctx.stroke();
+    ticks.forEach(function (v, j) {
+      var last = j === ticks.length - 1, xx = X(v);
+      if (xx > XT1 - 40 && !last) return;
+      C.label(ctx, Math.min(xx, XT1), ya + 28, num(v, dtk < 1 ? 1 : 0) + (last ? ' с' : ''), 17, mutS, last && xx > XT1 - 30 ? 'right' : 'center');
+    });
+  }
+
+  /* ── фазовая плоскость ── */
+
+  function grafikF(ctx, op, ink, mut) {
+    var tr = op.tr, mutS = 'rgba(' + mut + ',.95)';
+    var cx = (FX0 + FX1) / 2, cy = (FY0 + FY1) / 2, hw = (FX1 - FX0) / 2, hh = (FY1 - FY0) / 2;
+    var xm = op.Rf * X0, vm = op.Rf * W0 * X0;
+    function X(x) { return cx + x / xm * hw; }
+    function Y(v) { return cy - v / vm * hh; }
+    var i;
+    C.label(ctx, FX0, 30, 'фазовая плоскость', 17, mutS, 'left');
+    legenda(ctx, FX1, 30, 'без трения', CV_PAR, [9, 6]);
+
+    /* деление растёт с окном: 5, 10 или 20 см и 50, 100 или 200 см/с */
+    var md = op.Rf <= 1.5 ? 1 : op.Rf <= 3 ? 2 : 4, xd = md * X0, vd = W0 * xd;
+    ctx.strokeStyle = 'rgba(' + ink + ',.25)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(FX0, cy); ctx.lineTo(FX1, cy); ctx.moveTo(cx, FY0); ctx.lineTo(cx, FY1);
+    ctx.moveTo(X(xd), cy); ctx.lineTo(X(xd), cy + 6); ctx.moveTo(cx, Y(vd)); ctx.lineTo(cx - 6, Y(vd));
+    ctx.stroke();
+    /* подписи делений внутрь эллипса: при старте из покоя он проходит через деления */
+    C.label(ctx, X(xd) - 8, cy - 8, num(xd * 100, 0) + ' см', 17, mutS, 'right');
+    C.label(ctx, cx + 9, Y(vd) + 24, num(vd * 100, 0) + ' см/с', 17, mutS, 'left');
+    C.label(ctx, FX1, cy - 8, 'x', 17, mutS, 'right');
+    C.label(ctx, cx + 8, FY0 - 2, 'ẋ', 17, mutS, 'left');
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(FX0, FY0 - 6, FX1 - FX0, FY1 - FY0 + 12); ctx.clip();
+    /* эллипс без трения через начальную энергию */
+    var a = Math.sqrt(2 * tr.E0 / K);
+    ctx.save(); ctx.setLineDash([9, 6]); ctx.strokeStyle = 'rgb(' + CV_PAR + ')'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(cx, cy, a / xm * hw, W0 * a / vm * hh, 0, 0, 2 * Math.PI); ctx.stroke();
+    ctx.restore();
+    /* явный Эйлер */
+    if (S.eu) {
+      var fe = op.fazaEu;
+      ctx.strokeStyle = 'rgba(' + CV_EU + ',.85)'; ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (i = 0; i < fe.length; i++) { if (i) ctx.lineTo(X(fe[i][0]), Y(fe[i][1])); else ctx.moveTo(X(fe[i][0]), Y(fe[i][1])); }
+      ctx.stroke();
+    }
+    /* спираль */
+    var f = op.faza;
+    ctx.strokeStyle = 'rgba(' + CV_DV + ',.9)'; ctx.lineWidth = 2.2; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (i = 0; i < f.length; i++) { if (i) ctx.lineTo(X(f[i][0]), Y(f[i][1])); else ctx.moveTo(X(f[i][0]), Y(f[i][1])); }
+    ctx.stroke();
+    shar(ctx, X(tr.s.x), Y(tr.s.v), 7, CV_DV);
+    ctx.restore();
+    if (S.eu) C.label(ctx, FX1, FY1 + 30, 'явный Эйлер, шаг T₀/100', 17, 'rgb(' + CV_EU + ')', 'right');
+  }
+
+  /* ── показания ── */
+
+  function kolonki(sv) {
+    var z = sv.zeta, kol = [];
+    var n = sv.crossings;
+    kol.push({ c: 'ПО ЗНАКУ γ² − ω₀²', v: sv.regimeByD, word: true,
+               s: 'по следу ' + n + ' ' + C.plural(n, 'заход', 'захода', 'заходов') + ' за ноль' });
+    var ts = sv.tSettle;
+    var s2 = z === 0 ? 'без трения не войдёт' : ts == null ? 'ещё может выйти'
+           : z === 1 ? '= ' + num(ts * W0, 2) + '/ω₀'
+           : sv.tSettleCrit != null ? 'критический ' + num(sv.tSettleCrit, 3) + ' с' : 'критический ждём';
+    kol.push({ c: 'КОРИДОР 5 %, с', v: ts != null ? num(ts, 3) : '—', s: s2 });
+    if (z >= 1) {
+      kol.push({ c: 'ДЕКРЕМЕНТ d', v: '—', s: 'двух максимумов нет' });
+      kol.push({ c: 'ДОБРОТНОСТЬ Q = π/d', v: '—', s: 'колебаний нет' });
+    } else if (sv.d == null) {
+      kol.push({ c: 'ДЕКРЕМЕНТ d', v: '—', s: 'ждём второго максимума' });
+      kol.push({ c: 'ДОБРОТНОСТЬ Q = π/d', v: '—', s: 'ждём второго максимума' });
+    } else {
+      kol.push({ c: 'ДЕКРЕМЕНТ d', v: num(sv.d, 4), s: 'по формуле γT = ' + num(sv.dFormula, 4) });
+      kol.push({ c: 'ДОБРОТНОСТЬ Q = π/d', v: sv.Q != null ? znach(sv.Q, 4) : '∞',
+                 s: sv.Ne != null ? 'колебаний до e: ' + znach(sv.Ne, 3) : 'амплитуда не падает' });
+    }
+    return kol;
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, mut = tone.muted, acc = tone.accent;
+    var op = S.op, sv = svodka(op);
+    grafikX(ctx, op, ink, mut, acc);
+    grafikF(ctx, op, ink, mut);
+    var kol = kolonki(sv), cvet = ['rgb(' + ink + ')', 'rgb(' + CV_DV + ')', 'rgb(' + CV_DV + ')', 'rgb(' + CV_DV + ')'];
+    for (var i = 0; i < kol.length; i++) {
+      pribor(ctx, RX[i], RY, kol[i].c, kol[i].v, cvet[i], mut, kol[i].word);
+      C.label(ctx, RX[i], RY + 66, kol[i].s, 17, 'rgba(' + mut + ',.95)', 'right');
+    }
+    ctx.textAlign = 'center';
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* ── ручки ── */
+
+  function zagruzit(id, zeta, push) {
+    S.id = id; S.zeta = zeta; S.push = push; S.op = novyjOpyt(zeta, push); S.faza = null;
+    snyat();
+    setUi(function (u) { return Object.assign({}, u, { id: id, zeta: zeta, push: push, faza: S.faza }); });
+  }
+  function vybrat(id) { zagruzit(id, PO_ID[id].zeta, S.push); }
+  function polzunokZ(p) {
+    var z = zIzP(p);
+    if (z !== S.zeta) zagruzit(null, z, S.push);
+  }
+  function polzunokV(cm) {
+    var v = Math.round(cm / 5) * 5 / 100;
+    if (v !== S.push) zagruzit(S.id, S.zeta, v);
+  }
+  function pusk() { S.run = !S.run; snyat(); setUi(function (u) { return Object.assign({}, u, { run: S.run }); }); }
+  function sbros() { S.run = true; zagruzit(S.id, S.zeta, S.push); setUi(function (u) { return Object.assign({}, u, { run: true }); }); }
+  function ejler() { S.eu = !S.eu; snyat(); setUi(function (u) { return Object.assign({}, u, { eu: S.eu }); }); }
+  function medlenno() { S.slow = !S.slow; snyat(); setUi(function (u) { return Object.assign({}, u, { slow: S.slow }); }); }
+
+  /* Для автопроверки: __demoSet({ preset | zeta, push (м/с), run, euler,
+     slow }) ставит опыт; __demoCheck(zeta, push, tEnd) — прогон без кадров
+     на tEnd секунд, живую сцену не трогает. */
+  window.__demoSet = function (q) {
+    q = q || {};
+    if (q.euler != null) S.eu = !!q.euler;
+    if (q.slow != null) S.slow = !!q.slow;
+    S.run = q.run == null ? true : !!q.run;
+    var push = q.push != null ? q.push : S.push;
+    if (q.preset) zagruzit(q.preset, PO_ID[q.preset].zeta, push);
+    else zagruzit(q.zeta != null ? null : S.id, q.zeta != null ? q.zeta : S.zeta, push);
+    setUi(function (u) { return Object.assign({}, u, { run: S.run, eu: S.eu, slow: S.slow }); });
+    return pokaz;
+  };
+  window.__demoCheck = progon;
+  window.__demoModel = { PRESETS: PRESETS, FIZ: FIZ, novyjOpyt: novyjOpyt, shagOpyt: shagOpyt, svodka: svodka, H: H, X0: X0 };
+
+  /* ── строка показаний ── */
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var sv = svodka(S.op), z = sv.zeta;
+    var beta = 'β = 2mγ = ' + A(znach(sv.beta, 3) + ' кг/с');
+    var start = sv.push === 0 ? 'Груз 0,1 кг на пружине 10 Н/м отпущен из покоя с 5 см'
+                              : 'Груз 0,1 кг на пружине 10 Н/м толкнули из 5 см к равновесию со скоростью ' + num(sv.push * 100, 0) + ' см/с';
+    var eu = '';
+    if (S.eu && sv.eulerRatio != null)
+      eu = ' Явный Эйлер с тем же шагом T₀/100 даёт соседним максимумам отношение ' + A(num(sv.eulerRatio, 3)) +
+           (sv.eulerRatio > 1 ? ': его спираль идёт наружу, энергию добавляет сама схема.' : ', точный счёт ' +
+            (sv.d != null ? num(Math.exp(-sv.d), 3) : '—') + ': схема занижает затухание.');
+    if (z === 0)
+      return start + '. Трения нет: точка обходит эллипс и возвращается в ту же точку, соседние максимумы равны, энергия держится до ' +
+        A(stepen(sv.energyDrift)) + ' своей величины.' + eu;
+    var koridor = sv.tSettle != null ? 'в коридор 5 % отклонение входит навсегда через ' + A(num(sv.tSettle, 3) + ' с') : '';
+    var krit = sv.tSettleCrit != null ? ', критический с тем же стартом через ' + num(sv.tSettleCrit, 3) + ' с' : '';
+    if (z < 1) {
+      var s = start + ', γ/ω₀ = ' + znach(z, 2) + ', ' + beta + '. ';
+      if (z >= 0.3) {
+        /* сильное трение: число колебаний до e меньше одного, говорит коридор */
+        if (koridor) s += 'Колебательный режим: ' + koridor + ' = ' + num(sv.tSettle * W0, 2) + '/ω₀' + krit +
+          (sv.overshoot != null && sv.push === 0 ? ', хотя по дороге груз перелетает равновесие на ' + A(num(100 * sv.overshoot, 1) + ' %') : '') + '. ';
+        else s += 'Колебательный режим: груз заходит за ноль, а размах падает за период в ' + znach(Math.exp(sv.dFormula), 3) + ' раза. ';
+        return s + eu;
+      }
+      if (sv.d != null) {
+        var N = sv.Ne, celoe = Math.abs(N - Math.round(N)) < 0.005;
+        s += 'Соседние максимумы относятся как ' + A(num(Math.exp(-sv.d), 4)) + ', декремент ' + A(num(sv.d, 4)) +
+          ', амплитуда падает в e раз за ' + znach(N, 3) + ' ' + (celoe ? C.plural(Math.round(N), 'колебание', 'колебания', 'колебаний') : 'колебания') +
+          ', Q = π/d = ' + znach(sv.Q, 4) + ' (ω₀/2γ = ' + znach(sv.QOmega, 4) + '). ';
+      }
+      s += 'Эллипс размыкается в спираль внутрь: энергию отнимает трение, и от шага счёта эта спираль не зависит.';
+      return s + eu;
+    }
+    var thr = (z + Math.sqrt(z * z - 1)) * W0 * X0 * 100;
+    if (z === 1) {
+      if (sv.push === 0)
+        return start + '. γ = ω₀, ' + beta + ' = 2√(mk). Из покоя груз возвращается быстрее любого апериодического и ни разу не заходит за ноль' +
+          (koridor ? ', ' + koridor + ' = ' + num(sv.tSettle * W0, 2) + '/ω₀' : '') +
+          '. Толчок к равновесию быстрее ω₀x₀ = 50 см/с даст один заход за ноль.';
+      return start + '. γ = ω₀, ' + beta + ' = 2√(mk). ' +
+        (sv.push > W0 * X0 ? 'Толчок быстрее ω₀x₀ = 50 см/с, и груз ' + (sv.crossings > 0 ? A('один раз прошёл через ноль') : 'пройдёт через ноль один раз') +
+          ': определение режима по незаходу за ноль верно только для старта из покоя.'
+          : 'Толчок не быстрее ω₀x₀ = 50 см/с, и захода за ноль нет; более сильный толчок дал бы один заход.') +
+        (koridor ? ' Здесь ' + koridor + '.' : '');
+    }
+    if (sv.push === 0)
+      return start + ', γ/ω₀ = ' + znach(z, 2) + ', ' + beta + '. Трение сильнее критического: груз возвращается без колебаний, но медленнее' +
+        (koridor ? ', ' + koridor + krit : '') +
+        ', и пунктир критического лежит ниже во всех точках. Толчок быстрее (γ + √(γ² − ω₀²))x₀ = ' + num(thr, 1) + ' см/с даст один заход за ноль.';
+    return start + ', γ/ω₀ = ' + znach(z, 2) + ', ' + beta + '. Трение сильнее критического, колебаний нет' +
+      (koridor ? '; ' + koridor + krit : '') + '. Толчок быстрее (γ + √(γ² − ω₀²))x₀ = ' + num(thr, 1) + ' см/с даёт один заход за ноль' +
+      (sv.crossings > 0 ? ', и здесь он ' + A('был') + '.' : sv.push * 100 > thr ? ', он ещё будет.' : ', здесь его нет.');
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Трение:">
+          ${PRESETS.map(function (p) {
+            return html`<${C.Btn} key=${p.id} active=${ui.id === p.id} onClick=${function () { vybrat(p.id); }}>${p.knopka}<//>`; })}
+        <//>
+        <${C.Slider} label="Затухание:" min=${0} max=${1} step=${0.0025} value=${pIzZeta(ui.zeta)}
+                     onChange=${polzunokZ} display=${'γ/ω₀ = ' + znach(ui.zeta, 2)} />
+        <${C.Slider} label="Толчок к равновесию:" min=${0} max=${300} step=${5} value=${Math.round(ui.push * 100)}
+                     onChange=${polzunokV} display=${num(ui.push * 100, 0) + ' см/с'} />
+        <${C.Group}>
+          <${C.Btn} active=${ui.eu} onClick=${ejler}>Явный Эйлер<//>
+          <${C.Btn} active=${ui.slow} onClick=${medlenno}>Медленно ×¼<//>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+function pIzZeta(z) { return pIzZ(z); }
+
+C.mount(ElipsSpiral);
+</script>
+</body>
+</html>

@@ -1,0 +1,988 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Гравитационный манёвр</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-05/">&larr; Неделя 05</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=gravitacionnyj-manevr"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `effektivnyj-potencial`, последний абзац: пролёт у планеты
+   (бриф briefs/demki_nedelya05.md, № 7). Мост к четвёртой неделе: в
+   системе планеты пролёт есть упругий удар, как у шайб в системе центра
+   масс (`sistema-centra-mass`), и концы скоростей после пролёта лежат на
+   той же окружности упругих исходов, что в демке udar-v-scm.
+
+   ЧИСЛА. Юпитер: GM = 1,267·10¹⁷ м³/с², радиус 71 492 км, орбитальная
+   скорость 13,1 км/с. Скорость подлёта в системе планеты 10 км/с. При
+   сближении до трёх радиусов Юпитера угол поворота скорости около 118°
+   (бриф: sin(δ/2) = 1/(1 + r_min v²/GM)).
+
+   ЧТО СЧИТАЕТСЯ. Система планеты: Юпитер неподвижен в начале координат,
+   зонд движется под действием одной силы, −GM r/r³ на единицу массы.
+   Масса зонда ничтожна, поэтому система планеты и есть система центра
+   масс пары. Солнце в этой системе не учитывается: пролёт идёт внутри
+   области, где тяготение Юпитера главное, и длится дни, а скорость
+   планеты за это время поворачивается на доли градуса (оборот Юпитера
+   4333 суток, 0,08° в сутки). Поэтому система Солнца получается из
+   системы планеты сдвигом на постоянную скорость 13,1 км/с. Это обычное
+   для расчёта манёвров приближение: пролёт считается в системе планеты,
+   а в систему Солнца переводится только скорость вдали.
+
+   Ось x направлена по скорости планеты, ось y от Солнца. Вдали зонд идёт
+   со скоростью v вдоль оси y, то есть поперёк орбиты планеты, по прямой
+   x = −b (позади планеты) или x = +b (впереди), b есть прицельное
+   расстояние. «Вдали» значит на расстоянии R_ДАЛ = 10⁵ радиусов Юпитера:
+   там недокрученный угол скорости GM·b/(2v²R²) меньше 3·10⁻⁷ рад при любых
+   значениях ползунков. Это далеко за сферой действия Юпитера (около
+   700 радиусов), то есть R_ДАЛ есть бесконечность гиперболы, а не место
+   в Солнечной системе: с неё снимаются только скорости вдали. Старт ставится так, чтобы удельная энергия была
+   ровно v²/2, а момент ровно b·v: скорость там √(v² + 2GM/R_ДАЛ) вдоль y,
+   смещение по x равно b·v, делённому на эту скорость.
+
+   ИНТЕГРАТОР. Скоростной Верле (полшага скорости, шаг положения, полшага
+   скорости), шаг h = η·r/|v| с η = 10⁻³: на сближении шаг короткий, вдали
+   длинный, и весь пролёт с 10⁵ радиусов и обратно занимает 17–26 тысяч
+   шагов. Толчок направлен по радиусу, сдвиг идёт вдоль скорости, поэтому
+   момент r × v схема держит при любом шаге, до ошибки округления (замер:
+   отклонение не больше 4·10⁻¹¹, наибольшее на сетке 3,6·10⁻¹¹).
+   Проверка по сетке ползунков 4–20 км/с и 2–40 радиусов (прогоны 29.09 и 30.09, 340 пролётов): модуль скорости
+   на выходе, на том же расстоянии R_ДАЛ, совпадает с модулем на входе
+   с точностью 5·10⁻⁸;
+   наименьшее расстояние совпадает с точкой поворота эффективной энергии
+   до 1,1·10⁻⁷; угол поворота с формулой брифа до 3·10⁻⁵ градуса, и это
+   недокрученный остаток на R_ДАЛ, а не ошибка счёта.
+
+   ЧТО СНИМАЕТСЯ С ПРОЛЁТА. Угол поворота δ есть угол между скоростью на
+   входе и скоростью на выходе, обе на расстоянии R_ДАЛ. Наименьшее
+   расстояние r_min есть наименьшее r по шагам. Скорость вдали после
+   пролёта √(v² − 2GM/r) на выходе. В систему Солнца переводятся скорости
+   вдали: до пролёта V + v, после V + v′, где V скорость планеты. Формулы
+   считаются отдельно и служат проверкой:
+       r_min: точка поворота l²/(2r²) − GM/r = v²/2, l = b·v,
+       r_min = (GM/v²)(√(1 + (b v²/GM)²) − 1),
+       δ: sin(δ/2) = 1/(1 + r_min v²/GM).
+   Если r_min меньше радиуса Юпитера, зонд падает на планету; счёт
+   останавливается на поверхности.
+
+   Энергию, которую зонд набирает в системе Солнца, отдаёт Юпитер: импульс
+   пары сохраняется, и скорость планеты меняется на долю массы зонда к
+   массе Юпитера, то есть неизмеримо мало. */
+
+var GM = 1.267e17;                 /* Юпитер, м³/с² */
+var RJ = 71492e3;                  /* радиус Юпитера, м */
+var VPL = 13.1e3;                  /* орбитальная скорость Юпитера, м/с */
+var R_DAL = 1e5 * RJ;              /* «вдали»: отсюда стартует и сюда возвращается счёт */
+var ETA = 1e-3;                    /* шаг в долях r/|v| */
+var R_ZAP = 110 * RJ;              /* точки ближе этого запоминаются для показа */
+var B_MIN = 2, B_MAX = 40;         /* прицельное расстояние, радиусов Юпитера */
+var V_MIN = 4, V_MAX = 20;         /* скорость подлёта, км/с */
+var V_NACH = 10;                   /* скорость подлёта главы, км/с */
+var RP_GLAVY = 3;                  /* сближение до трёх радиусов */
+
+/* Прицельное расстояние, при котором наименьшее расстояние равно rp;
+   из тех же двух законов сохранения: v_p·rp = b·v, v_p² − 2GM/rp = v². */
+function bDlya(rp, v) { return rp * Math.sqrt(1 + 2 * GM / (rp * v * v)); }
+function rMinFormula(b, v) { var a = GM / (v * v); return a * (Math.sqrt(1 + Math.pow(b / a, 2)) - 1); }
+function deltaFormula(rp, v) { return 2 * Math.asin(1 / (1 + rp * v * v / GM)); }
+
+/* Пролёт. p: b (м), v (м/с), s (−1 позади планеты, +1 впереди). */
+function prolet(p) {
+  var v0 = Math.sqrt(p.v * p.v + 2 * GM / R_DAL);
+  var x = p.s * p.b * p.v / v0, y = -Math.sqrt(R_DAL * R_DAL - x * x);
+  var vx = 0, vy = v0;
+  var L0 = x * vy - y * vx;
+  var r = R_DAL, k = -GM / (r * r * r), ax = k * x, ay = k * y;
+  var t = 0, n = 0, rPred = r, proshel = false, udar = false;
+  var rMin = r, tMin = 0, xMin = x, yMin = y;
+  var px = x, py = y, pvx = vx, pvy = vy;
+  var tochki = [];
+  while (true) {
+    var h = ETA * r / Math.hypot(vx, vy);
+    px = x; py = y; pvx = vx; pvy = vy;
+    vx += ax * h / 2; vy += ay * h / 2;
+    x += vx * h; y += vy * h;
+    r = Math.hypot(x, y); k = -GM / (r * r * r); ax = k * x; ay = k * y;
+    vx += ax * h / 2; vy += ay * h / 2;
+    t += h; n++;
+    if (r <= RJ) {
+      /* точка касания поверхности внутри шага, линейно */
+      var r0 = Math.hypot(px, py), f = (r0 - RJ) / (r0 - r);
+      x = px + f * (x - px); y = py + f * (y - py); t = t - h + f * h;
+      tochki.push([t, x, y]);
+      udar = true; break;
+    }
+    if (r < R_ZAP) tochki.push([t, x, y]);
+    if (r < rMin) { rMin = r; tMin = t; xMin = x; yMin = y; }
+    if (r > rPred) proshel = true;
+    rPred = r;
+    if (proshel && r >= R_DAL) break;
+  }
+  var rMinT = rMinFormula(p.b, p.v), dT = deltaFormula(rMinT, p.v);
+  var res = {
+    b: p.b, v: p.v, s: p.s, n: n, hit: udar, tochki: tochki,
+    rMinTheory: rMinT, deltaTheory: dT, vInSun: Math.hypot(VPL, p.v)
+  };
+  if (udar) {
+    res.tHit = t; res.xHit = x; res.yHit = y;
+    return res;
+  }
+  /* выход: скорость в точке, где r снова равно R_DAL */
+  var rp0 = Math.hypot(px, py), g = (R_DAL - rp0) / (r - rp0);
+  var ex = pvx + g * (vx - pvx), ey = pvy + g * (vy - pvy);
+  var xe = px + g * (x - px), ye = py + g * (y - py);
+  var vVyh = Math.hypot(ex, ey);
+  var vDal = Math.sqrt(vVyh * vVyh - 2 * GM / R_DAL);
+  var ux = ex / vVyh, uy = ey / vVyh;
+  var delta = Math.abs(Math.atan2(-ux, uy));   /* угол от (0, 1) до выхода */
+  var sx = VPL + ux * vDal, sy = uy * vDal;
+  res.rMin = rMin; res.tMin = tMin; res.xMin = xMin; res.yMin = yMin;
+  res.delta = delta;
+  res.vVhod = v0; res.vVyhod = vVyh; res.speedRelError = vVyh / v0 - 1;
+  res.vOutPlanet = vDal; res.ux = ux; res.uy = uy; res.xe = xe; res.ye = ye;
+  res.vOutSun = Math.hypot(sx, sy);
+  res.gain = res.vOutSun - res.vInSun;
+  res.Ldrift = (x * vy - y * vx) / L0 - 1;
+  return res;
+}
+
+/* Русская запятая и настоящий минус; крохи печатаются нулём. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function snakom(v, d) { var s = num(v, d); return v > 0 && s !== num(0, d) ? '+' + s : s; }
+function grad(rad) { return rad * 180 / Math.PI; }
+
+var KX = {};
+function kx(tex) {
+  if (!(tex in KX)) {
+    try { KX[tex] = katex.renderToString(tex, { throwOnError: false }); }
+    catch (e) { KX[tex] = tex; }
+  }
+  return KX[tex];
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Три окна. Слева система Юпитера: планета в масштабе, пунктиром
+   прямая подлёта и прямая ухода (асимптоты), скобкой прицельное
+   расстояние, отрезком наименьшее; бирюзой путь до сближения, охрой после;
+   стрелками скорость вдали до и после, одинаковой длины. Масштаб окна
+   подстраивается под прицельное расстояние. В середине система Солнца:
+   тот же пролёт, к которому прибавлено движение планеты по орбите; орбита
+   на пролёте почти прямая. Справа скорости вдали: вектор скорости
+   планеты, окружность радиуса v вокруг его конца, скорости зонда
+   относительно планеты до и после (радиусы) и относительно Солнца (из
+   начала). Буквы величин набраны KaTeX слоем поверх канвы. */
+
+var W = 1000, HGT = 460;
+var PA = { cx: 170, cy: 198, pol: 156, x0: 12, x1: 328 };   /* окно системы планеты */
+var PB = { x0: 348, x1: 664 };                              /* окно системы Солнца */
+var PC = { x0: 684, x1: 990 };                              /* окно скоростей */
+var PY0 = 42, PY1 = 354;                                     /* верх и низ окон */
+var KV = 4;                                                  /* px на 1 км/с у стрелки скорости планеты */
+var STR_A = 44;                                              /* px у стрелок скорости вдали в системе планеты:
+                                                                их дело показать, что длины одинаковы */
+var CV = '77,182,198', CF = '224,138,82', JUP = '214,178,132';
+var T_POKAZ = 7, T_PAUZA = 1.6;                             /* с экрана: пролёт и пауза в конце */
+var ROW = 382;                                               /* строка показаний */
+
+/* Всё, что зависит только от ползунков: пролёт и раскладка на канве.
+   kegl: кегль подписей KaTeX в логических px канвы. Он зависит от ширины
+   кадра (clamp в demo.css), и на узком кадре буквы крупнее относительно
+   сцены, поэтому подписи раскладываются под него заново (podpisi). */
+function raskladka(M, kegl) {
+  var G = { M: M, kegl: kegl || 17 };
+  var bR = M.b / RJ, rpR = M.hit ? 1 : M.rMin / RJ;
+  var Rv = C.clamp(Math.max(1.3 * bR, 4 * rpR, 6), 6, 64) * RJ;
+  var sA = PA.pol / Rv;
+  G.Rv = Rv; G.sA = sA;
+  var rOkno = 1.45 * Rv;
+  var T = M.tochki, i0 = -1, i1 = -1;
+  for (var i = 0; i < T.length; i++) {
+    var r = Math.hypot(T[i][1], T[i][2]);
+    if (r < rOkno) { if (i0 < 0) i0 = i; i1 = i; }
+  }
+  if (i0 < 0) { i0 = 0; i1 = T.length - 1; }
+  if (M.hit) i1 = T.length - 1;
+  var okno = T.slice(i0, i1 + 1);
+  G.okno = okno; G.ta = okno[0][0]; G.tb = okno[okno.length - 1][0];
+  G.tp = M.hit ? M.tHit : M.tMin;
+  /* система Солнца: планета в момент сближения в начале отсчёта */
+  var xs = [], ys = [];
+  okno.forEach(function (q) { xs.push(q[1] + VPL * (q[0] - G.tp)); ys.push(q[2]); });
+  xs.push(VPL * (G.ta - G.tp), VPL * (G.tb - G.tp)); ys.push(0, 0);
+  var mnx = Math.min.apply(null, xs), mxx = Math.max.apply(null, xs);
+  var mny = Math.min.apply(null, ys), mxy = Math.max.apply(null, ys);
+  /* справа запас под стрелку скорости планеты: в конце пролёта планета
+     стоит у правого края рамки */
+  var ZAPAS = VPL / 1e3 * KV + 14, ph = PY1 - PY0 - 70, pw, sB;
+  for (var it = 0; it < 2; it++) {
+    pw = PB.x1 - PB.x0 - 40 - ZAPAS;
+    sB = Math.min(pw / Math.max(mxx - mnx, 1), ph / Math.max(mxy - mny, 1));
+    if (!it) ZAPAS += Math.max(RJ * sB, 4);
+  }
+  G.sB = sB;
+  G.bx = (PB.x0 + PB.x1 - ZAPAS) / 2 - (mnx + mxx) / 2 * sB;
+  G.by = (PY0 + 18 + PY1 - 30) / 2 + (mny + mxy) / 2 * sB;
+  /* точки для рисования, не больше 1500 на окно */
+  var shag = Math.max(1, Math.ceil(okno.length / 1500));
+  G.putA = []; G.putB = [];
+  for (i = 0; i < okno.length; i += shag) dobavit(okno[i]);
+  if ((okno.length - 1) % shag) dobavit(okno[okno.length - 1]);
+  function dobavit(q) {
+    G.putA.push([q[0], PA.cx + q[1] * sA, PA.cy - q[2] * sA]);
+    G.putB.push([q[0], G.bx + (q[1] + VPL * (q[0] - G.tp)) * sB, G.by - q[2] * sB]);
+  }
+  /* окно скоростей, км/с; начало O, конец скорости планеты Vt */
+  var v = M.v / 1e3, U = VPL / 1e3;
+  var vo = M.hit ? null : [M.ux * M.vOutPlanet / 1e3, M.uy * M.vOutPlanet / 1e3];
+  var lo = Math.min(0, U - v), hi = U + v;
+  var kC = Math.min((PC.x1 - PC.x0 - 60) / (hi - lo), (PY1 - PY0 - 120) / (2 * v), 14);
+  var ox = (PC.x0 + PC.x1) / 2 - (lo + hi) / 2 * kC, oy = (PY0 + PY1) / 2 - 8;
+  G.kC = kC;
+  G.O = [ox, oy]; G.Vt = [ox + U * kC, oy];
+  G.Pdo = [G.Vt[0], oy - v * kC];
+  G.Pposle = vo ? [G.Vt[0] + vo[0] * kC, oy - vo[1] * kC] : null;
+
+  /* окно системы планеты: прямая подлёта, скобка b, стрелки скорости вдали
+     на прямых подлёта и ухода, прямая ухода через точку выхода */
+  var cx = PA.cx, cy = PA.cy;
+  G.bxA = cx + M.s * M.b * sA; G.ybA = cy + 0.84 * PA.pol;
+  var Lv = STR_A, yv = cy + 0.6 * PA.pol;
+  G.strIn = [G.bxA, yv, G.bxA, yv - Lv];
+  G.strOut = null; G.pryamOut = null;
+  if (!M.hit) {
+    var pr = M.xe * M.ux + M.ye * M.uy, fx = M.xe - pr * M.ux, fy = M.ye - pr * M.uy;
+    G.pryamOut = [cx + (fx - 0.4 * Rv * M.ux) * sA, cy - (fy - 0.4 * Rv * M.uy) * sA,
+                  cx + (fx + 2 * Rv * M.ux) * sA, cy - (fy + 2 * Rv * M.uy) * sA];
+    /* стрелка встаёт на прямую ухода за основанием перпендикуляра из
+       центра; при большом прицельном расстоянии и малой скорости там уже
+       край окна, и она сдвигается назад по прямой, пока не войдёт целиком */
+    var Lo = STR_A * M.vOutPlanet / M.v;
+    [0.5, 0.35, 0.2, 0.05, -0.1, -0.25, -0.4].some(function (d, k) {
+      var a0x = cx + (fx + d * Rv * M.ux) * sA, a0y = cy - (fy + d * Rv * M.uy) * sA;
+      var a1x = a0x + M.ux * Lo, a1y = a0y - M.uy * Lo;
+      if (!k) G.strOut = [a0x, a0y, a1x, a1y];
+      var vnutri = function (x, y) { return x > PA.x0 + 8 && x < PA.x1 - 8 && y > PY0 + 8 && y < PY1 - 8; };
+      if (vnutri(a0x, a0y) && vnutri(a1x, a1y)) { G.strOut = [a0x, a0y, a1x, a1y]; return true; }
+      return false;
+    });
+  }
+  podpisi(G, G.kegl);
+
+  /* Окно Солнца. Путь зонда прорежен сеткой 4 px: у сближения точки
+     счёта идут густо, и петля пути весила бы больше чужой подписи. */
+  G.putBset = setka(G.putB.map(function (q) { return [q[1], q[2], 1]; }));
+  var pomehiB = G.putBset.slice();
+  var xa = G.bx + VPL * (G.ta - G.tp) * sB, xb = G.bx + VPL * (G.tb - G.tp) * sB;
+  G.rjB = Math.max(RJ * sB, 4);
+  otrezok(pomehiB, xa, G.by, xb, G.by, 80, 3, 1);
+  otrezok(pomehiB, xb - G.rjB, G.by - G.rjB, xb + G.rjB, G.by + G.rjB, 20, G.rjB, 3);
+  otrezok(pomehiB, xa - G.rjB, G.by - G.rjB, xa + G.rjB, G.by + G.rjB, 20, G.rjB, 3);
+  /* При падении путь короткий, масштаб крупный и Юпитер большой: диск
+     в начале и в конце пролёта идёт в помехи целиком, иначе подпись
+     орбиты ложится на планету. */
+  if (G.rjB > 6) { krug(pomehiB, xa, G.by, G.rjB + 4, 3); krug(pomehiB, xb, G.by, G.rjB + 4, 3); }
+  otrezok(pomehiB, PB.x1 - 8, PY1 - 40, PB.x1 - 8, PY1 - 8, 10, 4, 3);
+  /* там же всё время ездит число у стрелки планеты; под стрелкой в конце
+     пролёта оно стоит всю паузу, это место весит как подпись */
+  var sx = G.rjB + 2 + VPL / 1e3 * KV / 2;
+  otrezok(pomehiB, xa + sx - 38, G.by + 17, xb + sx + 38, G.by + 17, 60, 8, 0.5);
+  otrezok(pomehiB, xa + sx - 38, G.by - 17, xb + sx + 38, G.by - 17, 60, 8, 0.5);
+  otrezok(pomehiB, xb + sx - 38, G.by + 17, xb + sx + 38, G.by + 17, 12, 8, 3);
+  /* Места: справа, слева и посередине, над прямой и под ней; сначала
+     вплотную, потом дальше от прямой, чтобы уйти от большой планеты и
+     от пути, который идёт вдоль орбиты. */
+  var OW = 128, OH = 22;
+  function mesta(otst) {
+    var k = [];
+    otst.forEach(function (d) {
+      [G.by - OH - d, G.by + d].forEach(function (y) {
+        if (y < PY0 + 4 || y + OH > PY1 - 4) return;
+        [PB.x1 - OW - 6, PB.x0 + 6, (PB.x0 + PB.x1 - OW) / 2].forEach(function (x) { k.push([x, y]); });
+      });
+    });
+    return k;
+  }
+  /* дальние места берутся, только если у прямой всё занято */
+  var blizh = luchshee(mesta(G.rjB > 6 ? [6, G.rjB + 4] : [6]), OW, OH, pomehiB);
+  G.orbPodp = blizh.pomeh <= 24 ? blizh : luchshee(mesta([6, G.rjB + 4, Math.max(6, G.rjB + 4) + 26]), OW, OH, pomehiB);
+  return G;
+}
+
+/* Одна помеха на клетку 4×4 px. */
+function setka(list) {
+  var byl = {}, out = [];
+  list.forEach(function (p) {
+    var k = Math.round(p[0] / 4) + ':' + Math.round(p[1] / 4);
+    if (!byl[k]) { byl[k] = 1; out.push(p); }
+  });
+  return out;
+}
+
+/* Точки вдоль отрезка в список помех с весом ves; tolshch расширяет
+   полосу поперёк. */
+function otrezok(list, x0, y0, x1, y1, n, tolshch, ves) {
+  var w = tolshch || 0, v = ves == null ? 1 : ves;
+  for (var i = 0; i <= n; i++) {
+    var x = x0 + (x1 - x0) * i / n, y = y0 + (y1 - y0) * i / n;
+    list.push([x, y, v]);
+    if (w) { list.push([x - w, y - w, v]); list.push([x + w, y + w, v]); }
+  }
+}
+/* Точки диска радиуса R с шагом 4 px в список помех. */
+function krug(list, x0, y0, R, ves) {
+  for (var y = -R; y <= R; y += 4)
+    for (var x = -R; x <= R; x += 4)
+      if (x * x + y * y <= R * R) list.push([x0 + x, y0 + y, ves]);
+}
+
+/* Число у стрелки скорости планеты: под стрелкой, над ней, левее
+   планеты или правее острия, где меньше пути зонда, подписи орбиты и
+   самой планеты. Места, вылезающие из окна, не рассматриваются. */
+function podpisPlanety(G, plx, ply, rjB) {
+  var pom = G.putBset.slice(), op = G.orbPodp;
+  otrezok(pom, op.x, op.y + op.h / 2, op.x + op.w, op.y + op.h / 2, 20, 8, 6);
+  if (rjB > 6) krug(pom, plx, ply, rjB + 4, 3);
+  var sx0 = plx + rjB + 2, sx1 = sx0 + VPL / 1e3 * KV, xc = (sx0 + sx1) / 2 - 38, xl = plx - rjB - 84;
+  var kand = [[xc, ply + 6], [xc, ply - 28], [xc + 30, ply + 6], [xc + 30, ply - 28],
+              [xl, ply - 11], [xl, ply + 6], [xl, ply - 28], [sx1 + 6, ply - 11],
+              [xc, ply + 30], [xc, ply - 52], [xc + 30, ply + 30], [xc + 30, ply - 52],
+              [xl, ply + 30], [xl, ply - 52]];
+  var vnutri = kand.filter(function (k) {
+    return k[0] > PB.x0 + 2 && k[0] + 76 < PB.x1 - 2 && k[1] > PY0 + 2 && k[1] + 22 < PY1 - 2;
+  });
+  return luchshee(vnutri.length ? vnutri : kand, 76, 22, pom);
+}
+
+/* Из углов-кандидатов [x, y] прямоугольника w×h берётся тот, куда попал
+   наименьший вес помех (с полем 6 px); при равенстве первый. */
+function luchshee(kand, w, h, pomehi) {
+  var best = kand[0], min = Infinity;
+  kand.forEach(function (k) {
+    var n = 0;
+    for (var i = 0; i < pomehi.length; i++) {
+      var p = pomehi[i];
+      if (p[0] > k[0] - 6 && p[0] < k[0] + w + 6 && p[1] > k[1] - 6 && p[1] < k[1] + h + 6) n += p[2] == null ? 1 : p[2];
+    }
+    if (n < min) { min = n; best = k; }
+  });
+  return { x: best[0], y: best[1], w: w, h: h, pomeh: min };
+}
+
+/* Рамки подписей KaTeX в долях кегля: ширина и высота спана, замер
+   в Chrome (KaTeX внутри спана набирает формулу в 1,21 кегля). */
+var RAMKA = {
+  'b': [0.52, 1.52], 'r_{\\text{min}}': [2.02, 1.52], '\\delta': [0.58, 1.52],
+  '\\vec V': [0.97, 1.52], '\\vec v': [0.63, 1.45], '\\vec v^{\\,\\prime}': [1.09, 1.45],
+  '\\vec V + \\vec v': [3.08, 1.52], '\\vec V + \\vec v^{\\,\\prime}': [3.54, 1.52]
+};
+function ramka(tex, kegl) { var r = RAMKA[tex]; return [r[0] * kegl + 2, r[1] * kegl]; }
+
+/* Длина куска отрезка ab внутри прямоугольника (отсечение Лианга и Барски). */
+function dlinaVnutri(ax, ay, bx, by, x0, y0, x1, y1) {
+  var dx = bx - ax, dy = by - ay, t0 = 0, t1 = 1;
+  var p = [-dx, dx, -dy, dy], q = [ax - x0, x1 - ax, ay - y0, y1 - ay];
+  for (var i = 0; i < 4; i++) {
+    if (p[i] === 0) { if (q[i] < 0) return 0; continue; }
+    var r = q[i] / p[i];
+    if (p[i] < 0) { if (r > t1) return 0; if (r > t0) t0 = r; }
+    else { if (r < t0) return 0; if (r < t1) t1 = r; }
+  }
+  return (t1 - t0) * Math.hypot(dx, dy);
+}
+
+/* Цена рамки r = [x0, y0, x1, y1]: длина линий под ней (с полем линии)
+   на их вес, наезд на уже поставленные подписи и выход из окна. Линия:
+   [ax, ay, bx, by, вес, поле]. */
+function tsena(r, lin, ramki, okno) { return tsenaLin(r, lin, okno) + nakladka(r, ramki); }
+function tsenaLin(r, lin, okno) {
+  var c = 0;
+  for (var i = 0; i < lin.length; i++) {
+    var s = lin[i];
+    c += s[4] * dlinaVnutri(s[0], s[1], s[2], s[3], r[0] - s[5], r[1] - s[5], r[2] + s[5], r[3] + s[5]);
+  }
+  return c + 20 * (Math.max(0, okno[0] - r[0]) + Math.max(0, r[2] - okno[2]) +
+                   Math.max(0, okno[1] - r[1]) + Math.max(0, r[3] - okno[3]));
+}
+/* наезд на подписи: рамки ближе 4 px друг к другу уже считаются наездом */
+function nakladka(r, ramki) {
+  var c = 0;
+  for (var i = 0; i < ramki.length; i++) {
+    var q = ramki[i];
+    var ox = Math.min(r[2], q[2]) - Math.max(r[0], q[0]) + 4, oy = Math.min(r[3], q[3]) - Math.max(r[1], q[1]) + 4;
+    if (ox > 0 && oy > 0) c += 60 + 4 * Math.min(ox, oy);
+  }
+  return c;
+}
+
+/* Из мест [x, y, штраф] (центр рамки w×h и плата за удалённость от
+   своего отрезка) берётся самое дешёвое; помеха весит вдесятеро больше
+   удалённости, так что чистое место дальше лучше задетого рядом. */
+function vybrat(mesta, w, h, lin, ramki, okno) {
+  var best = null;
+  mesta.forEach(function (m) {
+    var r = [m[0] - w / 2, m[1] - h / 2, m[0] + w / 2, m[1] + h / 2];
+    var c = 10 * tsena(r, lin, ramki, okno) + m[2];
+    if (!best || c < best.c) best = { x: m[0], y: m[1], r: r, c: c };
+  });
+  return best;
+}
+
+/* Стрелка как помеха: древко и три стороны наконечника (как в strelka). */
+function strelkaPomeha(lin, a, b, ves) {
+  lin.push([a[0], a[1], b[0], b[1], ves, 3.5]);
+  var dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy);
+  if (L < 1) return;
+  var ux = dx / L, uy = dy / L, hd = Math.min(12, L * 0.32);
+  var k1 = [b[0] - ux * hd - uy * hd * 0.34, b[1] - uy * hd + ux * hd * 0.34];
+  var k2 = [b[0] - ux * hd + uy * hd * 0.34, b[1] - uy * hd - ux * hd * 0.34];
+  lin.push([b[0], b[1], k1[0], k1[1], 1.5 * ves, 3], [b[0], b[1], k2[0], k2[1], 1.5 * ves, 3],
+           [k1[0], k1[1], k2[0], k2[1], 1.5 * ves, 3]);
+}
+/* Дуга окружности ломаной в помехи: от угла a0 на угол razm (со знаком). */
+function dugaPomeha(lin, c, R, a0, razm, n, ves, pole) {
+  for (var i = 0; i < n; i++) {
+    var u = a0 + razm * i / n, w = a0 + razm * (i + 1) / n;
+    lin.push([c[0] + R * Math.cos(u), c[1] + R * Math.sin(u), c[0] + R * Math.cos(w), c[1] + R * Math.sin(w), ves, pole]);
+  }
+}
+
+/* Места у отрезка ab для рамки w×h: доли длины от середины к концам,
+   обе стороны, зазор от 4 до 52 px (дальние нужны на узком кадре, где
+   буквы крупные, а чертёж тесный). */
+function uOtrezka(a, b, w, h) {
+  var dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+  var e = Math.abs(nx) * w / 2 + Math.abs(ny) * h / 2 + 2, res = [];
+  [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8].forEach(function (f, i) {
+    [4, 9, 16, 26, 38, 52].forEach(function (g) {
+      [1, -1].forEach(function (sg) {
+        res.push([a[0] + f * dx + sg * nx * (e + g), a[1] + f * dy + sg * ny * (e + g), 2 * i + 0.4 * (g - 4)]);
+      });
+    });
+  });
+  /* за острием, на продолжении стрелки: туда уходит подпись короткой
+     суммы, когда по бокам её отрезка тесно */
+  var ux = dx / L, uy = dy / L, eu = Math.abs(ux) * w / 2 + Math.abs(uy) * h / 2 + 6;
+  [0, 0.3, -0.3].forEach(function (s, i) {
+    [0, 12].forEach(function (g) {
+      res.push([b[0] + ux * (eu + g) + nx * s * w, b[1] + uy * (eu + g) + ny * s * w, 8 + 2 * i + 0.4 * g]);
+    });
+  });
+  return res;
+}
+
+/* Подписи с буквами (KaTeX поверх канвы, координаты в логических px)
+   и легенда окна Юпитера, которая их обходит. Рамки подписей берутся
+   по кеглю, поэтому всё это пересчитывается, когда меняется кадр. */
+function podpisi(G, kegl) {
+  G.kegl = kegl;
+  G.metki = metki(G, kegl);
+  /* Легенда скоростей вдали встаёт в тот угол окна, где её меньше всего
+     задевают путь, прямые и подписи. */
+  /* помеха: [x, y, вес]; путь и сплошное весят больше пунктира, подписи больше всего */
+  var cx = PA.cx, cy = PA.cy;
+  var pomehi = setka(G.putA.map(function (q) { return [q[1], q[2], 1]; }));
+  otrezok(pomehi, G.bxA, PY0, G.bxA, PY1, 60, 0, 0.3);
+  otrezok(pomehi, cx, cy, cx, PY1, 30, 0, 0.3);
+  otrezok(pomehi, cx, G.ybA, G.bxA, G.ybA, 30, 0, 2);
+  otrezok(pomehi, G.strIn[0], G.strIn[1], G.strIn[2], G.strIn[3], 20, 5, 3);
+  if (G.pryamOut) otrezok(pomehi, G.pryamOut[0], G.pryamOut[1], G.pryamOut[2], G.pryamOut[3], 80, 0, 0.3);
+  if (G.strOut) otrezok(pomehi, G.strOut[0], G.strOut[1], G.strOut[2], G.strOut[3], 20, 5, 3);
+  G.metki.forEach(function (m) {
+    if (m.x < PA.x1) otrezok(pomehi, m.r[0], m.y, m.r[2], m.y, 6, (m.r[3] - m.r[1]) / 2, 6);
+  });
+  var LW = 140, LH = 48;
+  G.legenda = luchshee([
+    [PA.x1 - LW - 2, PY1 - LH - 2], [PA.x1 - LW - 2, PY0 + 4],
+    [PA.x0 + 2, PY1 - LH - 2], [PA.x0 + 2, PY0 + 4]
+  ], LW, LH, pomehi);
+}
+
+function metki(G, kegl) {
+  var M = G.M, out = [], sA = G.sA;
+  function metka(x, y, tex, cls) {
+    var wh = ramka(tex, kegl);
+    var m = { x: x, y: y, tex: tex, cls: cls, r: [x - wh[0] / 2, y - wh[1] / 2, x + wh[0] / 2, y + wh[1] / 2] };
+    out.push(m);
+    return m;
+  }
+
+  /* ── окно Юпитера ── */
+  var linA = [], ramkiA = [], oknoA = [PA.x0 + 2, PY0 + 2, PA.x1 - 2, PY1 - 2];
+  var P0 = G.putA;
+  for (var i = 1; i < P0.length; i++) linA.push([P0[i - 1][1], P0[i - 1][2], P0[i][1], P0[i][2], 1, 3.5]);
+  var rj = RJ * sA;
+  linA.push([PA.cx - rj, PA.cy, PA.cx + rj, PA.cy, 1, rj + 2]);
+  var bx = G.bxA, yb = G.ybA;
+  linA.push([PA.cx, yb, bx, yb, 1, 3], [PA.cx, yb - 6, PA.cx, yb + 6, 1, 3], [bx, yb - 6, bx, yb + 6, 1, 3]);
+  linA.push([bx, PY0, bx, PY1, 0.4, 2], [PA.cx, PA.cy, PA.cx, PY1, 0.4, 2]);
+  strelkaPomeha(linA, [G.strIn[0], G.strIn[1]], [G.strIn[2], G.strIn[3]], 1);
+  if (G.strOut) strelkaPomeha(linA, [G.strOut[0], G.strOut[1]], [G.strOut[2], G.strOut[3]], 1);
+  if (G.pryamOut) linA.push([G.pryamOut[0], G.pryamOut[1], G.pryamOut[2], G.pryamOut[3], 0.4, 2]);
+  if (!M.hit) {
+    /* r_min за ближайшей точкой, на продолжении отрезка от центра: путь
+       там выпуклый и отходит от подписи в обе стороны. Если там пунктир
+       или край окна, луч поворачивается на 20 или 40 градусов. */
+    var P = [PA.cx + M.xMin * sA, PA.cy - M.yMin * sA];
+    linA.push([PA.cx, PA.cy, P[0], P[1], 1, 3]);
+    var ex = P[0] - PA.cx, ey = P[1] - PA.cy, el = Math.hypot(ex, ey) || 1;
+    var wr = ramka('r_{\\text{min}}', kegl), mr = [];
+    [0, 0.35, -0.35, 0.7, -0.7].forEach(function (u, k) {
+      var dx = (ex * Math.cos(u) - ey * Math.sin(u)) / el, dy = (ex * Math.sin(u) + ey * Math.cos(u)) / el;
+      var e = Math.abs(dx) * wr[0] / 2 + Math.abs(dy) * wr[1] / 2 + 5;
+      [0, 8, 18].forEach(function (g) { mr.push([P[0] + dx * (e + g), P[1] + dy * (e + g), 3 * Math.ceil(k / 2) + 0.4 * g]); });
+    });
+    var vr = vybrat(mr, wr[0], wr[1], linA, [], oknoA);
+    ramkiA.push(metka(vr.x, vr.y, 'r_{\\text{min}}').r);
+  }
+  /* b у скобки: над ней, под ней или за её концами, где не задевают путь,
+     стрелки и пунктир, и так, чтобы буква не вышла из окна */
+  var wb = ramka('b', kegl), mb = [];
+  [0.5, 0.35, 0.65, 0.2, 0.8].forEach(function (f, k) {
+    var x = PA.cx + (bx - PA.cx) * f;
+    mb.push([x, yb - 5 - wb[1] / 2, 2 * k], [x, yb + 5 + wb[1] / 2, 2 * k + 0.5], [x, yb - 15 - wb[1] / 2, 2 * k + 4]);
+  });
+  var xl = Math.min(PA.cx, bx), xr = Math.max(PA.cx, bx);
+  mb.push([xl - 8 - wb[0] / 2, yb, 9], [xr + 8 + wb[0] / 2, yb, 9]);
+  var vb = vybrat(mb, wb[0], wb[1], linA, ramkiA, oknoA);
+  metka(vb.x, vb.y, 'b');
+
+  /* ── окно скоростей ──
+     Векторы сходятся в концах, и при малом повороте или малой скорости
+     подписи наползают друг на друга и на стрелки. Каждой подписи даётся
+     около восьмидесяти мест вокруг её отрезка. Подписи ставятся по
+     очереди, каждая в самое дешёвое место с учётом уже поставленных,
+     потом дважды переставляются по одной при всех остальных на местах;
+     из четырёх очередей берётся та, где сумма цен меньше. */
+  var O = G.O, Vt = G.Vt, D = G.Pdo, Q = G.Pposle;
+  var Rk = M.v / 1e3 * G.kC;
+  var lin = [];
+  strelkaPomeha(lin, O, Vt, 1); strelkaPomeha(lin, Vt, D, 1); strelkaPomeha(lin, O, D, 0.8);
+  if (Q) { strelkaPomeha(lin, Vt, Q, 1); strelkaPomeha(lin, O, Q, 0.8); }
+  lin.push([O[0] - 4, O[1], O[0] + 4, O[1], 1, 2]);
+  dugaPomeha(lin, Vt, Rk, 0, 2 * Math.PI, 48, 0.3, 2);
+  /* подпись окружности внизу окна (канва, 17 px) */
+  var xc = (PC.x0 + PC.x1) / 2;
+  var ramki0 = [[xc - 112, PY1 - 20, xc + 112, PY1 + 2]];
+  var okno = [PC.x0 + 3, PY0 + 2, PC.x1 - 3, PY1];
+  var zadachi = [];
+  G.Ra = 24;
+  if (Q) {
+    /* δ: дуга так далеко от центра, чтобы её было видно и при малом угле;
+       подпись на биссектрисе за дугой, внутри дуги или у её концов */
+    var a1 = Math.atan2(D[1] - Vt[1], D[0] - Vt[0]), a2 = Math.atan2(Q[1] - Vt[1], Q[0] - Vt[0]);
+    G.Ra = C.clamp(18 / Math.max(M.delta, 1e-3), 22, 0.6 * Rk);
+    var norm = function (a) { return ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI); };
+    dugaPomeha(lin, Vt, G.Ra, a1, M.s > 0 ? -norm(a1 - a2) : norm(a2 - a1), 20, 1.5, 3);
+    var wd = ramka('\\delta', kegl);
+    var bxs = Math.cos(a1) + Math.cos(a2), bys = Math.sin(a1) + Math.sin(a2), bl = Math.hypot(bxs, bys) || 1;
+    var ux = bxs / bl, uy = bys / bl, eb = Math.abs(ux) * wd[0] / 2 + Math.abs(uy) * wd[1] / 2;
+    var kd = [];
+    [4, 10, 18, 28, 40].forEach(function (g, k) {
+      kd.push([Vt[0] + ux * (G.Ra + eb + g), Vt[1] + uy * (G.Ra + eb + g), 1.5 * k]);
+    });
+    if (G.Ra - 2 * eb - 10 > 4) kd.push([Vt[0] + ux * (G.Ra - eb - 5), Vt[1] + uy * (G.Ra - eb - 5), 3]);
+    [a1, a2].forEach(function (a) {
+      var px = -Math.sin(a), py = Math.cos(a), ep = Math.abs(px) * wd[0] / 2 + Math.abs(py) * wd[1] / 2 + 5;
+      [0, 10].forEach(function (g) {
+        [1, -1].forEach(function (sg) {
+          kd.push([Vt[0] + Math.cos(a) * G.Ra + sg * px * (ep + g), Vt[1] + Math.sin(a) * G.Ra + sg * py * (ep + g), 7 + g / 2]);
+        });
+      });
+    });
+    zadachi.push({ tex: '\\delta', cls: 'ax-accent', mesta: kd });
+  }
+  function uOtr(a, b, tex) {
+    var wh = ramka(tex, kegl);
+    zadachi.push({ tex: tex, mesta: uOtrezka(a, b, wh[0], wh[1]) });
+  }
+  uOtr(O, Vt, '\\vec V');
+  uOtr(Vt, D, '\\vec v');
+  if (Q) uOtr(Vt, Q, '\\vec v^{\\,\\prime}');
+  uOtr(O, D, '\\vec V + \\vec v');
+  if (Q) uOtr(O, Q, '\\vec V + \\vec v^{\\,\\prime}');
+  /* линии и окно у места не меняются: их цена считается один раз */
+  zadachi.forEach(function (z) {
+    var wh = ramka(z.tex, kegl);
+    z.r = z.mesta.map(function (m) { return [m[0] - wh[0] / 2, m[1] - wh[1] / 2, m[0] + wh[0] / 2, m[1] + wh[1] / 2]; });
+    z.baza = z.mesta.map(function (m, j) { return 10 * tsenaLin(z.r[j], lin, okno) + m[2]; });
+  });
+  var n = zadachi.length, idx = zadachi.map(function (z, k) { return k; });
+  function drugie(mesto, k) {
+    var r = ramki0.slice();
+    for (var q = 0; q < n; q++) if (q !== k && mesto[q] != null) r.push(zadachi[q].r[mesto[q]]);
+    return r;
+  }
+  function luchsheeMesto(k, ramki) {
+    var z = zadachi[k], bj = 0, bc = Infinity;
+    for (var j = 0; j < z.r.length; j++) {
+      if (z.baza[j] >= bc) continue;
+      var c = z.baza[j] + 10 * nakladka(z.r[j], ramki);
+      if (c < bc) { bc = c; bj = j; }
+    }
+    return { j: bj, c: bc };
+  }
+  /* очереди: как перечислены; сначала суммы; δ, потом суммы; наоборот */
+  var dlinnye = idx.filter(function (k) { return /\+/.test(zadachi[k].tex); }).reverse();
+  var prochie = idx.filter(function (k) { return !/\+/.test(zadachi[k].tex); });
+  var q1 = Q ? 1 : 0;
+  var ocheredi = [idx, dlinnye.concat(prochie), prochie.slice(0, q1).concat(dlinnye, prochie.slice(q1)),
+                  idx.slice().reverse()];
+  var luchsh = null;
+  ocheredi.forEach(function (och) {
+    var mesto = new Array(n), summa = 0;
+    och.forEach(function (k) { mesto[k] = luchsheeMesto(k, drugie(mesto, k)).j; });
+    for (var prohod = 0; prohod < 2; prohod++)
+      och.forEach(function (k) { mesto[k] = luchsheeMesto(k, drugie(mesto, k)).j; });
+    idx.forEach(function (k) {
+      var z = zadachi[k];
+      summa += z.baza[mesto[k]] + 10 * nakladka(z.r[mesto[k]], drugie(mesto, k));
+    });
+    if (!luchsh || summa < luchsh.summa) luchsh = { summa: summa, mesto: mesto };
+  });
+  zadachi.forEach(function (z, k) { var m = z.mesta[luchsh.mesto[k]]; metka(m[0], m[1], z.tex, z.cls); });
+  return out;
+}
+
+function strelka(ctx, x0, y0, x1, y1, color, width) {
+  var dx = x1 - x0, dy = y1 - y0, Ln = Math.hypot(dx, dy);
+  if (Ln < 1) return;
+  var ux = dx / Ln, uy = dy / Ln;
+  var head = Math.min(12, Ln * 0.32);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * head - uy * head * 0.34, y1 - uy * head + ux * head * 0.34);
+  ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.lineTo(x1 - ux * head + uy * head * 0.34, y1 - uy * head - ux * head * 0.34);
+  ctx.closePath(); ctx.fill();
+}
+
+function punktir(ctx, x0, y0, x1, y1, color) {
+  ctx.save(); ctx.setLineDash([5, 6]);
+  ctx.strokeStyle = color; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  ctx.restore();
+}
+
+/* Индекс последней точки не позже t, двоичным поиском. */
+function indeks(put, t) {
+  var lo = 0, hi = put.length - 1;
+  if (t <= put[0][0]) return 0;
+  if (t >= put[hi][0]) return hi;
+  while (hi - lo > 1) { var m = (lo + hi) >> 1; if (put[m][0] <= t) lo = m; else hi = m; }
+  return lo;
+}
+function tochkaNa(put, t) {
+  var i = indeks(put, t), a = put[i], b = put[Math.min(i + 1, put.length - 1)];
+  var f = b[0] > a[0] ? C.clamp((t - a[0]) / (b[0] - a[0]), 0, 1) : 0;
+  return [a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2]), i];
+}
+
+var NACH = { bR: bDlya(RP_GLAVY * RJ, V_NACH * 1e3) / RJ, vK: V_NACH, s: -1 };
+
+function Manevr() {
+  var st = useRef(null);
+  if (!st.current) {
+    st.current = { p: Object.assign({}, NACH), tau: 0, idet: true, G: null, ramka: null, kegl: 17 };
+    st.current.G = raskladka(prolet({ b: NACH.bR * RJ, v: NACH.vK * 1e3, s: NACH.s }), 17);
+  }
+  var S = st.current;
+  var pair = useState(0), bump = function () { pair[1](function (k) { return k + 1; }); };
+  var axRef = useRef(null);
+
+  function simT() { return S.G.ta + (S.G.tb - S.G.ta) * Math.min(S.tau, T_POKAZ) / T_POKAZ; }
+
+  function pokazaniya() {
+    var M = S.G.M;
+    window.__demoState = {
+      side: M.s < 0 ? 'behind' : 'ahead',
+      b: M.b, bRJ: M.b / RJ, vInf: M.v,
+      rp: M.hit ? null : M.rMin, rpRJ: M.hit ? null : M.rMin / RJ,
+      rpTheory: M.rMinTheory, rpTheoryRJ: M.rMinTheory / RJ,
+      delta: M.hit ? null : M.delta, deltaDeg: M.hit ? null : grad(M.delta),
+      deltaTheory: M.deltaTheory, deltaTheoryDeg: grad(M.deltaTheory),
+      vInPlanet: M.v, vOutPlanet: M.hit ? null : M.vOutPlanet,
+      speedRelError: M.hit ? null : M.speedRelError, Ldrift: M.hit ? null : M.Ldrift,
+      Uplanet: VPL, vInSun: M.vInSun,
+      vOutSun: M.hit ? null : M.vOutSun, gain: M.hit ? null : M.gain,
+      hit: M.hit, steps: M.n, t: simT() - S.G.tp, running: S.idet
+    };
+  }
+
+  function perestroit() {
+    var p = S.p;
+    S.G = raskladka(prolet({ b: p.bR * RJ, v: p.vK * 1e3, s: p.s }), S.kegl);
+    S.tau = 0; S.ramka = null; S.idet = true;
+    pokazaniya(); bump();
+  }
+
+  function step(dt) {
+    if (!S.idet) return;
+    S.tau += dt;
+    if (S.tau > T_POKAZ + T_PAUZA) S.tau = 0;
+    pokazaniya();
+  }
+
+  /* Слой подписей прижимается к кадру канвы (как в raketa.html). Кегль
+     подписей в px экрана задаёт demo.css по ширине кадра; в логических px
+     канвы он от 13 (широкий кадр) до 24 (телефон), и если он сменился,
+     подписи раскладываются заново под свои настоящие рамки. */
+  function prizhat(ctx) {
+    var el = axRef.current;
+    if (!el) return;
+    var rect = ctx.canvas.getBoundingClientRect();
+    var sc = Math.min(rect.width / W, rect.height / HGT);
+    var key = rect.width + ':' + rect.height;
+    if (S.ramka === key) return;
+    S.ramka = key;
+    el.style.left = (rect.width - W * sc) / 2 + 'px';
+    el.style.top = (rect.height - HGT * sc) / 2 + 'px';
+    el.style.width = W * sc + 'px';
+    el.style.height = HGT * sc + 'px';
+    var sp = el.firstElementChild, px = sp ? parseFloat(getComputedStyle(sp).fontSize) : 0;
+    if (px > 0 && sc > 0) {
+      var kegl = px / sc;
+      if (Math.abs(kegl - S.kegl) > 0.25) { S.kegl = kegl; podpisi(S.G, kegl); bump(); }
+    }
+  }
+
+  function draw(ctx) {
+    prizhat(ctx);
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var mut = 'rgb(' + muted + ')';
+    var G = S.G, M = G.M, t = simT(), posle = t >= G.tp, i;
+
+    /* заголовки окон и разделители */
+    C.label(ctx, PA.x0, 26, 'система Юпитера', 18, mut, 'left');
+    C.label(ctx, PB.x0 + 4, 26, 'система Солнца', 18, mut, 'left');
+    C.label(ctx, PC.x0 + 4, 26, 'скорости вдали', 18, mut, 'left');
+    var dt = (t - G.tp) / 3600;
+    var sobyt = M.hit ? ['падение', ' ч до падения'] : ['сближение', ' ч до сближения'];
+    C.label(ctx, PA.x1, 26, Math.abs(dt) < 0.05 ? sobyt[0] :
+      num(Math.abs(dt), 1) + (dt < 0 ? sobyt[1] : ' ч после'), 17, mut, 'right');
+    ctx.strokeStyle = 'rgba(' + muted + ',.25)'; ctx.lineWidth = 1;
+    [338, 674].forEach(function (x) { ctx.beginPath(); ctx.moveTo(x, 12); ctx.lineTo(x, PY1); ctx.stroke(); });
+
+    /* путь: бледный целиком, пройденное бирюзой до сближения и охрой после */
+    function put(P, tt) {
+      ctx.strokeStyle = 'rgba(' + ink + ',.16)'; ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      for (var j = 0; j < P.length; j++) { if (j) ctx.lineTo(P[j][1], P[j][2]); else ctx.moveTo(P[j][1], P[j][2]); }
+      ctx.stroke();
+      var tek = tochkaNa(P, tt), k = tek[2];
+      ctx.lineWidth = 2.4; ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgb(' + CV + ')';
+      ctx.beginPath();
+      for (j = 0; j <= k && P[j][0] <= G.tp; j++) { if (j) ctx.lineTo(P[j][1], P[j][2]); else ctx.moveTo(P[j][1], P[j][2]); }
+      if (tt <= G.tp) ctx.lineTo(tek[0], tek[1]);
+      ctx.stroke();
+      if (tt > G.tp) {
+        var s0 = indeks(P, G.tp);
+        ctx.strokeStyle = 'rgb(' + CF + ')';
+        ctx.beginPath(); ctx.moveTo(P[s0][1], P[s0][2]);
+        for (j = s0 + 1; j <= k; j++) ctx.lineTo(P[j][1], P[j][2]);
+        ctx.lineTo(tek[0], tek[1]);
+        ctx.stroke();
+      }
+      return tek;
+    }
+    function zond(x, y) {
+      C.glow(ctx, x, y, 14, ink, 0.35);
+      ctx.fillStyle = 'rgb(' + ink + ')';
+      ctx.beginPath(); ctx.arc(x, y, 4.5, 0, 2 * Math.PI); ctx.fill();
+    }
+
+    /* ── система Юпитера ── */
+    var sA = G.sA, cx = PA.cx, cy = PA.cy;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(PA.x0, PY0, PA.x1 - PA.x0, PY1 - PY0); ctx.clip();
+    var bx = G.bxA, yb = G.ybA;
+    /* ось через планету и прямая подлёта: между ними прицельное расстояние */
+    punktir(ctx, cx, PY1, cx, cy, 'rgba(' + muted + ',.45)');
+    punktir(ctx, bx, PY1, bx, PY0, 'rgba(' + muted + ',.6)');
+    /* прямая ухода: через точку выхода вдоль скорости выхода */
+    var pu = G.pryamOut;
+    if (pu) punktir(ctx, pu[0], pu[1], pu[2], pu[3], 'rgba(' + muted + ',.6)');
+    ctx.strokeStyle = 'rgba(' + ink + ',.7)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(cx, yb); ctx.lineTo(bx, yb);
+    ctx.moveTo(cx, yb - 6); ctx.lineTo(cx, yb + 6); ctx.moveTo(bx, yb - 6); ctx.lineTo(bx, yb + 6); ctx.stroke();
+    /* Юпитер в масштабе */
+    var rj = RJ * sA;
+    C.glow(ctx, cx, cy, rj * 2.2, JUP, 0.25);
+    ctx.fillStyle = 'rgb(' + JUP + ')';
+    ctx.beginPath(); ctx.arc(cx, cy, rj, 0, 2 * Math.PI); ctx.fill();
+    if (!M.hit) {
+      ctx.strokeStyle = 'rgba(' + ink + ',.7)'; ctx.lineWidth = 1.3;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + M.xMin * sA, cy - M.yMin * sA); ctx.stroke();
+    }
+    var tekA = put(G.putA, t);
+    zond(tekA[0], tekA[1]);
+    if (M.hit && t >= G.tb) C.glow(ctx, tekA[0], tekA[1], 26, CF, 0.9);
+    /* скорость вдали до и после: стрелки одной длины на прямых подлёта и
+       ухода, числа в легенде в свободном углу окна */
+    var si = G.strIn, so = G.strOut;
+    strelka(ctx, si[0], si[1], si[2], si[3], 'rgb(' + CV + ')', 3);
+    if (so) strelka(ctx, so[0], so[1], so[2], so[3], 'rgb(' + CF + ')', 3);
+    var lg = G.legenda;
+    [['до', M.v, CV], ['после', M.hit ? null : M.vOutPlanet, CF]].forEach(function (r, k) {
+      C.label(ctx, lg.x + 4, lg.y + 18 + 24 * k, r[0] + ' ' + (r[1] == null ? '—' : num(r[1] / 1e3, 2) + ' км/с'),
+              17, 'rgb(' + r[2] + ')', 'left');
+    });
+    ctx.restore();
+
+    /* ── система Солнца ── */
+    ctx.save();
+    ctx.beginPath(); ctx.rect(PB.x0, PY0, PB.x1 - PB.x0, PY1 - PY0); ctx.clip();
+    punktir(ctx, PB.x0, G.by, PB.x1, G.by, 'rgba(' + JUP + ',.55)');
+    C.label(ctx, G.orbPodp.x + G.orbPodp.w / 2, G.orbPodp.y + 16, 'орбита Юпитера', 17, 'rgba(' + JUP + ',.9)');
+    var tekB = put(G.putB, t);
+    var plx = G.bx + VPL * (Math.min(t, G.tb) - G.tp) * G.sB, ply = G.by;
+    var rjB = Math.max(RJ * G.sB, 4);
+    C.glow(ctx, plx, ply, rjB * 3, JUP, 0.3);
+    ctx.fillStyle = 'rgb(' + JUP + ')';
+    ctx.beginPath(); ctx.arc(plx, ply, rjB, 0, 2 * Math.PI); ctx.fill();
+    var sx0 = plx + rjB + 2, sx1 = sx0 + VPL / 1e3 * KV;
+    strelka(ctx, sx0, ply, sx1, ply, 'rgba(' + JUP + ',.95)', 2.5);
+    var pod = podpisPlanety(G, plx, ply, rjB);
+    C.label(ctx, pod.x + 38, pod.y + 16, num(VPL / 1e3, 1) + ' км/с', 17, 'rgb(' + JUP + ')');
+    zond(tekB[0], tekB[1]);
+    if (M.hit && t >= G.tb) C.glow(ctx, tekB[0], tekB[1], 26, CF, 0.9);
+    ctx.restore();
+    /* где Солнце */
+    strelka(ctx, PB.x1 - 8, PY1 - 40, PB.x1 - 8, PY1 - 8, mut, 1.8);
+    C.label(ctx, PB.x1 - 18, PY1 - 14, 'к Солнцу', 17, mut, 'right');
+
+    /* ── скорости вдали ── */
+    var O = G.O, Vt = G.Vt, D = G.Pdo, Q = G.Pposle, kC = G.kC;
+    ctx.strokeStyle = 'rgba(' + ink + ',.35)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(Vt[0], Vt[1], M.v / 1e3 * kC, 0, 2 * Math.PI); ctx.stroke();
+    C.label(ctx, (PC.x0 + PC.x1) / 2, PY1 - 4, 'окружность упругих исходов', 17, mut);
+    strelka(ctx, O[0], O[1], D[0], D[1], 'rgba(' + CV + ',.55)', 2);
+    strelka(ctx, Vt[0], Vt[1], D[0], D[1], 'rgb(' + CV + ')', 2.6);
+    if (Q) {
+      /* дуга угла поворота между радиусами */
+      var a1 = Math.atan2(D[1] - Vt[1], D[0] - Vt[0]), a2 = Math.atan2(Q[1] - Vt[1], Q[0] - Vt[0]);
+      ctx.strokeStyle = 'rgb(' + acc + ')'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(Vt[0], Vt[1], G.Ra, a1, a2, M.s > 0); ctx.stroke();
+      strelka(ctx, O[0], O[1], Q[0], Q[1], 'rgba(' + CF + ',.55)', 2);
+      strelka(ctx, Vt[0], Vt[1], Q[0], Q[1], 'rgb(' + CF + ')', 2.6);
+    }
+    strelka(ctx, O[0], O[1], Vt[0], Vt[1], 'rgb(' + JUP + ')', 2.6);
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(O[0], O[1], 3, 0, 2 * Math.PI); ctx.fill();
+
+    /* показания */
+    var net = '—';
+    C.readout(ctx, 190, ROW, 'ПОВОРОТ ПО СЧЁТУ', M.hit ? net : num(grad(M.delta), 1) + '°', 'rgb(' + acc + ')');
+    C.readout(ctx, 390, ROW, 'ПО ФОРМУЛЕ', M.hit ? net : num(grad(M.deltaTheory), 1) + '°', 'rgb(' + ink + ')');
+    C.readout(ctx, 590, ROW, 'У СОЛНЦА ДО, км/с', num(M.vInSun / 1e3, 2), 'rgb(' + CV + ')');
+    C.readout(ctx, 790, ROW, 'У СОЛНЦА ПОСЛЕ, км/с', M.hit ? net : num(M.vOutSun / 1e3, 2), 'rgb(' + CF + ')');
+    C.readout(ctx, 990, ROW, 'ПРИБАВКА, км/с', M.hit ? net : snakom(M.gain / 1e3, 2), 'rgb(' + ink + ')');
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+
+  /* Прогон по любым значениям без экрана: __demoProgon({ bRJ, vKms, side })
+     отдаёт то же, что __demoState, для заданных ползунков. */
+  window.__demoProgon = function (q) {
+    q = q || {};
+    var M = prolet({ b: (q.bRJ != null ? q.bRJ : S.p.bR) * RJ, v: (q.vKms != null ? q.vKms : S.p.vK) * 1e3,
+                     s: q.side === 'ahead' ? 1 : q.side === 'behind' ? -1 : S.p.s });
+    var o = Object.assign({}, M); delete o.tochki;
+    o.deltaDeg = M.hit ? null : grad(M.delta); o.deltaTheoryDeg = grad(M.deltaTheory);
+    o.rpRJ = M.hit ? null : M.rMin / RJ; o.rpTheoryRJ = M.rMinTheory / RJ;
+    return o;
+  };
+
+  function storona(s) { S.p.s = s; perestroit(); }
+  function setB(v) { S.p.bR = C.clamp(v, B_MIN, B_MAX); perestroit(); }
+  function setV(v) { S.p.vK = C.clamp(Math.round(v * 10) / 10, V_MIN, V_MAX); perestroit(); }
+  function triRadiusa() { S.p.bR = bDlya(RP_GLAVY * RJ, S.p.vK * 1e3) / RJ; perestroit(); }
+  function pauza() { S.idet = !S.idet; pokazaniya(); bump(); }
+  function sbros() { S.p = Object.assign({}, NACH); perestroit(); }
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var M = S.G.M;
+    if (M.hit)
+      return 'Зонд подходит к центру Юпитера ближе его радиуса и падает на планету. При скорости подлёта ' + num(M.v / 1e3, 1) +
+        ' км/с облететь её можно, если прицельное расстояние больше ' + A(num(bDlya(RJ, M.v) / RJ, 2) + ' радиуса') + '.';
+    var s = 'В системе Юпитера зонд уходит с той же скоростью, ' + A(num(M.vOutPlanet / 1e3, 2) + ' км/с') +
+      ', с какой пришёл, и только поворачивает её на ' + A(num(grad(M.delta), 1) + '°') +
+      ', как шайба при упругом ударе в системе центра масс. ';
+    if (M.s < 0)
+      s += 'Зонд обошёл планету сзади, скорость повернулась по ходу планеты, и относительно Солнца он уходит ' +
+        'быстрее, чем пришёл: ' + A(num(M.vOutSun / 1e3, 2) + ' км/с') + ' вместо ' + num(M.vInSun / 1e3, 2) + '.';
+    else
+      s += 'Зонд обошёл планету спереди, скорость повернулась против хода планеты, и относительно Солнца он уходит ' +
+        'медленнее, чем пришёл: ' + A(num(M.vOutSun / 1e3, 2) + ' км/с') + ' вместо ' + num(M.vInSun / 1e3, 2) + '.';
+    return s;
+  }
+
+  var G = S.G, p = S.p;
+  function spanAt(sp, i) {
+    return html`<span key=${i} class=${sp.cls || null}
+      style=${{ left: (sp.x / W * 100) + '%', top: (sp.y / HGT * 100) + '%' }}
+      dangerouslySetInnerHTML=${{ __html: kx(sp.tex) }}></span>`;
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Обход:">
+          <${C.Btn} active=${p.s < 0} onClick=${function () { storona(-1); }}>позади планеты<//>
+          <${C.Btn} active=${p.s > 0} onClick=${function () { storona(1); }}>впереди<//>
+        <//>
+        <${C.Slider} label="Прицельное расстояние:" min=${B_MIN} max=${B_MAX} step=${0.01} value=${p.bR}
+                     onChange=${setB} display=${num(p.bR, 2) + ' радиуса'} />
+        <${C.Slider} label="Скорость подлёта:" min=${V_MIN} max=${V_MAX} step=${0.1} value=${p.vK}
+                     onChange=${setV} display=${num(p.vK, 1) + ' км/с'} />
+        <${C.Group}>
+          <${C.Btn} onClick=${triRadiusa}>пролёт в трёх радиусах<//>
+          <${C.Btn} onClick=${pauza}>${S.idet ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      <div class="stage-wrap"
+           style=${{ aspectRatio: W + ' / ' + HGT, flex: '0 1 auto', minHeight: 0,
+                     height: '100%', width: 'auto', maxWidth: '100%',
+                     alignSelf: 'center' }}>
+        <canvas class="stage" ref=${ref}></canvas>
+        <div class="ax is-on" ref=${axRef}>${G.metki.map(spanAt)}</div>
+      </div>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(Manevr);
+</script>
+</body>
+</html>

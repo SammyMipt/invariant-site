@@ -1,0 +1,47 @@
+<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script>
+      (function () {
+        var mode = 'dark';
+        try { mode = localStorage.getItem('themeMode') || 'dark'; } catch (e) {}
+        var dark = mode === 'dark' ||
+          (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+      })();
+    </script><title>Неделя 07 · Колебания</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=STIX+Two+Text:wght@400;600;700&family=Onest:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"><link rel="stylesheet" href="/_astro/site.BedIDvA9.css"><link rel="stylesheet" href="/_astro/fig-fonts.BtEqAtjY.css"><link rel="stylesheet" href="/_astro/katex.AsTGkpx7.css"><link rel="stylesheet" href="/_astro/index.zE0dKDtW.css"></head><body><header class="site-top"><a class="site-top__brand" href="/"><svg class="site-top__mark" viewBox="4 14 58 35" aria-hidden="true"><line x1="11" y1="42" x2="27" y2="27"></line><line x1="27" y1="27" x2="43" y2="40"></line><line x1="43" y1="40" x2="55" y2="22"></line><circle cx="11" cy="42" r="4.5" fill="#4fc3f7"></circle><circle cx="27" cy="27" r="6.5" fill="#ffb454"></circle><circle cx="43" cy="40" r="4.5" fill="#4dd0c4"></circle><circle cx="55" cy="22" r="5" fill="#9575cd"></circle></svg>Инвариант</a><nav><a href="/map">Карта физики</a><a href="/course">Курс</a></nav><span class="site-top__right"><button class="site-top__theme" type="button" data-top-theme title="Тема: тёмная" aria-label="Переключить тему">🌙</button><a class="site-top__login" href="/login?next=%2Fweek-07%2F" data-top-login>Вход</a><span class="site-top__who" data-top-who hidden><span class="site-top__who-txt" data-top-who-text></span><a class="site-top__cab" data-top-cab hidden>Кабинет</a><button class="site-top__out" type="button" data-top-out>Выйти</button></span></span></header><main class="page"><p class="wk-kicker"><span class="wk-kicker__dot" style="background:#4dd0c4"></span>Физика 1 · осень 2026 · неделя 07 · Колебания</p><h1 class="wk-h1">Колебания</h1><p class="wk-lead">Понятие колебаний, точка равновесия и возвращающая сила; условия существования свободных колебаний; гармонические колебания, амплитуда, фаза, циклическая частота; динамический и энергетический методы определения собственной частоты; фазовый портрет гармонического осциллятора; примеры свободных систем — пружинный маятник, математический маятник (малые углы), LC-контур; физический смысл затухающих колебаний: вязкое трение, коэффициент затухания, логарифмический декремент, добротность; апериодический, критический и колебательный режимы.</p><p class="wk-chernovik">Неделя ещё не открыта: лекция четверг 15.10. Материалы появятся здесь накануне.</p><div class="wk-who" data-who hidden><span class="wk-who__txt" data-who-text></span><button class="wk-who__out" type="button" data-logout>Выйти</button></div><div class="wk-my" data-my hidden></div><p class="wk-offline" data-offline hidden></p><p class="wk-gruz" data-gruz hidden><span class="wk-gruz__spin" aria-hidden="true"></span><span data-gruz-text>Загружаю материалы недели…</span></p><h2 class="wk-h2">Материалы недели</h2><ul class="wk-mats" data-mats></ul><div class="wk-entry" data-entry><p class="wk-entry__txt">Участникам курса на этой странице открывается больше. Заходите тем же адресом, на который вас записали.</p><p class="wk-entry__act"><a class="entry-btn" href="/login?next=%2Fweek-07%2F" data-login>Войти в систему курса</a></p></div><div data-rolevye data-week="07" style="--wk-area:#4dd0c4"></div><script type="module" src="/_astro/index.astro_astro_type_script_index_0_lang.CwIzWe4O.js"></script><script type="module">var e=document.querySelector(`[data-rec-tabs]`),t=document.querySelector(`[data-rec-fail]`);async function n(e){if(!(e.dataset.ready||!e.dataset.disk))try{let t=encodeURIComponent(e.dataset.disk),n=await fetch(`https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key=${t}`);if(!n.ok)throw Error(String(n.status));let{href:r}=await n.json();if(!r)throw Error(`no href`);if(!document.querySelector(`meta[name="referrer"]`)){let e=document.createElement(`meta`);e.name=`referrer`,e.content=`no-referrer`,document.head.appendChild(e)}e.src=r,e.dataset.ready=`1`}catch{t&&(t.hidden=!1)}}var r=document.querySelector(`video[data-rec-pane="disk"]`);r&&!e&&n(r),e?.addEventListener(`click`,t=>{let r=t.target.closest(`[data-rec-tab]`);if(!r)return;let i=r.dataset.recTab;e.querySelectorAll(`.wk-rec__tab`).forEach(e=>{e.classList.toggle(`is-active`,e===r)}),document.querySelectorAll(`[data-rec-pane]`).forEach(e=>{let t=e.dataset.recPane===i;e.hidden=!t,e instanceof HTMLVideoElement&&(t?n(e):e.pause()),e instanceof HTMLIFrameElement&&(!t&&e.src?(e.dataset.src=e.src,e.src=`about:blank`):t&&e.dataset.src&&(e.src=e.dataset.src))})});</script></main><script>
+      (function () {
+        var btn = document.querySelector('[data-top-theme]');
+        if (!btn) return;
+        var ICONS = { auto: '🌓', light: '☀️', dark: '🌙' };
+        var LABELS = { auto: 'авто', light: 'светлая', dark: 'тёмная' };
+        function stored() {
+          try { return localStorage.getItem('themeMode'); }
+          catch (e) { return null; }
+        }
+        var cur = stored() || 'dark';
+        function apply() {
+          var dark = cur === 'dark' ||
+            (cur === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+          btn.textContent = ICONS[cur] || ICONS.dark;
+          btn.title = 'Тема: ' + (LABELS[cur] || LABELS.dark);
+        }
+        btn.addEventListener('click', function () {
+          var order = ['auto', 'light', 'dark'];
+          cur = order[(order.indexOf(cur) + 1) % 3];
+          try { localStorage.setItem('themeMode', cur); } catch (e) {}
+          apply();
+        });
+        matchMedia('(prefers-color-scheme: dark)')
+          .addEventListener('change', apply);
+        /* Возврат из bfcache и смена темы в соседней вкладке. */
+        window.addEventListener('pageshow', function () {
+          cur = stored() || cur;
+          apply();
+        });
+        window.addEventListener('storage', function (e) {
+          if (e.key === 'themeMode') { cur = stored() || cur; apply(); }
+        });
+        apply();
+      })();
+    </script><script src="/legacy/site/config.js"></script><script src="/legacy/shared/analytics.js"></script><script>
+      window.track && window.track('page_view', { page: location.pathname });
+    </script><script type="module" src="/_astro/Base.astro_astro_type_script_index_0_lang.Dsa6W7T5.js"></script></body></html>

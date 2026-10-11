@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Два тела вокруг центра масс</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-05/">&larr; Неделя 05</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=dva-tela"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `dva-tela-na-orbite` («Отпустим Солнце») и задача
+   `zadacha-dvojnaya-zvezda`; бриф briefs/demki_nedelya05.md, № 5. Долг
+   третьей недели: в `zadacha-dvuh-tel` сказано, что так в пятой неделе
+   будет решаться задача о планете и Солнце. Демка держит одну мысль:
+   относительное движение пары идёт так, будто лёгкое тело обходит
+   неподвижное тело массы M + m, и в третий закон Кеплера входит сумма масс.
+
+   ДВЕ МОДЕЛИ ИДУТ РЯДОМ, в одном и том же времени, с одного расстояния a
+   между телами, каждая по своей круговой орбите (как в задаче: «орбиты с
+   нулевым эксцентриситетом»). Переключатель выбирает, какую рисовать;
+   показания снимаются с обеих.
+
+   «Задача двух тел»: интегрируются оба тела, каждое под силой
+   G M m / r² со стороны другого, в системе центра масс. Ничего не
+   сводится заранее к приведённой массе: центр масс стоит, потому что
+   сила пары внутренняя, и это проверяется (cmDrift). Старт: вектор
+   r = r₂ − r₁ от тела M к телу m длиной a, относительная скорость
+   √(G(M + m)/a) поперёк него; тела на расстояниях a·m/(M + m) и
+   a·M/(M + m) от центра масс.
+
+   «Неподвижная звезда»: тело M прибито к началу координат, тело m идёт
+   под ускорением GM/r² со скоростью круговой орбиты √(GM/a). Центр масс
+   пары при этом ходит по кругу радиусом a·m/(M + m), значит, на пару
+   действует внешняя сила, и демка это показывает. Кнопка режима названа
+   «Тело M неподвижно», без звезды: в опыте «Земля и Луна» держат Землю.
+
+   ИНТЕГРАТОР. Скоростной Верле (полшага скорости, шаг положения, полшага
+   скорости), NSTEP = 4000 шагов на оборот пары. Сила центральная, поэтому
+   момент в этой схеме сохраняется до ошибки округления: толчок идёт вдоль
+   радиус-вектора, сдвиг вдоль скорости. Проверено 29.09 прогоном
+   __demoProgon на десяти оборотах, три опыта на шести отношениях масс от
+   0,0009 до 1: относительный уход энергии не больше 1,6·10⁻¹², момента не
+   больше 3,3·10⁻¹⁴, центр масс сдвигается на 1,6·10⁻¹² своего расстояния
+   до M. Постоянная Кеплера отходит от 1 + m/M на 1,6·10⁻⁶: это фазовая
+   ошибка схемы, (ωh)² порядка 2,5·10⁻⁶ при 4000 шагах; при 2000 шагах было
+   6,6·10⁻⁶. Отрицательный контроль (01.10, на нынешнем опыте двойной
+   звезды): если тело M в задаче двух тел не чувствует силы, выходит 0,296
+   вместо 1,333 и центр масс уезжает; явная схема Эйлера даёт уход энергии
+   0,17 и период 212,4 сут вместо 182,6. Таблица в
+   briefs/demki_nedelya05_dva-tela_REPORT.md.
+
+   ПЕРИОД МЕРЯЕТСЯ ПО ОБОРОТАМ, а не подставляется. Угол вектора r
+   (у неподвижной звезды угол радиус-вектора тела m) копится без
+   обрезки на 2π; момент, когда он проходит 2πk, находится линейной
+   интерполяцией внутри шага, и период есть это время, делённое на k.
+   Постоянная Кеплера 4π²a³/T² считается из измеренного периода и
+   печатается в долях GM: у двух тел она выходит 1 + m/M, у неподвижной
+   звезды 1. Теоретические периоды 2π√(a³/G(M + m)) и 2π√(a³/GM) лежат в
+   __demoState только для сверки и шага интегрирования.
+
+   ЧИСЛА ГЛАВЫ. Юпитер: m/M = 1/1048, постоянная Кеплера на 0,1 процента
+   больше, чем у лёгких планет. Земля и Луна: 1/81,3, поправка
+   1,2 процента, центр масс в 4700 км от центра Земли (384 400 / 82,3 =
+   4671 км).
+
+   ДВОЙНАЯ ЗВЕЗДА НЕ ИЗ ЗАДАЧИ. Числа задачи `zadacha-dvojnaya-zvezda` в
+   демке не показываются, чтобы не выдавать ответ домашнего задания
+   (замечание автора 01.10). Опыт свой: 3 и 1 массы Солнца на 1 а.е.,
+   период √(a³/(M + m)) в годах, а.е. и массах Солнца, √(1/4) = 0,5 года,
+   182,6 суток; с неподвижной тяжёлой звездой √(1/3) года, 210,9 суток.
+
+   ПОДОБРАНО БИЛДЕРОМ, в главе этих чисел нет: большая полуось Юпитера
+   778,479 млн км (5,204 а.е., справочник NASA), радиус Солнца 695 700 км
+   и радиус Земли 6371 км для окошка у центра масс; GM Солнца
+   1,32712440018·10²⁰ м³/с², GM Земли 3,986004418·10¹⁴ м³/с², а.е.
+   1,495978707·10¹¹ м, G = 6,6743·10⁻¹¹ (массы в кг нужны только для
+   момента пары). Левый край ползунка 0,0009, а не 0,001, как в брифе:
+   иначе в шкалу не влезает Юпитер, 1/1048 = 0,000954.
+
+   АДРЕС. ?opyt=yupiter, ?opyt=zemlya-luna или ?opyt=dvojnaya открывает
+   демку на опыте; ?rezhim=stoit сразу с неподвижной звездой. Без
+   параметров двойная звезда, задача двух тел. */
+
+var G = 6.6743e-11;                    /* м³/(кг·с²) */
+var GM_SOLNCA = 1.32712440018e20;      /* м³/с² */
+var AE = 1.495978707e11;               /* м */
+var SUT = 86400, GOD = 365.25 * SUT;   /* с */
+var NSTEP = 4000;                      /* шагов интегрирования на оборот пары */
+var TP = 5;                            /* секунд показа на оборот пары */
+var SLED_SHAG = 8;                     /* точка следа через 8 шагов. След держит
+                                          ровно один оборот своего движения, без
+                                          нахлёста: пунктир, прорисованный дважды
+                                          со сдвигом фазы, сливался в сплошную
+                                          линию, а полупрозрачный след темнел */
+var RATIO_MIN = 0.0009, RATIO_MAX = 1;
+var TWO_PI = 2 * Math.PI;
+
+var SISTEMY = {
+  yupiter: {
+    knopka: 'Юпитер', GM: GM_SOLNCA, R: 6.957e8, ratio: 1 / 1048, a: 7.78479e11,
+    texM: '\\text{Солнце},\\ M', texm: '\\text{Юпитер},\\ m', svet: true,
+    rod: 'Солнца', ego: 'его',
+    edT: 'лет', edTch: 'года', T: GOD, dT: 3, edL: 'тыс. км', L: 1e6, dL: 0
+  },
+  'zemlya-luna': {
+    knopka: 'Земля и Луна', GM: 3.986004418e14, R: 6.371e6, ratio: 1 / 81.3, a: 3.844e8,
+    texM: '\\text{Земля},\\ M', texm: '\\text{Луна},\\ m', svet: false,
+    rod: 'Земли', ego: 'её',
+    edT: 'сут', edTch: 'сут', T: SUT, dT: 2, edL: 'км', L: 1e3, dL: 0
+  },
+  dvojnaya: {
+    knopka: 'Двойная звезда', GM: 3 * GM_SOLNCA, R: null, ratio: 1 / 3, a: AE,
+    texM: 'M = 3M_\\odot', texm: 'm = M_\\odot', svet: true,
+    edT: 'сут', edTch: 'сут', T: SUT, dT: 1, edL: 'а.е.', L: AE, dL: 3
+  }
+};
+var PORYADOK = ['yupiter', 'zemlya-luna', 'dvojnaya'];
+
+/* С какого опыта открываться: ?opyt=… и ?rezhim=stoit. */
+var START_SIS = 'dvojnaya', START_REZHIM = 'dva';
+try {
+  var qs = new URLSearchParams(location.search);
+  if (SISTEMY[qs.get('opyt')]) START_SIS = qs.get('opyt');
+  if (qs.get('rezhim') === 'stoit') START_REZHIM = 'stoit';
+} catch (e) {}
+
+/* ── модель ── */
+
+function schetchik() { return { phi: 0, ang: 0, k: 0, T: null }; }
+
+/* Угол копится без обрезки; проход через 2π(k + 1) ловится внутри шага. */
+function schet(c, rx, ry, t, h) {
+  var ang = Math.atan2(ry, rx), d = ang - c.ang;
+  if (d > Math.PI) d -= TWO_PI; else if (d < -Math.PI) d += TWO_PI;
+  var phi0 = c.phi;
+  c.phi += d; c.ang = ang;
+  var cel = TWO_PI * (c.k + 1);
+  if (c.phi >= cel) {
+    var tc = t - h + h * (cel - phi0) / (c.phi - phi0);
+    c.k += 1; c.T = tc / c.k;
+  }
+}
+
+function uskoreniya(m) {
+  var d = m.d, rx = d.x2 - d.x1, ry = d.y2 - d.y1;
+  var r2 = rx * rx + ry * ry, r3 = r2 * Math.sqrt(r2);
+  /* на M тянет m, на m тянет M; сила одна, ускорения обратны массам */
+  d.ax1 = m.Gm * rx / r3; d.ay1 = m.Gm * ry / r3;
+  d.ax2 = -m.GM * rx / r3; d.ay2 = -m.GM * ry / r3;
+  var f = m.f, q2 = f.x * f.x + f.y * f.y, q3 = q2 * Math.sqrt(q2);
+  f.ax = -m.GM * f.x / q3; f.ay = -m.GM * f.y / q3;
+}
+
+function Model(sis, ratio) {
+  var GM = sis.GM, Gm = sis.GM * ratio, a = sis.a, GS = GM + Gm;
+  var k1 = Gm / GS, k2 = GM / GS;
+  var vOtn = Math.sqrt(GS / a), v0 = Math.sqrt(GM / a);
+  var m = {
+    sis: sis, ratio: ratio, GM: GM, Gm: Gm, a: a,
+    M: GM / G, mm: Gm / G,
+    /* шаг из круговой угловой скорости пары: это сетка времени, а не ответ */
+    h: TWO_PI * Math.sqrt(a * a * a / GS) / NSTEP,
+    t: 0, n: 0,
+    d: { x1: -k1 * a, y1: 0, vx1: 0, vy1: -k1 * vOtn,
+         x2: k2 * a, y2: 0, vx2: 0, vy2: k2 * vOtn },
+    f: { x: a, y: 0, vx: 0, vy: v0 },
+    cd: schetchik(), cf: schetchik(),
+    s1: [], s2: [], sOtn: [], sF: [], sCmF: [],
+    /* Точек следа на оборот. Шаг h задан оборотом пары, поэтому у пары
+       это NSTEP/SLED_SHAG; у неподвижной звезды оборот в √(1 + m/M) раз
+       дольше. Округление вниз оставляет зазор меньше шага следа. */
+    nD: Math.floor(NSTEP / SLED_SHAG),
+    nF: Math.floor(NSTEP * Math.sqrt(1 + ratio) / SLED_SHAG)
+  };
+  uskoreniya(m);
+  var q = velichiny(m);
+  m.E0 = q.E; m.L0 = q.L; m.Ef0 = q.Ef; m.Lf0 = q.Lf;
+  zapisatSled(m);
+  return m;
+}
+
+function zapisatSled(m) {
+  var d = m.d, f = m.f, k = m.mm / (m.M + m.mm);
+  function push(arr, p, n) { arr.push(p); if (arr.length > n) arr.shift(); }
+  push(m.s1, [d.x1, d.y1], m.nD); push(m.s2, [d.x2, d.y2], m.nD);
+  push(m.sOtn, [d.x2 - d.x1, d.y2 - d.y1], m.nD);
+  push(m.sF, [f.x, f.y], m.nF); push(m.sCmF, [k * f.x, k * f.y], m.nF);
+}
+
+/* Один шаг Верле обеих моделей. */
+function shag(m) {
+  var d = m.d, f = m.f, h = m.h, hh = h / 2;
+  d.vx1 += hh * d.ax1; d.vy1 += hh * d.ay1; d.vx2 += hh * d.ax2; d.vy2 += hh * d.ay2;
+  f.vx += hh * f.ax; f.vy += hh * f.ay;
+  d.x1 += h * d.vx1; d.y1 += h * d.vy1; d.x2 += h * d.vx2; d.y2 += h * d.vy2;
+  f.x += h * f.vx; f.y += h * f.vy;
+  uskoreniya(m);
+  d.vx1 += hh * d.ax1; d.vy1 += hh * d.ay1; d.vx2 += hh * d.ax2; d.vy2 += hh * d.ay2;
+  f.vx += hh * f.ax; f.vy += hh * f.ay;
+  m.t += h; m.n += 1;
+  schet(m.cd, d.x2 - d.x1, d.y2 - d.y1, m.t, h);
+  schet(m.cf, f.x, f.y, m.t, h);
+  if (m.n % SLED_SHAG === 0) zapisatSled(m);
+}
+
+/* Всё, что снимается с состояния. Масса в кг нужна только моменту. */
+function velichiny(m) {
+  var d = m.d, f = m.f, M = m.M, mm = m.mm, S = M + mm;
+  var Rx = (M * d.x1 + mm * d.x2) / S, Ry = (M * d.y1 + mm * d.y2) / S;
+  var Vx = (M * d.vx1 + mm * d.vx2) / S, Vy = (M * d.vy1 + mm * d.vy2) / S;
+  var rx = d.x2 - d.x1, ry = d.y2 - d.y1, r = Math.hypot(rx, ry);
+  var L = M * ((d.x1 - Rx) * (d.vy1 - Vy) - (d.y1 - Ry) * (d.vx1 - Vx)) +
+          mm * ((d.x2 - Rx) * (d.vy2 - Vy) - (d.y2 - Ry) * (d.vx2 - Vx));
+  var E = M * (d.vx1 * d.vx1 + d.vy1 * d.vy1) / 2 + mm * (d.vx2 * d.vx2 + d.vy2 * d.vy2) / 2 -
+          m.GM * mm / r;
+  var rf = Math.hypot(f.x, f.y);
+  var Ef = (f.vx * f.vx + f.vy * f.vy) / 2 - m.GM / rf;       /* на килограмм */
+  var Lf = mm * (f.x * f.vy - f.y * f.vx);
+  return {
+    r: r, rx: rx, ry: ry, L: L, E: E, Ef: Ef, Lf: Lf,
+    cmDrift: Math.hypot(Rx, Ry), cmOffset: Math.hypot(d.x1 - Rx, d.y1 - Ry),
+    cmF: mm / S * rf
+  };
+}
+
+function kepler(m, T) { return T ? 4 * Math.PI * Math.PI * m.a * m.a * m.a / (T * T) / m.GM : null; }
+
+/* Прогон без анимации для проверки: оба счётчика доводятся до n оборотов. */
+function progon(opt) {
+  var sis = SISTEMY[opt.opyt || 'dvojnaya'];
+  var m = Model(sis, opt.ratio != null ? opt.ratio : sis.ratio);
+  var n = opt.oborotov || 10;
+  while (m.cd.k < n || m.cf.k < n) shag(m);
+  var q = velichiny(m), GS = m.GM + m.Gm, mu = m.M * m.mm / (m.M + m.mm);
+  return {
+    ratio: m.ratio, steps: m.n, period: m.cd.T, periodFixed: m.cf.T,
+    periodDays: m.cd.T / SUT, periodFixedDays: m.cf.T / SUT,
+    periodTheory: TWO_PI * Math.sqrt(m.a * m.a * m.a / GS),
+    periodFixedTheory: TWO_PI * Math.sqrt(m.a * m.a * m.a / m.GM),
+    kepler: kepler(m, m.cd.T), keplerFixed: kepler(m, m.cf.T),
+    dE: Math.abs(q.E - m.E0) / Math.abs(m.E0), dL: Math.abs(q.L - m.L0) / Math.abs(m.L0),
+    dEfixed: Math.abs(q.Ef - m.Ef0) / Math.abs(m.Ef0), dLfixed: Math.abs(q.Lf - m.Lf0) / Math.abs(m.Lf0),
+    cmDrift: q.cmDrift, cmOffset: q.cmOffset, cmOffsetTheory: m.a * m.Gm / GS,
+    Lcm: q.L, LcmTheory: mu * Math.sqrt(GS * m.a), r: q.r
+  };
+}
+
+/* ── числа ── */
+
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  var t = v.toFixed(d).replace('-', '−').split('.');
+  t[0] = t[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return t.join(',');
+}
+var SUP = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+function sci(v, d) {
+  if (!v) return '0';
+  var e = Math.floor(Math.log10(Math.abs(v))), mant = v / Math.pow(10, e);
+  if (Math.abs(+mant.toFixed(d)) >= 10) { e += 1; mant /= 10; }
+  var s = String(Math.abs(e)).split('').map(function (c) { return SUP[+c]; }).join('');
+  return num(mant, d) + '·10' + (e < 0 ? '⁻' : '') + s;
+}
+/* Отношение масс дробью, как в главе: 1/1048, 1/81,3, 1/2. */
+function drob(r) {
+  if (r > 0.9995) return '1';
+  var N = 1 / r, d = N >= 100 ? 0 : N >= 10 ? 1 : 2;
+  var t = N.toFixed(d);
+  if (d) t = t.replace(/0+$/, '').replace(/\.$/, '');
+  return '1/' + t.replace('.', ',');
+}
+/* Расстояние в единицах опыта, не меньше трёх значащих цифр: у двойной
+   звезды при 1/1111 центр масс в 0,000899 а.е. от тяжёлой, и «0,001»
+   потеряло бы две цифры из трёх. */
+function dlina(x, sis) {
+  var v = x / sis.L, d = sis.dL;
+  if (v > 0 && v < 100) d = Math.min(6, Math.max(d, 2 - Math.floor(Math.log10(v))));
+  return num(v, d);
+}
+/* «в 254 раза», «в 15 раз»: форма по целому числу, как его напечатали. */
+function razA(n) {
+  var d10 = n % 10, d100 = n % 100;
+  return d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14) ? 'раза' : 'раз';
+}
+/* Знаков у периодов столько, чтобы два измеренных периода не печатались
+   одинаково. С нынешними опытами это страховка: даже у левого края
+   ползунка, 1/1111, периоды различаются при своих знаках (двойная звезда
+   210,8 и 210,9 сут, Земля и Луна 27,44 и 27,45 сут). Пока измерен один,
+   знаков сколько положено опыту. */
+function znakiT(m) {
+  var sis = m.sis, d = sis.dT;
+  if (!m.cd.T || !m.cf.T) return d;
+  while (d < sis.dT + 3 && num(m.cd.T / sis.T, d) === num(m.cf.T / sis.T, d)) d++;
+  return d;
+}
+function kx(tex) {
+  /* формула в фигурных скобках одна группа, и KaTeX не рвёт её переносом строки */
+  try { return katex.renderToString('{' + tex + '}', { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева пара в плоскости орбиты: в задаче двух тел начало координат есть
+   центр масс, у неподвижной звезды это сама звезда. Крест отмечает центр
+   масс, следы обоих тел ровно за последний оборот. Кнопка «Вектор r» рисует
+   стрелку от M к m и пунктиром путь m относительно M: окружность радиуса a
+   вокруг движущегося тела M. Справа показания: периоды обеих постановок,
+   постоянная Кеплера в долях GM, центр масс и момент L. Когда тело M ходит
+   по кругу меньше 12 пикселей, справа внизу открывается окошко у центра
+   масс, где M нарисовано в своём настоящем размере (для Солнца и Земли). */
+
+var W = 1000, HGT = 440;
+var CX = 240, CY = 222, RPX = 165;          /* центр сцены и радиус a в пикселях */
+var LX = 590, LY = 362, LR = 54;             /* окошко у центра масс */
+/* Показания таблицей: две колонки (M движется, M стоит) и подписи строк
+   слева. Латех-слой в узком кадре крупнее канвы: его кегль 2,15 % ширины,
+   то есть 21,5 логических пикселя, поэтому подписи короткие, а у каждой
+   строки своя полоса по высоте. */
+var XL0 = 530;                               /* левый край подписей строк */
+var XC1 = 830, XC2 = 985;                    /* правые края колонок */
+var YH = 34;                                 /* заголовки колонок */
+var YV = [92, 166, 232, 292];                /* базовые линии чисел по строкам */
+/* места подписей таблицы: заголовки колонок и подписи строк */
+var PODPISI = [[XC1, YH], [XC2, YH], [XL0, YV[0] - 12], [XL0, YV[1] - 12], [XL0, YV[2] - 12], [XL0, YV[3] - 12]];
+var CM_COL = '242,184,75', CP_COL = '77,182,198', CR = '#a6c35a';
+var RS = 12;                                 /* радиус кружка M на сцене, px */
+
+function strelka(ctx, x0, y0, x1, y1, color, width) {
+  var dx = x1 - x0, dy = y1 - y0, Ln = Math.hypot(dx, dy);
+  if (Ln < 1) return;
+  var ux = dx / Ln, uy = dy / Ln;
+  var head = Math.min(12, Ln * 0.32);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * head - uy * head * 0.34, y1 - uy * head + ux * head * 0.34);
+  ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.lineTo(x1 - ux * head + uy * head * 0.34, y1 - uy * head - ux * head * 0.34);
+  ctx.closePath(); ctx.fill();
+}
+
+function krest(ctx, x, y, r, color, w) {
+  ctx.strokeStyle = color; ctx.lineWidth = w || 2.2; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r);
+  ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r);
+  ctx.stroke();
+}
+
+function lomanaya(ctx, pts, X, Y, dx, dy) {
+  if (pts.length < 2) return;
+  ctx.beginPath();
+  for (var i = 0; i < pts.length; i++) {
+    var px = X(pts[i][0] + (dx || 0)), py = Y(pts[i][1] + (dy || 0));
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+}
+
+function DvaTela() {
+  var ref0 = useRef(null);
+  if (!ref0.current) ref0.current = {
+    sis: START_SIS, ratio: SISTEMY[START_SIS].ratio, rezhim: START_REZHIM,
+    vektor: false, idet: true, buf: 0, model: null, node: {}
+  };
+  var s = ref0.current;
+  if (!s.model) s.model = Model(SISTEMY[s.sis], s.ratio);
+
+  function snimok() {
+    return { sis: s.sis, ratio: s.ratio, rezhim: s.rezhim, vektor: s.vektor, idet: s.idet,
+             Td: s.model.cd.T, Tf: s.model.cf.T };
+  }
+  var pair = useState(snimok());
+  var ui = pair[0], setUi = pair[1];
+  function obnovit() { setUi(snimok()); pokazaniya(); }
+
+  function presetId() {
+    var p = SISTEMY[s.sis].ratio;
+    return Math.abs(s.ratio - p) < 1e-12 ? s.sis : null;
+  }
+
+  function pokazaniya() {
+    var m = s.model, q = velichiny(m), GS = m.GM + m.Gm, mu = m.M * m.mm / (m.M + m.mm);
+    window.__demoState = {
+      mode: s.rezhim === 'dva' ? 'dva-tela' : 'zvezda-stoit',
+      ratio: s.ratio, preset: presetId(), system: s.sis, t: m.t,
+      period: m.cd.T, periodFixed: m.cf.T,
+      periodTheory: TWO_PI * Math.sqrt(m.a * m.a * m.a / GS),
+      periodFixedTheory: TWO_PI * Math.sqrt(m.a * m.a * m.a / m.GM),
+      revolutions: m.cd.k, revolutionsFixed: m.cf.k,
+      GM: m.GM, GMm: GS, kepler: kepler(m, m.cd.T), keplerFixed: kepler(m, m.cf.T),
+      cmOffset: q.cmOffset, cmOffsetTheory: m.a * m.Gm / GS, cmDrift: q.cmDrift, cmFixedRadius: q.cmF,
+      Lcm: q.L, LcmTheory: mu * Math.sqrt(GS * m.a), Lfixed: q.Lf,
+      dE: Math.abs(q.E - m.E0) / Math.abs(m.E0), dL: Math.abs(q.L - m.L0) / Math.abs(m.L0),
+      dEfixed: Math.abs(q.Ef - m.Ef0) / Math.abs(m.Ef0), dLfixed: Math.abs(q.Lf - m.Lf0) / Math.abs(m.Lf0),
+      vector: s.vektor
+    };
+  }
+
+  function nachat() { s.model = Model(SISTEMY[s.sis], s.ratio); s.buf = 0; s.idet = true; obnovit(); }
+
+  function step(dt) {
+    if (!s.idet) return;
+    var m = s.model, k1 = m.cd.k, k2 = m.cf.k;
+    s.buf += dt * NSTEP / TP;
+    var n = Math.floor(s.buf);
+    s.buf -= n;
+    for (var i = 0; i < n; i++) shag(m);
+    /* строка под сценой и подписи столбцов обновляются, когда период измерен */
+    if (m.cd.k !== k1 || m.cf.k !== k2) setUi(snimok());
+    pokazaniya();
+  }
+
+  /* Подпись латех-слоя ставится в точку логического кадра в процентах,
+     как в «ускорении в повороте»; адрес пересчитывается каждый кадр.
+     Проценты считаются от настоящей коробки канвы с учётом полей, которые
+     оставляет paint в demo-core, когда коробка не в пропорции кадра. Так
+     бывает на отдельной странице в телефоне: инлайн aspect-ratio обёртки
+     там не держится (то же у podobie), и подписи по процентам от W×H
+     уезжали от чисел. */
+  var ramka = { ox: 0, oy: 0, k: 1, w: W, h: HGT };
+  function izmeritRamku(canvas) {
+    var r = canvas.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    var k = Math.min(r.width / W, r.height / HGT);
+    ramka = { ox: (r.width - W * k) / 2, oy: (r.height - HGT * k) / 2, k: k, w: r.width, h: r.height };
+  }
+  function place(id, x, y, on) {
+    var el = s.node[id];
+    if (!el) return;
+    el.hidden = !on;
+    if (!on) return;
+    el.style.left = ((ramka.ox + x * ramka.k) / ramka.w * 100) + '%';
+    el.style.top = ((ramka.oy + y * ramka.k) / ramka.h * 100) + '%';
+  }
+
+  /* Полуразмеры подписи в логических пикселях; снимаются до того, как
+     кадр начнёт двигать подписи. */
+  function razmer(id) {
+    var el = s.node[id];
+    if (!el || !el.offsetWidth) return [14, 14];
+    return [el.offsetWidth / ramka.k / 2, el.offsetHeight / ramka.k / 2];
+  }
+  /* Место подписи тела в точке (x, y) радиуса R: по направлению (ex, ey),
+     вплотную к телу с зазором 6 px, иначе в обратную сторону, иначе
+     прижатой внутрь сцены. Поле сцены слева от таблицы, легенда внизу
+     слева закрыта. Обратная сторона смотрит на другое тело, и в узком
+     кадре длинная подпись «m = M⊙» ложилась там на крест центра масс и
+     на стрелку r (двойная звезда 3 и 1 массы Солнца, 375 px, m у левого
+     края сцены). Поэтому внутрь подпись уходит, только если не задевает
+     помехи (крест, другое тело, его подпись); иначе сначала пробуются
+     места поперёк прямой M–m, и лишь потом прежнее «внутрь». Где подпись
+     и раньше стояла чисто, место не меняется. */
+  var LEG_X = 222, LEG_Y = 390;
+  function mestoPodpisi(raz, x, y, R, ex, ey, pomehi) {
+    var hw = raz[0], hh = raz[1];
+    function v(zn, px, py) {
+      var D = R + 6 + Math.abs(px) * hw + Math.abs(py) * hh;
+      return { x: x + zn * px * D, y: y + zn * py * D, hw: hw, hh: hh };
+    }
+    function goden(b) {
+      return b.x - hw >= 4 && b.x + hw <= XL0 - 8 && b.y - hh >= 4 && b.y + hh <= HGT - 4 &&
+             !(b.x - hw < LEG_X && b.y + hh > LEG_Y);
+    }
+    function chisto(b) {
+      return pomehi.every(function (p) {
+        return Math.abs(b.x - p.x) >= hw + p.hw + 3 || Math.abs(b.y - p.y) >= hh + p.hh + 3;
+      });
+    }
+    var b = v(1, ex, ey);
+    if (goden(b)) return b;
+    var b2 = v(-1, ex, ey), vbok = [b2, v(1, -ey, ex), v(-1, -ey, ex)];
+    for (var i = 0; i < vbok.length; i++) if (goden(vbok[i]) && chisto(vbok[i])) return vbok[i];
+    if (goden(b2)) return b2;
+    b.x = C.clamp(b.x, hw + 4, XL0 - 8 - hw); b.y = C.clamp(b.y, hh + 4, HGT - 4 - hh);
+    return b;
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted, mut = 'rgb(' + muted + ')';
+    izmeritRamku(ctx.canvas);
+    var razM = razmer('M'), razm = razmer('m');
+    PODPISI.forEach(function (p, i) { place('p' + i, p[0], p[1], true); });
+    var m = s.model, sis = m.sis, d = m.d, f = m.f, q = velichiny(m);
+    var dva = s.rezhim === 'dva';
+    /* Путь m относительно M есть окружность радиуса a вокруг движущегося M,
+       и от центра масс она уходит на a(1 + m/(M + m)), при равных массах
+       на полтора a. С вектором r сцена отъезжает, чтобы он влез целиком:
+       до 185 px от центра масс, то есть внизу до y = 407, выше легенды
+       (при 205 дуга задевала строку «размеры тел не в масштабе»). */
+    var SC = (s.vektor && dva ? Math.min(RPX, 185 / (1 + m.mm / (m.M + m.mm))) : RPX) / m.a;
+    function X(x) { return CX + x * SC; }
+    function Y(y) { return CY - y * SC; }
+    var rp = Math.max(4, RS * Math.cbrt(m.ratio));
+
+    /* положения на сцене */
+    var p1 = dva ? [d.x1, d.y1] : [0, 0];
+    var p2 = dva ? [d.x2, d.y2] : [f.x, f.y];
+    var kcm = m.mm / (m.M + m.mm);
+    var cm = dva ? [(m.M * d.x1 + m.mm * d.x2) / (m.M + m.mm), (m.M * d.y1 + m.mm * d.y2) / (m.M + m.mm)]
+                 : [kcm * f.x, kcm * f.y];
+
+    /* следы за последний оборот */
+    ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
+    if (dva) {
+      ctx.strokeStyle = 'rgba(' + CM_COL + ',.55)'; lomanaya(ctx, m.s1, X, Y);
+      ctx.strokeStyle = 'rgba(' + CP_COL + ',.55)'; lomanaya(ctx, m.s2, X, Y);
+    } else {
+      ctx.strokeStyle = 'rgba(' + CP_COL + ',.55)'; lomanaya(ctx, m.sF, X, Y);
+      ctx.save(); ctx.setLineDash([3, 4]);
+      ctx.strokeStyle = 'rgba(' + ink + ',.45)'; lomanaya(ctx, m.sCmF, X, Y);
+      ctx.restore();
+    }
+
+    /* путь m относительно M: пунктир вокруг текущего положения M */
+    if (s.vektor && dva) {
+      ctx.save(); ctx.setLineDash([6, 6]);
+      ctx.strokeStyle = CR; ctx.globalAlpha = 0.7; ctx.lineWidth = 1.6;
+      lomanaya(ctx, m.sOtn, X, Y, d.x1, d.y1);
+      ctx.restore();
+    }
+
+    /* Подписи тел ставятся по прямой M–m наружу: подпись m за телом m,
+       подпись M с другой стороны от M. Центр масс лежит на этой прямой,
+       поэтому это направление по радиусу от него, и линия своей орбиты
+       у тела идёт поперёк, мимо подписи. Отступ считается от настоящего
+       размера подписи (латех-слой в узком кадре крупнее канвы). Если
+       подпись вылезает за сцену или на легенду, она уходит внутрь, к
+       другому телу. Чужая линия всё же может пройти под подписью (у
+       двойной звезды орбиты близко), поэтому следы под подписями
+       стираются: подпись лежит на чистом месте, как на карте. */
+    var x1 = X(p1[0]), y1 = Y(p1[1]), x2 = X(p2[0]), y2 = Y(p2[1]);
+    var ux = (x2 - x1), uy = (y2 - y1), ul = Math.hypot(ux, uy) || 1;
+    ux /= ul; uy /= ul;
+    var krestB = { x: X(cm[0]), y: Y(cm[1]), hw: 9, hh: 9 };
+    var telo1 = { x: x1, y: y1, hw: dva ? RS : RS + 7, hh: dva ? RS : RS + 7 };
+    var telo2 = { x: x2, y: y2, hw: rp, hh: rp };
+    var boxM = mestoPodpisi(razM, x1, y1, telo1.hw, -ux, -uy, [krestB, telo2]);
+    var boxm = mestoPodpisi(razm, x2, y2, rp, ux, uy, [krestB, telo1, boxM]);
+    [boxM, boxm].forEach(function (b) {
+      ctx.clearRect(b.x - b.hw - 3, b.y - b.hh, 2 * b.hw + 6, 2 * b.hh);
+    });
+
+    /* неподвижная звезда: кольцо-крепление */
+    if (!dva) {
+      ctx.save(); ctx.setLineDash([3, 4]);
+      ctx.strokeStyle = 'rgba(' + ink + ',.55)'; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(X(0), Y(0), RS + 7, 0, TWO_PI); ctx.stroke();
+      ctx.restore();
+    }
+
+    /* тела */
+    if (sis.svet) C.glow(ctx, x1, y1, 34, CM_COL, 0.35);
+    ctx.fillStyle = 'rgb(' + CM_COL + ')';
+    ctx.beginPath(); ctx.arc(x1, y1, RS, 0, TWO_PI); ctx.fill();
+    if (sis.svet && m.ratio > 0.3) C.glow(ctx, x2, y2, 30, CP_COL, 0.3);
+    ctx.fillStyle = 'rgb(' + CP_COL + ')';
+    ctx.beginPath(); ctx.arc(x2, y2, rp, 0, TWO_PI); ctx.fill();
+
+    /* вектор r от M к m */
+    if (s.vektor) strelka(ctx, x1 + ux * RS, y1 + uy * RS, x2 - ux * (rp + 3), y2 - uy * (rp + 3), CR, 2.6);
+
+    /* центр масс */
+    krest(ctx, X(cm[0]), Y(cm[1]), 7, 'rgb(' + ink + ')', 2.4);
+
+    place('m', boxm.x, boxm.y, true);
+    place('M', boxM.x, boxM.y, true);
+    /* Подпись r стоит посередине между центром масс и остриём стрелки,
+       сбоку от неё. Середина всей стрелки при равных массах совпадает с
+       центром масс, и подпись садилась на его крестик; при малом m/M
+       центр масс у M, и подпись остаётся около середины стрелки. Отступ
+       вбок считается от настоящего размера подписи: в узком кадре она
+       крупнее и при 18 px ложилась на саму стрелку. Если место занято
+       подписью тела (у края сцены она уходит внутрь, к другому телу),
+       подпись r переходит на другую сторону стрелки или вдоль неё. */
+    if (s.vektor) {
+      var razr = razmer('r');
+      var otst = Math.max(18, razr[0] * Math.abs(uy) + razr[1] * Math.abs(ux) + 4);
+      var zanyato = [boxM, boxm,
+        { x: X(cm[0]), y: Y(cm[1]), hw: 9, hh: 9 },
+        { x: x1, y: y1, hw: dva ? RS : RS + 7, hh: dva ? RS : RS + 7 },
+        { x: x2, y: y2, hw: rp, hh: rp }];
+      var s0 = (kcm * ul + ul - rp - 3) / 2, mestoR = null;
+      /* последние два места для узкого кадра, где длинная подпись тела
+         вроде m = M⊙ ложится вдоль стрелки на всю её половину */
+      [[s0, 1], [s0, -1], [s0 - 0.15 * ul, 1], [s0 - 0.15 * ul, -1],
+       [s0 + 0.12 * ul, 1], [s0 + 0.12 * ul, -1], [s0, 2], [s0, -2]].some(function (k) {
+        var px = x1 + ux * k[0] - uy * otst * k[1], py = y1 + uy * k[0] + ux * otst * k[1];
+        var svob = zanyato.every(function (b) {
+          return Math.abs(px - b.x) >= razr[0] + b.hw + 3 || Math.abs(py - b.y) >= razr[1] + b.hh + 3;
+        });
+        if (!mestoR || svob) mestoR = [px, py];
+        return svob;
+      });
+      place('r', mestoR[0], mestoR[1], true);
+    } else place('r', 0, 0, false);
+
+    /* легенда */
+    krest(ctx, 30, 402, 6, 'rgb(' + ink + ')', 2.2);
+    C.label(ctx, 46, 408, 'центр масс', 17, mut, 'left');
+    C.label(ctx, 18, 432, 'размеры тел не в масштабе', 17, mut, 'left');
+
+    /* показания; столбец текущей постановки ярче */
+    var acc = 'rgb(' + tone.accent + ')', tus = 'rgba(' + ink + ',.75)';
+    var cDva = dva ? acc : tus, cSt = dva ? tus : acc;
+    var dK = m.ratio < 0.005 ? 5 : 4, dT = znakiT(m);
+    /* C.readout ставит число на 38 px ниже подписи; подписи здесь в латех-слое */
+    C.readout(ctx, XC1, YV[0] - 38, '', m.cd.T ? num(m.cd.T / sis.T, dT) : '—', cDva);
+    C.readout(ctx, XC2, YV[0] - 38, '', m.cf.T ? num(m.cf.T / sis.T, dT) : '—', cSt);
+    C.readout(ctx, XC1, YV[1] - 38, '', m.cd.T ? num(kepler(m, m.cd.T), dK) : '—', cDva);
+    C.readout(ctx, XC2, YV[1] - 38, '', m.cf.T ? num(kepler(m, m.cf.T), dK) : '—', cSt);
+    C.readout(ctx, XC2, YV[2] - 38, '', dlina(q.cmOffset, sis), 'rgb(' + ink + ')');
+    C.readout(ctx, XC2, YV[3] - 38, '', sci(dva ? q.L : q.Lf, 3), 'rgb(' + ink + ')');
+    ctx.strokeStyle = 'rgba(' + muted + ',.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(XL0, YV[1] + 22); ctx.lineTo(XC2, YV[1] + 22); ctx.stroke();
+
+    /* окошко у центра масс */
+    var dcm = m.a * kcm;
+    if (dcm * SC < 12) {
+      var sL = 40 / Math.max(dcm, sis.R || 0);
+      var cx0 = LX, cy0 = LY;
+      function XL(x) { return cx0 + x * sL; }
+      function YL(y) { return cy0 - y * sL; }
+      ctx.save();
+      ctx.fillStyle = 'rgba(' + ink + ',.05)'; ctx.strokeStyle = 'rgba(' + muted + ',.5)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(cx0, cy0, LR, 0, TWO_PI); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx0, cy0, LR, 0, TWO_PI); ctx.clip();
+      /* направление на m */
+      var ex = dva ? d.x2 - d.x1 : f.x, ey = dva ? d.y2 - d.y1 : f.y, el = Math.hypot(ex, ey);
+      var bx = XL(p1[0]), by = YL(p1[1]);
+      ctx.strokeStyle = 'rgba(' + CP_COL + ',.6)'; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + ex / el * 2 * LR, by - ey / el * 2 * LR); ctx.stroke();
+      /* след M или след центра масс */
+      ctx.lineWidth = 1.6;
+      if (dva) { ctx.strokeStyle = 'rgba(' + CM_COL + ',.7)'; lomanaya(ctx, m.s1, XL, YL); }
+      else {
+        ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(' + ink + ',.5)';
+        lomanaya(ctx, m.sCmF, XL, YL); ctx.setLineDash([]);
+      }
+      /* M в настоящем размере, если он известен */
+      if (sis.R) {
+        ctx.fillStyle = 'rgba(' + CM_COL + ',.35)'; ctx.strokeStyle = 'rgb(' + CM_COL + ')'; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(bx, by, sis.R * sL, 0, TWO_PI); ctx.fill(); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgb(' + CM_COL + ')';
+      ctx.beginPath(); ctx.arc(bx, by, 3, 0, TWO_PI); ctx.fill();
+      var cmx = dva ? XL(cm[0]) : XL(cm[0]), cmy = YL(cm[1]);
+      krest(ctx, cmx, cmy, 6, 'rgb(' + ink + ')', 2.2);
+      ctx.restore();
+
+      var krat = Math.round(sL / SC);
+      var stroki = ['у центра масс', 'крупнее в ' + num(krat, 0) + ' ' + razA(krat)];
+      if (!dva) stroki.push('центр масс ходит', 'вокруг закреплённого тела');
+      else if (sis.R) {
+        var vR = dcm / sis.R;
+        stroki.push(vR < 1 ? 'центр масс внутри ' + sis.rod + ',' : 'центр масс вне ' + sis.rod + ',',
+                    'в ' + num(vR, 2) + ' ' + sis.ego + ' радиуса от центра');
+      }
+      for (var i = 0; i < stroki.length; i++) C.label(ctx, LX + LR + 16, LY - 44 + i * 24, stroki[i], 17, mut, 'left');
+    }
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+  window.__demoProgon = progon;
+
+  function vybratSis(id) { s.sis = id; s.ratio = SISTEMY[id].ratio; nachat(); }
+  function rezhim(r) { s.rezhim = r; obnovit(); }
+  function ratio(v) {
+    var p = SISTEMY[s.sis].ratio;
+    v = C.clamp(v, RATIO_MIN, RATIO_MAX);
+    /* защёлка на отношении масс текущего опыта */
+    if (Math.abs(Math.log10(v) - Math.log10(p)) < 0.012) v = p;
+    s.ratio = v; nachat();
+  }
+  function vektor() { s.vektor = !s.vektor; obnovit(); }
+  function pauza() { s.idet = !s.idet; obnovit(); }
+
+  /* ── строка под сценой ── */
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var m = s.model, sis = m.sis, pid = presetId(), q = velichiny(m);
+    /* после дробного числа «года», а не «лет»: 11,865 года */
+    var dT = znakiT(m);
+    var Tv = m.cd.T ? A(num(m.cd.T / sis.T, dT) + ' ' + sis.edTch) : null;
+    var T0v = m.cf.T ? A(num(m.cf.T / sis.T, dT) + ' ' + sis.edTch) : null;
+    var kv = m.cd.T ? kepler(m, m.cd.T) : null;
+    var pct = kv ? A(num((kv - 1) * 100, kv - 1 < 0.005 ? 3 : 1) + ' %') : null;
+    var dcm = A(dlina(q.cmOffset, sis) + ' ' + sis.edL);
+    /* Пока нужный период не измерен, фраза о нём выпадает, и вместо неё
+       в конце одна строка о том, откуда он возьмётся. */
+    var oba = !!(Tv && T0v), zhdem = false;
+    var zhdat = ' Периоды модель меряет по оборотам, они появятся в показаниях после первого.';
+    var t;
+    if (s.rezhim === 'stoit') {
+      t = 'Тело ' + kx('M') + ' держат на месте, и тело ' + kx('m') + ' тянет одна масса ' + kx('M') +
+        (Tv && T0v ? ': период ' + T0v + ' вместо ' + Tv + '.' : '.') +
+        ' Центр масс пары при этом ходит по кругу радиусом ' + dcm +
+        ', значит, на пару действует внешняя сила, и прикладывает её то, что держит ' + kx('M.');
+      return t + (oba ? '' : zhdat);
+    }
+    zhdem = pid === 'yupiter' || pid === null ? !kv : !oba;
+    if (pid === 'dvojnaya')
+      t = 'Звёзды в три массы Солнца и в одну на расстоянии 1 а.е. обходят общий центр масс, и он стоит: ' +
+        'внешних сил у пары нет. ' + (Tv && T0v ? 'Период по оборотам модели ' + Tv +
+        '; если держать тяжёлую звезду, вышло бы ' + T0v + '. ' : '') +
+        'В третий закон Кеплера входит сумма масс: ' + kx('4\\pi^2a^3/T^2 = G(M+m).');
+    else if (pid === 'yupiter')
+      t = 'Юпитер в 1048 раз легче Солнца, и Солнце обходит центр масс пары, который лежит ' +
+        'чуть выше его поверхности (окошко справа).' + (kv ? ' Постоянная Кеплера ' + kx('4\\pi^2a^3/T^2') +
+        ' для Юпитера больше ' + kx('GM') + ' Солнца на ' + pct + '.' : '');
+    else if (pid === 'zemlya-luna')
+      t = 'Луна в 81,3 раза легче Земли. Центр масс пары лежит в ' + dcm + ' от центра Земли, внутри неё, ' +
+        'и Земля обходит его за тот же месяц, что и Луна.' + (Tv && T0v ? ' Период ' + Tv + ' вместо ' + T0v +
+        ' при неподвижной Земле, поправка к постоянной Кеплера ' + pct + '.' : '');
+    else
+      t = 'Отношение масс ' + A(drob(s.ratio)) + '. Центр масс стоит, тела обходят его по окружностям, ' +
+        'и радиусы обратно пропорциональны массам.' + (kv ? ' Постоянная Кеплера ' + kx('4\\pi^2a^3/T^2') +
+        ' больше ' + kx('GM') + ' в ' + A(num(kv, s.ratio < 0.005 ? 5 : 4)) + ' раза, то есть в ' + kx('1 + m/M.') : '');
+    if (s.vektor)
+      t += ' Пунктир: путь ' + kx('m') + ' относительно ' + kx('M') + ', окружность радиуса ' + kx('a') +
+        ', как вокруг неподвижной массы ' + kx('M + m.');
+    return t + (zhdem ? zhdat : '');
+  }
+
+  /* подписи показаний: буквы величин только KaTeX */
+  var sis = SISTEMY[ui.sis], dva = ui.rezhim === 'dva';
+  var podpisi = [
+    ['M\\text{ движется}', 'ax-right' + (dva ? ' ax-accent' : '')],
+    ['M\\text{ стоит}', 'ax-right' + (dva ? '' : ' ax-accent')],
+    ['\\text{период } T\\text{, ' + sis.edT + '}', 'ax-left'],
+    ['\\dfrac{4\\pi^2a^3}{GMT^2}', 'ax-left'],
+    /* Подписи строк короткие: при кегле 9 px на кадре 360 px «от M до
+       центра масс, а.е.» наезжала на 0,000450 (левый край ползунка), а
+       «момент пары» на 7,234·10⁴⁵. Момент назван буквой главы. */
+    ['\\text{центр масс от } M\\text{, ' + sis.edL + '}', 'ax-left'],
+    [dva ? 'L\\text{ пары, кг}\\cdot\\text{м}^2\\!/\\text{с}'
+         : 'L\\text{ тела } m\\text{, кг}\\cdot\\text{м}^2\\!/\\text{с}', 'ax-left']
+  ];
+  /* место задаётся в draw по PODPISI; стиль здесь только до первого кадра */
+  function spanAt(p, i) {
+    return html`<span key=${'p' + i} class=${p[1]}
+      ref=${function (el) { s.node['p' + i] = el; }}
+      style=${{ left: (PODPISI[i][0] / W * 100) + '%', top: (PODPISI[i][1] / HGT * 100) + '%' }}
+      dangerouslySetInnerHTML=${{ __html: kx(p[0]) }}></span>`;
+  }
+  var imena = Math.abs(ui.ratio - sis.ratio) < 1e-12;
+  var dvizh = [
+    ['M', imena ? sis.texM : 'M', null],
+    ['m', imena ? sis.texm : 'm', null],
+    ['r', '\\vec r', 'ax-accent']
+  ];
+  function nodeAt(p) {
+    return html`<span key=${p[0]} class=${p[2]}
+      ref=${function (el) { s.node[p[0]] = el; }}
+      dangerouslySetInnerHTML=${{ __html: kx(p[1]) }}></span>`;
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        ${/* кнопка без слова «звезда»: в опыте «Земля и Луна» держат Землю */''}
+        <${C.Group}>
+          <${C.Btn} active=${ui.rezhim === 'stoit'} onClick=${function () { rezhim('stoit'); }}>Тело <span dangerouslySetInnerHTML=${{ __html: kx('M') }}></span> неподвижно<//>
+          <${C.Btn} active=${ui.rezhim === 'dva'} onClick=${function () { rezhim('dva'); }}>Задача двух тел<//>
+        <//>
+        ${/* шаг «any»: сетка шагов от 0,0009 не попадает в правый край, и
+              равные массы были бы недостижимы (ручка вставала на 0,966) */''}
+        <${C.Slider} label="Отношение масс:" log=${true} min=${RATIO_MIN} max=${RATIO_MAX} step="any"
+                     value=${ui.ratio} onChange=${ratio} display=${drob(ui.ratio)} />
+        <${C.Group} label="Опыт:">
+          ${PORYADOK.map(function (id) {
+            return html`<${C.Btn} key=${id} active=${ui.sis === id && Math.abs(ui.ratio - SISTEMY[id].ratio) < 1e-12}
+                                  onClick=${function () { vybratSis(id); }}>${SISTEMY[id].knopka}<//>`;
+          })}
+        <//>
+        <${C.Group}>
+          <${C.Btn} active=${ui.vektor} onClick=${vektor}>Вектор <span dangerouslySetInnerHTML=${{ __html: kx('\\vec r') }}></span><//>
+          <${C.Btn} onClick=${pauza}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${nachat}>Сброс<//>
+        <//>
+      </div>
+      <div class="stage-wrap"
+           style=${{ aspectRatio: W + ' / ' + HGT, flex: '0 1 auto', minHeight: 0,
+                     height: '100%', width: 'auto', maxWidth: '100%',
+                     alignSelf: 'center' }}>
+        <canvas class="stage" ref=${ref}></canvas>
+        <div class="ax is-on">
+          ${podpisi.map(spanAt)}
+          ${dvizh.map(nodeAt)}
+        </div>
+      </div>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(DvaTela);
+</script>
+</body>
+</html>

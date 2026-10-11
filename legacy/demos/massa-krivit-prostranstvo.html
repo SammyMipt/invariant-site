@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Масса искривляет пространство</title>
+<link rel="stylesheet" href="../shared/demo.css">
+<style>
+/* Сетка пространства здесь рисуется на канве и работает физикой: миллиметровка
+   окна прибора спорила бы с ней второй решёткой, и обе читались бы хуже.
+   Виньетка окна остаётся, клетка снимается. Класс нужен только этой демке,
+   поэтому живёт здесь, а не в общем demo.css. */
+.stage.space {
+  background-image:
+    radial-gradient(ellipse 80% 70% at 50% 45%, transparent 55%, rgba(0, 0, 0, .5) 100%);
+  background-size: 100% 100%;
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-02/">&larr; Неделя 02</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=massa-krivit-prostranstvo"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Затмение 29 мая 1919 года из блока parallaks-i-zatmenie. Луч от звезды
+   идёт прямейшей линией, но у Солнца эта линия перестаёт быть прямой в
+   школьном смысле, и звезда видна сдвинутой наружу от диска.
+
+   СЧИТАЕМ, А НЕ РИСУЕМ. Отклонение не вписано в демку числом: луч
+   трассируется численно в метрике Шварцшильда, записанной в изотропных
+   координатах,
+
+       ds² = −((1−u)/(1+u))² c²dt² + (1+u)⁴ (dx² + dy² + dz²),   u = r_g/(4r),
+
+   где r_g = 2GM/c². Для статической метрики вида −A c²dt² + B dl² световые
+   лучи — геодезические оптической метрики (B/A)dl², то есть в точности лучи
+   среды с показателем преломления
+
+       n(r) = sqrt(B/A) = (1+u)³/(1−u).
+
+   Отсюда уравнение луча Ферма: d/ds (n·t) = ∇n, а для единичного вектора
+   направления t
+
+       dt/ds = [∇n − (∇n·t)t] / n.
+
+   Его и интегрируем методом Рунге — Кутты четвёртого порядка. В слабом поле
+   n ≈ 1 + r_g/r, и интеграл поперечного градиента даёт δ = 2r_g/b = 4GM/(c²b);
+   численный ответ обязан сойтись с этой формулой, и сходится: при массе
+   Солнца и прицельном параметре в один солнечный радиус трасса выдаёт
+   1,7504″ против 1,7504″ у формулы (расхождение 6·10⁻⁶ — это уже настоящая
+   поправка второго порядка, а не ошибка счёта).
+
+   ЧИСЛА. GM Солнца = 1,32712440018·10²⁰ м³/с² (IAU), радиус Солнца 6,96·10⁸ м,
+   астрономическая единица 1,495978707·10¹¹ м, скорость света точная.
+   При M = M☉ и b = R☉ выходит δ = 1,750″ — те самые «одна и три четверти
+   угловой секунды» из главы; ньютоновская половина 0,875″ — «0,87″» текста.
+   Угловой диаметр диска 1919″, отношение к сдвигу 1096 — «примерно в тысячу
+   раз меньше» оттуда же.
+
+   ЧТО НА СЦЕНЕ УВЕЛИЧЕНО. Настоящие 1,75″ — это одна двухтысячная диска;
+   такой излом не виден никаким глазом, и сетка при r_g/(4r) ≈ 10⁻⁶ не
+   шелохнётся. Поэтому сцена рисует Солнце тяжелее настоящего: луч
+   трассируется при массе, увеличенной в K_LUCH раз, сетка отображается при
+   массе, увеличенной в K_SETKA раз (растяжение сетки на порядок слабее
+   излома при той же массе, иначе одно из двух пропадает). Обе цифры стоят в
+   строке показаний, а в приборе — настоящие секунды дуги. */
+
+/* Масса Солнца и G по отдельности известны на четыре знака, а их произведение
+   на одиннадцать: небесная механика меряет именно GM. Берём GM. */
+var C_LIGHT = 2.99792458e8;              /* м/с, точно */
+var GM_SUN  = 1.32712440018e20;          /* м³/с², гелиоцентрическая константа IAU */
+var R_SUN   = 6.96e8;                    /* м, радиус Солнца */
+var AU      = 1.495978707e11;            /* м, астрономическая единица */
+var RG_SUN  = 2 * GM_SUN / (C_LIGHT * C_LIGHT);   /* 2953,25 м */
+var ARCSEC  = 180 * 3600 / Math.PI;      /* радиан → угловые секунды */
+var SUN_DISK_ARCSEC = 2 * (R_SUN / AU) * ARCSEC;  /* угловой диаметр диска, 1919″ */
+
+/* Показатель преломления и его производная. r и rg — в одних единицах. */
+function nOf(r, rg){
+  var u = rg / (4 * r);
+  return Math.pow(1 + u, 3) / (1 - u);
+}
+function dnOf(r, rg){
+  var u = rg / (4 * r);
+  var dndu = Math.pow(1 + u, 2) * (4 - 2 * u) / Math.pow(1 - u, 2);
+  return dndu * (-rg / (4 * r * r));     /* du/dr = −rg/(4r²) */
+}
+
+/* Правая часть системы для состояния [x, y, tx, ty]; параметр — длина дуги. */
+function deriv(s, rg, out){
+  var x = s[0], y = s[1], tx = s[2], ty = s[3];
+  var r = Math.sqrt(x * x + y * y);
+  var n = nOf(r, rg), dn = dnOf(r, rg);
+  var gx = dn * x / r, gy = dn * y / r;
+  var proj = gx * tx + gy * ty;          /* продольная часть градиента в луч не идёт */
+  out[0] = tx; out[1] = ty;
+  out[2] = (gx - proj * tx) / n;
+  out[3] = (gy - proj * ty) / n;
+}
+
+/* Шаг Рунге — Кутты; направление нормируется, иначе за тысячу шагов копится дрейф. */
+var K1 = [0,0,0,0], K2 = [0,0,0,0], K3 = [0,0,0,0], K4 = [0,0,0,0], TMP = [0,0,0,0];
+function rk4(s, h, rg){
+  var i;
+  deriv(s, rg, K1);
+  for (i = 0; i < 4; i++) TMP[i] = s[i] + h / 2 * K1[i];
+  deriv(TMP, rg, K2);
+  for (i = 0; i < 4; i++) TMP[i] = s[i] + h / 2 * K2[i];
+  deriv(TMP, rg, K3);
+  for (i = 0; i < 4; i++) TMP[i] = s[i] + h * K3[i];
+  deriv(TMP, rg, K4);
+  for (i = 0; i < 4; i++) s[i] += h / 6 * (K1[i] + 2 * K2[i] + 2 * K3[i] + K4[i]);
+  var m = Math.sqrt(s[2] * s[2] + s[3] * s[3]);
+  s[2] /= m; s[3] /= m;
+}
+
+/* Полное отклонение луча: трасса от x = −X до x = +X при b = 1.
+   Шаг растёт вместе с расстоянием до массы — угловое разрешение при этом
+   держится постоянным, и вся трасса укладывается в девять сотен шагов.
+   X = 4000 прицельных параметров: недобор асимптотики при таком X равен
+   1 − X/sqrt(X²+b²) ≈ 3·10⁻⁸, то есть далеко за третьим знаком. */
+function traceDeflection(eps){
+  if (!(eps > 0)) return 0;
+  var X = 4000, s = [-X, 1, 1, 0], guard = 0;
+  while (s[0] < X && guard++ < 200000) {
+    var r = Math.sqrt(s[0] * s[0] + s[1] * s[1]);
+    var h = Math.max(0.02, 0.02 * r);
+    if (s[0] + h > X) h = X - s[0];
+    rk4(s, h, eps);
+  }
+  return Math.atan2(-s[3], s[2]);
+}
+
+/* Показания прибора для массы M (в массах Солнца) и прицельного параметра
+   b (в радиусах Солнца). Всё, кроме formula, добыто трассировкой. */
+function measure(M, b){
+  var rg = RG_SUN * M;                   /* м */
+  var bm = R_SUN * b;                    /* м */
+  var eps = rg / bm;
+  var num = traceDeflection(eps) * ARCSEC;
+  var formula = 2 * eps * ARCSEC;        /* 4GM/(c²b) */
+  return {
+    M: M, b: b,
+    delta: num,                          /* численно, угловые секунды */
+    formula: formula,                    /* 4GM/(c²b), для сверки */
+    newton: num / 2,                     /* ньютоновская половина */
+    rel: formula ? num / formula - 1 : 0,
+    diskRatio: num ? SUN_DISK_ARCSEC / num : Infinity
+  };
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Мир сцены меряется радиусами Солнца, начало координат — центр Солнца.
+   По экрану ось x развёрнута влево: звезда справа, наблюдатель слева, как
+   на рисунке ris-zatmenie-1919. Расстояния до звезды и до наблюдателя на
+   схеме сжаты в миллиарды раз — иначе Солнце и луч не поместятся в один
+   кадр; об этом сказано подписью на сцене. */
+
+var W = 1000, HGT = 460;
+var CX = 500, CY = 250, S = 38;          /* центр Солнца и масштаб: пикселей на радиус Солнца */
+var X_STAR = 11, X_OBS = 8;              /* плечи схемы в радиусах Солнца */
+
+/* Увеличения картинки. K_LUCH подобран так, чтобы при трёх массах Солнца и
+   луче у самого края излом ещё влезал в кадр (там он около 16°), а при одной
+   массе уже был отчётливо виден. K_SETKA больше на порядок: радиальный сдвиг
+   сетки равен r_g/2 и при K_LUCH дал бы полпикселя. Верх K_SETKA держит
+   условие r_g < R☉ при трёх массах — иначе горловина отображения выходит за
+   диск и сетка отступает от Солнца пустым кольцом.
+   Плата за K_LUCH: у тяжёлого сценического Солнца луч подходит ближе, чем
+   прицельный параметр на бесконечности, и при 3 M☉ и b = R☉ задевает диск на
+   четыре пикселя. У настоящего Солнца эта разница — 4·10⁻⁶ радиуса. */
+var K_LUCH = 9000, K_SETKA = 7e4;
+
+var COL_RAY = '#ffb454';                 /* луч */
+var COL_APP = '#7aa6ff';                 /* видимое положение звезды и стрелка сдвига */
+
+function sx(x){ return CX - x * S; }
+function sy(y){ return CY - y * S; }
+
+/* Русский разделитель: в подписях рядом стоят «1,75″» и «0,875″». */
+function num(v, d){ return v.toFixed(d).replace('.', ','); }
+/* Крупные числа с неразрывным пробелом между тысячами: «9 500». */
+function big(v){
+  return String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009');
+}
+
+/* Отображение сетки: узел с изотропного радиуса r уезжает на
+   R = r(1 + g/(4r))². В первом порядке это сдвиг наружу на постоянные g/2,
+   то есть вокруг массы открывается дырка, а линии обтекают её. */
+function mapOut(x, y, g){
+  var r = Math.sqrt(x * x + y * y);
+  if (r < 1e-6) return null;
+  var k = Math.pow(1 + g / (4 * r), 2);
+  return [x * k, y * k];
+}
+
+/* Сетка строится в изотропных координатах и рисуется отображённой.
+   hide — радиус, внутри которого линии не рисуются: там стоит диск Солнца, и
+   вакуумного решения внутри Солнца всё равно нет. Радиус едет вместе с
+   прозрачностью диска, иначе на снятом Солнце посреди ровной сетки оставалась
+   бы необъяснимая дырка. */
+function buildGrid(g, hide){
+  var out = [], step = 0.75, h2 = hide * hide, rmin = g / 4;
+  var xa = -13.4, xb = 13.4, ya = -5.9, yb = 7.0, i, t, p, r2;
+
+  function line(pts){ if (pts.length > 1) out.push(pts); }
+  function ok(x, y){
+    /* r = g/4 — горловина отображения: ближе к центру образ снова уходит
+       наружу, и это уже другой лист, которому на картинке делать нечего. */
+    if (Math.sqrt(x * x + y * y) <= rmin) return null;
+    p = mapOut(x, y, g);
+    if (!p) return null;
+    r2 = p[0] * p[0] + p[1] * p[1];
+    return r2 >= h2 ? p : null;
+  }
+
+  for (i = Math.ceil(xa / step); i * step <= xb; i++) {
+    var x = i * step, seg = [];
+    for (t = 0; t <= 64; t++) {
+      var q = ok(x, ya + (yb - ya) * t / 64);
+      if (q) seg.push(sx(q[0]), sy(q[1]));
+      else { line(seg); seg = []; }
+    }
+    line(seg);
+  }
+  for (i = Math.ceil(ya / step); i * step <= yb; i++) {
+    var y = i * step, seg2 = [];
+    for (t = 0; t <= 64; t++) {
+      var q2 = ok(xa + (xb - xa) * t / 64, y);
+      if (q2) seg2.push(sx(q2[0]), sy(q2[1]));
+      else { line(seg2); seg2 = []; }
+    }
+    line(seg2);
+  }
+  return out;
+}
+
+/* Трасса луча для картинки: те же уравнения, что у прибора, но с массой
+   сцены. Пишем мировые координаты и длину дуги — по ней бежит фотон. */
+function tracePath(rg, b){
+  var s = [-X_STAR, b, 1, 0], pts = [s[0], s[1]], len = [0], L = 0, guard = 0;
+  while (s[0] < X_OBS && guard++ < 20000) {
+    var px = s[0], py = s[1];
+    var r = Math.sqrt(px * px + py * py);
+    var h = Math.max(0.03, 0.03 * r);
+    if (s[0] + h > X_OBS) h = X_OBS - s[0];
+    if (h <= 0) break;
+    rk4(s, h, rg);
+    L += Math.sqrt((s[0] - px) * (s[0] - px) + (s[1] - py) * (s[1] - py));
+    pts.push(s[0], s[1]); len.push(L);
+  }
+  var tilt = -s[3] / s[2];               /* тангенс наклона на выходе, вниз положителен */
+  return {
+    pts: pts, len: len, total: L,
+    end: [s[0], s[1]],
+    ang: Math.atan2(-s[3], s[2]),
+    /* Видимое положение звезды: прямое продолжение принятого луча назад,
+       до той же вертикали, где стоит настоящая звезда. */
+    apparent: s[1] + (X_STAR + X_OBS) * tilt
+  };
+}
+
+/* Наконечник стрелки в точке (x, y), направление (dx, dy). */
+function arrowHead(ctx, x, y, dx, dy, size, color){
+  var m = Math.sqrt(dx * dx + dy * dy);
+  dx /= m; dy /= m;
+  var nx = -dy, ny = dx;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x - dx * size + nx * size * 0.45, y - dy * size + ny * size * 0.45);
+  ctx.lineTo(x - dx * size - nx * size * 0.45, y - dy * size - ny * size * 0.45);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function Demka(){
+  /* t — доля «Солнце на месте»: переключатель не щёлкает картинкой, а
+     переводит её из плоской в искривлённую, и по дороге каждый кадр
+     остаётся честной трассой для промежуточной массы. */
+  var st = useRef({ t: 1, ph: 0, geo: null, key: '' }).current;
+  var ui = useState({ M: 1, b: 1, sun: true });
+  var val = ui[0], setUi = ui[1];
+
+  var me = measure(val.M, val.b);        /* настоящие показания, без увеличений */
+
+  function step(dt){
+    var target = val.sun ? 1 : 0, d = target - st.t;
+    if (Math.abs(d) < 1e-4) st.t = target;
+    else st.t += (d > 0 ? 1 : -1) * Math.min(Math.abs(d), dt / 0.55);
+    st.ph += dt * 0.3;                   /* фотон проходит трассу за три с третью секунды */
+    if (st.ph > 1) st.ph -= 1;
+  }
+
+  /* Геометрия картинки пересчитывается только когда меняется масса сцены или
+     прицельный параметр: на покое кадр рисует готовые ломаные. */
+  function geometry(){
+    var e = C.ease(C.clamp(st.t, 0, 1));
+    var mEff = val.M * e;
+    var key = mEff.toFixed(5) + '|' + val.b.toFixed(4) + '|' + e.toFixed(3);
+    if (st.key !== key || !st.geo) {
+      st.key = key;
+      var eps0 = RG_SUN / R_SUN;         /* радиус Шварцшильда Солнца в его же радиусах */
+      st.geo = {
+        grid: buildGrid(K_SETKA * eps0 * mEff, e),
+        path: tracePath(K_LUCH * eps0 * mEff, val.b)
+      };
+    }
+    st.geo.a = e;
+    return st.geo;
+  }
+
+  function draw(ctx){
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted;
+    var geo = geometry(), a = geo.a, P = geo.path;
+    var i;
+    /* Сдвиг на экране; при нулевой массе он равен нулю, и вся вспомогательная
+       разметка про видимое положение звезды гаснет вместе с ним. */
+    var shift = (P.apparent - val.b) * S;
+    var aux = a * C.clamp(shift / 12, 0, 1);
+
+    /* Сетка пространства. Яркость падает с расстоянием от массы: вся геометрия
+       живёт у диска, а к краям кадра сетка только мешала бы читать луч. */
+    var gg = ctx.createRadialGradient(CX, CY, S, CX, CY, 9 * S);
+    gg.addColorStop(0, 'rgba(' + ink + ',.32)');
+    gg.addColorStop(0.35, 'rgba(' + ink + ',.24)');
+    gg.addColorStop(1, 'rgba(' + ink + ',.1)');
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = gg;
+    geo.grid.forEach(function (seg){
+      ctx.beginPath();
+      ctx.moveTo(seg[0], seg[1]);
+      for (var k = 2; k < seg.length; k += 2) ctx.lineTo(seg[k], seg[k + 1]);
+      ctx.stroke();
+    });
+
+    /* Солнце, закрытое Луной: диск тёмный, снаружи остаётся корона */
+    if (a > 0.01) {
+      ctx.save();
+      ctx.globalAlpha = a;
+      C.glow(ctx, CX, CY, S * 3.2, '255,180,84', .09);
+      ctx.beginPath(); ctx.arc(CX, CY, S, 0, 6.284);
+      ctx.fillStyle = 'rgba(' + ink + ',.16)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(255,180,84,.45)'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.restore();
+      C.label(ctx, CX, CY + S + 30, 'Солнце', 19, 'rgba(' + ink + ',' + (.8 * a) + ')');
+      C.label(ctx, CX, CY + S + 56, 'Луна закрыла диск', 17, 'rgba(' + muted + ',' + a + ')');
+    }
+
+    /* прямая, по которой луч шёл бы без массы */
+    if (aux > 0.03) {
+      ctx.save();
+      ctx.setLineDash([2, 6]); ctx.lineWidth = 1.6;
+      ctx.strokeStyle = 'rgba(' + ink + ',' + (.34 * aux) + ')';
+      ctx.beginPath(); ctx.moveTo(sx(-X_STAR), sy(val.b)); ctx.lineTo(sx(X_OBS + 3), sy(val.b));
+      ctx.stroke();
+      ctx.restore();
+      C.label(ctx, sx(X_OBS + 1.2), sy(val.b) - 13, 'без Солнца', 17,
+              'rgba(' + muted + ',' + aux + ')');
+    }
+
+    /* прямое продолжение принятого луча: туда и смотрит наблюдатель */
+    if (aux > 0.03) {
+      ctx.save();
+      ctx.setLineDash([7, 5]); ctx.lineWidth = 1.8;
+      ctx.strokeStyle = 'rgba(122,166,255,' + (.75 * aux) + ')';
+      ctx.beginPath();
+      ctx.moveTo(sx(P.end[0]), sy(P.end[1]));
+      ctx.lineTo(sx(-X_STAR), sy(P.apparent));
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    /* сам луч */
+    ctx.strokeStyle = COL_RAY; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(sx(P.pts[0]), sy(P.pts[1]));
+    for (i = 2; i < P.pts.length; i += 2) ctx.lineTo(sx(P.pts[i]), sy(P.pts[i + 1]));
+    ctx.stroke();
+
+    /* фотон бежит по трассе: положение ищется по накопленной длине дуги */
+    var want = st.ph * P.total, lo = 0;
+    while (lo < P.len.length - 2 && P.len[lo + 1] < want) lo++;
+    var span = P.len[lo + 1] - P.len[lo];
+    var f = span > 0 ? (want - P.len[lo]) / span : 0;
+    var fx = C.lerp(P.pts[2 * lo], P.pts[2 * lo + 2], f);
+    var fy = C.lerp(P.pts[2 * lo + 1], P.pts[2 * lo + 3], f);
+    C.glow(ctx, sx(fx), sy(fy), 22, '255,180,84', .55);
+    ctx.beginPath(); ctx.arc(sx(fx), sy(fy), 5, 0, 6.284);
+    ctx.fillStyle = '#fff2dc'; ctx.fill();
+
+    /* наблюдатель с пластинкой: стоит там, куда луч пришёл */
+    var ex = sx(P.end[0]), ey = sy(P.end[1]);
+    var tilt = (P.apparent - P.end[1]) / (X_STAR + X_OBS);
+    arrowHead(ctx, ex, ey, -1, tilt, 15, COL_RAY);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(' + ink + ',.85)'; ctx.lineWidth = 3.4; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(ex - 9, ey - 17); ctx.lineTo(ex - 15, ey + 15);
+    ctx.stroke();
+    ctx.restore();
+    C.label(ctx, ex - 6, ey + 40, 'наблюдатель', 17, 'rgb(' + muted + ')');
+
+    /* звезда ночью — она не двигается; звезда в затмение появляется с Солнцем */
+    var stx = sx(-X_STAR), sty = sy(val.b), sta = sy(P.apparent);
+    ctx.beginPath(); ctx.arc(stx, sty, 7, 0, 6.284);
+    ctx.fillStyle = 'rgb(' + ink + ')'; ctx.fill();
+    C.label(ctx, stx - 6, sty + 32, 'звезда ночью', 17, 'rgb(' + muted + ')');
+
+    if (aux > 0.03 && sty - sta > 8) {
+      ctx.save();
+      ctx.globalAlpha = aux;
+      C.glow(ctx, stx, sta, 26, '122,166,255', .5);
+      ctx.beginPath(); ctx.arc(stx, sta, 7, 0, 6.284);
+      ctx.fillStyle = COL_APP; ctx.fill();
+      ctx.strokeStyle = COL_APP; ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.moveTo(stx, sty - 13); ctx.lineTo(stx, sta + 14); ctx.stroke();
+      arrowHead(ctx, stx, sta + 10, 0, -1, 12, COL_APP);
+      ctx.restore();
+      C.label(ctx, stx - 6, sta - 21, 'звезда в затмение', 17,
+              'rgba(122,166,255,' + aux + ')');
+      C.label(ctx, stx - 26, (sty + sta) / 2 + 7, num(me.delta, 2) + '″', 19,
+              'rgba(122,166,255,' + aux + ')', 'right');
+    }
+
+    /* Показания прибора: настоящие секунды дуги, без всяких увеличений.
+       На ночном снимке отклонения нет вовсе, и прибор обязан показывать
+       ноль: он меряет то, что на сцене, а не то, что было бы с Солнцем.
+       Иначе выходило, что луч идёт прямо, а прибор рядом пишет 1,75″. */
+    C.readout(ctx, 246, 376, 'ОТКЛОНЕНИЕ ЛУЧА',
+              val.sun ? num(me.delta, 2) + '″' : '0,00″', COL_APP);
+    C.readout(ctx, 540, 376, 'ПОЛОВИНА, ПО НЬЮТОНУ',
+              val.sun ? num(me.newton, 3) + '″' : '0,000″', 'rgb(' + ink + ')');
+    C.readout(ctx, 838, 376, 'РАЗ МЕНЬШЕ ДИСКА СОЛНЦА',
+              val.sun && isFinite(me.diskRatio) ? big(me.diskRatio) : '—', 'rgb(' + ink + ')');
+
+    C.label(ctx, 20, 446, 'расстояния до звезды и до наблюдателя на схеме сжаты', 17,
+            'rgba(' + muted + ',.8)', 'left');
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Во сколько раз излом на сцене больше настоящего. Число не назначено, а
+     посчитано: тот же трассировщик прогоняется второй раз, с массой сцены.
+     Отношение чуть больше K_LUCH — отклонение растёт с массой быстрее, чем
+     линейно, и эта нелинейность в тяжёлом «сценическом» Солнце уже видна. */
+  var stageAng = traceDeflection(K_LUCH * RG_SUN * val.M / (R_SUN * val.b));
+  var gain = me.delta > 0 ? stageAng / (me.delta / ARCSEC) : K_LUCH;
+
+  /* Показания для автопроверки: всё, что демка утверждает. */
+  window.__demoState = {
+    M: val.M, b: val.b, sun: val.sun,
+    delta: me.delta, formula: me.formula, newton: me.newton,
+    rel: me.rel, diskRatio: me.diskRatio,
+    stageDeg: stageAng * 180 / Math.PI, gain: gain,
+    gainRay: K_LUCH, gainGrid: K_SETKA
+  };
+  /* Прогон трассы мимо ползунков: __demoCheck(2, 1) — две массы Солнца. */
+  window.__demoCheck = measure;
+
+  function set(patch){
+    var next = { M: val.M, b: val.b, sun: val.sun };
+    if (patch.M !== undefined) next.M = patch.M;
+    if (patch.b !== undefined) next.b = patch.b;
+    if (patch.sun !== undefined) next.sun = patch.sun;
+    setUi(next);
+  }
+
+  var say = !val.sun
+    ? 'Большой массы рядом нет, луч идёт по прямой, звезда стоит там, где стоит. Это ночной ' +
+      'снимок того же участка неба: с ним и сравнивали пластинку затмения 29 мая 1919 года.'
+    : me.delta < 1e-9
+    ? 'Масса выкручена в ноль. Тело на месте, а искривлять пространство нечем, и луч проходит ' +
+      'мимо по прямой: прибор показывает ноль, звезда видна там, где она есть.'
+    : 'Луч идёт прямейшей линией, а приходит под другим углом, и звезда видна сдвинутой ' +
+      'наружу от диска. Настоящий сдвиг — <span class="accent">' + num(me.delta, 2) +
+      '″</span>, на сцене излом увеличен примерно в <span class="accent">' + big(gain) +
+      '</span> раз, а растяжение сетки — в <span class="accent">' + big(K_SETKA) +
+      '</span>: настоящих долей секунды не разглядеть ничем.';
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Снимок:">
+          <${C.Btn} active=${val.sun} onClick=${function(){ set({ sun: true }); }}>Солнце на месте<//>
+          <${C.Btn} active=${!val.sun} onClick=${function(){ set({ sun: false }); }}>Солнце убрано<//>
+        <//>
+        <${C.Slider} label="Масса:" min=${0} max=${3} step=${0.05} value=${val.M}
+                     display=${num(val.M, 2) + ' M☉'}
+                     onChange=${function(v){ set({ M: v, sun: true }); }} />
+        <${C.Slider} label="Луч проходит в:" min=${1} max=${5} step=${0.05} value=${val.b}
+                     display=${num(val.b, 2) + ' R☉'}
+                     onChange=${function(v){ set({ b: v }); }} />
+      </div>
+      <canvas class="stage space" ref=${ref}></canvas>
+      <${C.Status} html=${say} />
+    </div>`;
+}
+
+C.mount(Demka);
+</script>
+</body>
+</html>

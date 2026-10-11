@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Параллакс в трёх пространствах</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-02/">&larr; Неделя 02</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=parallaks-krivizna"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ геометрия ══════════════════
+
+   Блок parallaks-i-zatmenie говорит: третий угол треугольника, при звезде,
+   никто не мерил и померить не может, поэтому расстояние вычисляют в
+   предположении, что геометрия плоская. Демка ставит вопрос ребром. Углы
+   при Земле и основание оставлены теми же, а кривизна пространства едет
+   ползунком, и видно, куда уезжает ответ.
+
+   ТРЕУГОЛЬНИК. Тот же, что в pics/parallaks.tex: основание — диаметр
+   орбиты, 2 а.е., звезда на луче из середины основания, углы при Земле
+   79,229°, при звезде 21,543°, в сумме 180,000°. Масштаб там нарушен
+   нарочно (настоящий параллакс меньше угловой секунды), и здесь нарушен
+   так же — иначе рисовать нечего.
+
+   КРИВИЗНА. Ползунок задаёт k = 1/R со знаком, в единицах 1/а.е.
+   Положительное k — сфера (выпуклое пространство), отрицательное —
+   псевдосфера, геометрия Лобачевского (вогнутое), ноль — плоскость.
+   Гауссова кривизна K = sign(k)·k².
+
+   ЧТО СЧИТАЕТСЯ И КАК. Треугольник равнобедренный, медиана из середины
+   основания к звезде перпендикулярна основанию, поэтому половина
+   треугольника — прямоугольный с катетами a (половина базы, 1 а.е.) и d
+   (расстояние до звезды) и с углом A при Земле. Все три геометрии
+   считаются ОДНОЙ записью через обобщённые функции длины sn, cs, vs
+   (см. ниже): плоский случай выходит не отдельной веткой, а пределом,
+   и это проверка сходимости, которой требует бриф.
+
+     расстояние      tn(d) = tg A · sn(a)
+                     сфера:      tg(d/R) = tg A · sin(a/R)
+                     псевдосфера: th(d/R) = tg A · sh(a/R)
+                     плоскость:   d = a · tg A
+     угол при звезде tg B = tn(a)/sn(d),  полный угол при звезде 2B
+     сумма углов     2A + 2B
+
+   ПРОВЕРКИ, КОТОРЫЕ ДЕМКА ГОНЯЕТ САМА (лежат в window.__demoState):
+     1. Жирар и Гаусс — Бонне. Площадь треугольника считается независимо,
+        интегрированием в геодезических полярных координатах вокруг Солнца
+        (dS = sn(r) dr dθ, внутренний интеграл равен vs(r)), и избыток
+        углов обязан равняться K·S. Невязка держится около 1e-9, и это
+        ошибка квадратуры, а не формул.
+     2. Угол при звезде считается вторым маршрутом, из трёх сторон по
+        теореме косинусов, и обязан совпасть с непе́ровым 2B.
+     3. Теорема синусов sn(c)/sin A = sn(2a)/sin 2B — невязка на уровне
+        машинного нуля во всех трёх геометриях.
+     4. Углы, снятые с экрана. Карта конформная (см. ниже), поэтому
+        нарисованный угол обязан совпасть с посчитанным; расхождение
+        около сотой доли градуса и берётся из конечной разности при
+        снятии касательной.
+
+   ЧИСЛА НА КРАЯХ. При k = +0,18 (сфера радиуса 5,556 а.е.) сумма углов
+   188,198°, звезда на 4,195 а.е. вместо 5,257 — плоская формула завышает
+   на 20,2%. При k = −0,18 сумма 165,062°, звезда на 10,252 а.е., плоская
+   формула занижает вдвое. При k = 0 сумма 180,000000° и d = d(плоское)
+   знак в знак.
+
+   КАРТА. Рисунок — конформная модель пространства постоянной кривизны:
+   точка на геодезическом расстоянии r от Солнца в направлении θ кладётся
+   на экран в (ρ cos θ, ρ sin θ), где ρ = 2 tn(r/2). Для сферы это
+   стереографическая проекция, для псевдосферы — круг Пуанкаре, для
+   плоскости — сама плоскость. Углы на такой карте не искажаются, поэтому
+   зал видит сумму углов честно, а не в пересказе. Цена конформности —
+   растянутая линейка: метки расстояний на сфере разбегаются, на
+   псевдосфере сбиваются в кучу, и это тоже правда про пространство.
+
+   ГРАНИЦЫ, О КОТОРЫХ ГОВОРИТ ГЛАВА. В вогнутом пространстве параллакс
+   не опускается ниже угла параллельности Лобачевского, arctg(sh(a/R)):
+   при k = −0,18 это 10,258°, а меряем мы 10,771° — оттого звезда и
+   уезжает почти вдвое. В выпуклом параллакс обращается в ноль на
+   конечном расстоянии πR/2 и дальше меняет знак: при k = 0,18 это
+   8,727 а.е. Обе фразы стоят в тексте главы, и обе выходят из счёта. */
+
+/* ── обобщённые функции длины ────────────────────────────────
+   sn — обобщённый синус: sin(kx)/k на сфере, x в плоскости, sh(|k|x)/|k|
+   на псевдосфере. cs — обобщённый косинус. vs = (1 − cs)/K — «версинус»,
+   в плоском пределе x²/2; он записан через квадрат полусинуса, поэтому у
+   нуля ничего не вычитается и точность не теряется. Ветки сшиты рядами:
+   при k → 0 обе дают ровно одно и то же. */
+
+function sinc(u)  { return Math.abs(u) < 1e-5 ? 1 - u * u / 6 : Math.sin(u) / u; }
+function sinhc(u) { return Math.abs(u) < 1e-5 ? 1 + u * u / 6 : Math.sinh(u) / u; }
+function asinc(y) { return Math.abs(y) < 1e-5 ? 1 + y * y / 6 : Math.asin(y) / y; }
+function asinhc(y){ return Math.abs(y) < 1e-5 ? 1 - y * y / 6 : Math.asinh(y) / y; }
+function atanc(y) { return Math.abs(y) < 1e-5 ? 1 - y * y / 3 : Math.atan(y) / y; }
+function atanhc(y){ return Math.abs(y) < 1e-5 ? 1 + y * y / 3 : Math.atanh(y) / y; }
+
+function KK(k) { return k >= 0 ? k * k : -k * k; }                 /* гауссова кривизна */
+function sn(x, k) { return k >= 0 ? x * sinc(k * x) : x * sinhc(-k * x); }
+function cs(x, k) { return k >= 0 ? Math.cos(k * x) : Math.cosh(-k * x); }
+function vs(x, k) { var s = k >= 0 ? sinc(k * x / 2) : sinhc(-k * x / 2); return 0.5 * x * x * s * s; }
+function tn(x, k) { return sn(x, k) / cs(x, k); }
+
+/* Обращения: длина по версинусу и длина по тангенсу. Обе идут через
+   половинный аргумент, чтобы у нуля не было вычитания близких величин. */
+function fromVs(v, k) {
+  var q = Math.sqrt(2 * Math.max(0, v)) / 2;
+  return k >= 0 ? 2 * q * asinc(C.clamp(k * q, -1, 1)) : 2 * q * asinhc(-k * q);
+}
+function fromTn(T, k) {
+  /* На псевдосфере ареатангенс требует |k·T| < 1: это и есть предел
+     Лобачевского, дальше звезды с таким параллаксом не существует.
+     Ползунок до предела не доходит (на краю аргумент 0,951), зажим
+     стоит на случай арифметической пыли. */
+  return k >= 0 ? T * atanc(k * T) : T * atanhc(C.clamp(-k * T, -0.999999, 0.999999));
+}
+
+/* Теорема косинусов в единой записи: работает во всех трёх геометриях,
+   в плоскости вырождается в школьную c² = a² + b² − 2ab cos C. */
+function sideOf(a, b, ang, k) {
+  return fromVs(vs(a, k) + vs(b, k) - KK(k) * vs(a, k) * vs(b, k) - sn(a, k) * sn(b, k) * Math.cos(ang), k);
+}
+function angleOf(a, b, c, k) {                 /* угол между сторонами a и b */
+  var num = vs(a, k) + vs(b, k) - KK(k) * vs(a, k) * vs(b, k) - vs(c, k);
+  return Math.acos(C.clamp(num / (sn(a, k) * sn(b, k)), -1, 1));
+}
+
+/* ── сам треугольник ─────────────────────────────────────── */
+
+var AHALF = 1;                                 /* половина базы: радиус орбиты, а.е. */
+var A_DEG = 79.229;                            /* измеренный угол при Земле, из parallaks.tex */
+var A = A_DEG * Math.PI / 180;
+var NSIDE = 192;                               /* точек на стороне Земля — звезда */
+var KMAX = 0.18;                               /* край ползунка, 1/а.е. */
+
+/* Точка стороны Земля → звезда на расстоянии t от Земли, в геодезических
+   полярных координатах вокруг Солнца. r — расстояние от Солнца, θ — угол
+   от направления на звезду. Оба через теорему косинусов в треугольнике
+   Земля — Солнце — точка, где известны сторона a, сторона t и угол A. */
+function sidePoint(t, k) {
+  var r = sideOf(AHALF, t, A, k);
+  var phi = t === 0 ? 0 : angleOf(AHALF, r, t, k);   /* угол при Солнце */
+  return { r: r, th: Math.PI / 2 - phi };
+}
+
+function solve(k) {
+  var d = fromTn(Math.tan(A) * sn(AHALF, k), k);            /* Солнце → звезда */
+  var B = Math.atan2(tn(AHALF, k), sn(d, k));               /* половина угла при звезде */
+  var c = sideOf(AHALF, d, Math.PI / 2, k);                 /* Земля → звезда */
+  var sum = 2 * A + 2 * B;
+
+  var side = [], i;
+  for (i = 0; i <= NSIDE; i++) side.push(sidePoint(c * i / NSIDE, k));
+
+  /* Площадь независимым счётом: dS = sn(r) dr dθ, внутренний интеграл по r
+     равен vs(r), остаётся трапеция по θ вдоль стороны. Трапеция даёт
+     ошибку порядка h², поэтому берём её на полном и на прореженном вдвое
+     наборе и гасим по Ричардсону — остаётся порядок h⁴. */
+  function trap(stp) {
+    var s = 0, j;
+    for (j = stp; j <= NSIDE; j += stp)
+      s += 0.5 * (vs(side[j].r, k) + vs(side[j - stp].r, k)) * Math.abs(side[j].th - side[j - stp].th);
+    return s;
+  }
+  var area = 2 * (4 * trap(1) - trap(2)) / 3;
+
+  var dFlat = AHALF * Math.tan(A);                          /* ответ плоской формулы */
+  return {
+    k: k, d: d, B: B, c: c, sum: sum, area: area, side: side, dFlat: dFlat,
+    /* второй маршрут к углу при звезде: из трёх сторон, без Непера */
+    starFrom3: angleOf(c, c, 2 * AHALF, k),
+    /* невязка теоремы синусов в полном треугольнике */
+    sines: sn(c, k) / Math.sin(A) - sn(2 * AHALF, k) / Math.sin(2 * B)
+  };
+}
+
+/* ── сцена ───────────────────────────────────────────────── */
+
+var W = 1000, HGT = 460;
+var SUN = { x: 118, y: 186 };                  /* Солнце — середина базы и центр карты */
+var PX = 90;                                   /* пикселей на а.е. в центре карты */
+var RULE_Y = 340;                              /* линейка расстояний */
+var ROW_Y = 398;                               /* строка приборных показаний */
+var COL_FLAT = '#7aa6ff';                      /* плоский ответ: цвет данных, от темы не зависит */
+
+/* Экранный радиус точки: конформная модель, ρ = 2·tn(r/2). */
+function rho(r, k) { return 2 * tn(r / 2, k); }
+
+function num(v, d) { return v.toFixed(d).replace('.', ','); }
+function signed(v, d) {
+  var s = v > 0 ? '+' : v < 0 ? '−' : '';
+  return s + num(Math.abs(v), d);
+}
+
+function Parallaks() {
+  var st = useRef({ k: 0, kGoal: 0, sol: solve(0) }).current;
+  var [ui, setUi] = useState({ k: 0 });
+
+  /* Пересчёт при каждом изменении кривизны. __demoState обновляется здесь
+     же: он и есть то, что демка утверждает. */
+  function apply(k, hard) {
+    st.k = k;
+    if (hard) st.kGoal = k;
+    st.sol = solve(k);
+    publish();
+    setUi({ k: k });
+  }
+
+  function publish() {
+    var s = st.sol, K = KK(s.k);
+    var excess = s.sum - Math.PI;
+    var deg = 180 / Math.PI;
+    window.__demoState = {
+      k: s.k,                                        /* кривизна 1/R со знаком, 1/а.е. */
+      R: s.k === 0 ? Infinity : Math.abs(1 / s.k),
+      geom: s.k > 0 ? 'выпуклое' : s.k < 0 ? 'вогнутое' : 'плоское',
+      angleEarthDeg: A_DEG,                          /* измеренный угол, не меняется */
+      parallaxDeg: 90 - A_DEG,
+      starAngleDeg: 2 * s.B * deg,
+      sumDeg: s.sum * deg,
+      excessDeg: excess * deg,
+      dFlat: s.dFlat,
+      dTrue: s.d,
+      errPct: 100 * (s.d - s.dFlat) / s.dFlat,
+      area: s.area,
+      /* Жирар и Гаусс — Бонне: избыток обязан равняться K·S */
+      excessFromArea: K * s.area * deg,
+      girardResid: K === 0 ? 0 : excess / (K * s.area) - 1,
+      /* угол при звезде вторым маршрутом и невязка теоремы синусов */
+      starFrom3Deg: s.starFrom3 * deg,
+      starRouteResid: (2 * s.B - s.starFrom3) * deg,
+      sinesResid: s.sines,
+      /* углы, снятые с экранного рисунка: карта конформная, обязаны совпасть */
+      screenEarthDeg: screenAngleAtEarth(s) * deg,
+      screenStarDeg: screenAngleAtStar(s) * deg,
+      /* границы, о которых говорит глава */
+      parallaxFloorDeg: s.k < 0 ? Math.atan(-s.k * sn(AHALF, s.k)) * deg : 0,
+      zeroParallaxAt: s.k > 0 ? Math.PI / (2 * s.k) : Infinity
+    };
+  }
+
+  /* Углы прямо с картинки: берём касательные к нарисованной стороне
+     конечной разностью по узлам полилинии. Отличие от посчитанных углов —
+     мера того, врёт рисунок или нет. */
+  function scr(p, k) { var q = rho(p.r, k) * PX; return [q * Math.cos(p.th), -q * Math.sin(p.th)]; }
+  function screenAngleAtEarth(s) {
+    var p0 = scr(s.side[0], s.k), p1 = scr(s.side[1], s.k);
+    /* база на экране — вертикаль, от верхней Земли вниз это (0; +1) */
+    return Math.abs(Math.atan2(p1[1] - p0[1], p1[0] - p0[0]) - Math.PI / 2);
+  }
+  function screenAngleAtStar(s) {
+    var n = s.side.length - 1;
+    var p0 = scr(s.side[n], s.k), p1 = scr(s.side[n - 1], s.k);
+    var ang = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]);
+    return 2 * Math.abs(Math.PI - Math.abs(ang));    /* медиана уходит из звезды по −x */
+  }
+
+  /* Плавный ход к пресету: на слайде важно увидеть, как пространство
+     гнётся, а не как картинка перескакивает. Ползунок ведёт мгновенно. */
+  var GLIDE = 0.5;                                    /* 1/а.е. в секунду */
+  function step(dt) {
+    if (st.k === st.kGoal) return;
+    var dk = st.kGoal - st.k;
+    var mv = Math.sign(dk) * Math.min(Math.abs(dk), dt * GLIDE);
+    var next = Math.abs(dk) - Math.abs(mv) < 1e-6 ? st.kGoal : st.k + mv;
+    apply(next, false);
+  }
+
+  var tone = null;
+
+  function px(p, k) { return SUN.x + rho(p.r, k) * PX * Math.cos(p.th); }
+  function py(p, k) { return SUN.y - rho(p.r, k) * PX * Math.sin(p.th); }
+
+  /* Кольца равных расстояний от Солнца. На конформной карте это обычные
+     окружности, а вот их шаг по экрану и показывает, как растянута
+     линейка пространства. */
+  function rings(ctx, k) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, RULE_Y - 16); ctx.clip();
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.08)';
+    ctx.lineWidth = 1;
+    for (var r = 2; r <= 24; r += 2) {
+      var q = rho(r, k) * PX;
+      if (q > 1100) break;
+      ctx.beginPath(); ctx.arc(SUN.x, SUN.y, q, 0, 6.284); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* Линейка: те же расстояния, выложенные вдоль луча зрения. По ней
+     читаются оба ответа, и по ней же видно, что метки разбегаются или
+     сбиваются в кучу. */
+  function ruler(ctx, k) {
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.45)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(SUN.x, RULE_Y); ctx.lineTo(W - 30, RULE_Y); ctx.stroke();
+
+    var lastLabel = -99;
+    for (var r = 1; r <= 40; r++) {
+      var x = SUN.x + rho(r, k) * PX;
+      if (x > W - 160) break;                    /* дальше стоит подпись единиц */
+      var big = r % 2 === 0;
+      ctx.strokeStyle = 'rgba(' + tone.muted + ',' + (big ? .7 : .35) + ')';
+      ctx.lineWidth = big ? 1.6 : 1;
+      ctx.beginPath(); ctx.moveTo(x, RULE_Y); ctx.lineTo(x, RULE_Y + (big ? 11 : 6)); ctx.stroke();
+      if (big && x - lastLabel > 36) {
+        C.label(ctx, x, RULE_Y + 32, String(r), 17, 'rgba(' + tone.muted + ',.9)');
+        lastLabel = x;
+      }
+    }
+    C.label(ctx, W - 30, RULE_Y + 32, 'а.е. от Солнца', 17, 'rgba(' + tone.muted + ',.9)', 'right');
+  }
+
+  function draw(ctx) {
+    tone = C.tones(ctx);
+    var s = st.sol, k = s.k;
+    var ink = 'rgb(' + tone.ink + ')', acc = 'rgb(' + tone.accent + ')';
+    var mut = 'rgb(' + tone.muted + ')';
+    var sx = SUN.x + rho(s.d, k) * PX, sy = SUN.y;             /* звезда */
+    var gx = SUN.x + rho(s.dFlat, k) * PX;                     /* плоский ответ */
+    var ey = SUN.y - rho(AHALF, k) * PX;                       /* верхняя Земля */
+    var ey2 = SUN.y + (SUN.y - ey);
+
+    rings(ctx, k);
+    ruler(ctx, k);
+
+    /* луч зрения от Солнца к звезде: линия построения, не измеренная сторона */
+    ctx.save();
+    ctx.setLineDash([5, 7]);
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.5)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(SUN.x, SUN.y); ctx.lineTo(Math.max(sx, gx) + 26, SUN.y); ctx.stroke();
+
+    /* сносы на линейку: по ним читаются оба расстояния */
+    ctx.strokeStyle = 'rgba(' + tone.accent + ',.55)';
+    ctx.beginPath(); ctx.moveTo(sx, sy + 14); ctx.lineTo(sx, RULE_Y - 2); ctx.stroke();
+    ctx.strokeStyle = COL_FLAT;
+    ctx.globalAlpha = .6;
+    ctx.beginPath(); ctx.moveTo(gx, sy + 14); ctx.lineTo(gx, RULE_Y - 2); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    /* полоса расхождения над линейкой */
+    if (Math.abs(sx - gx) > 4) {
+      ctx.strokeStyle = COL_FLAT; ctx.lineWidth = 3.2; ctx.lineCap = 'butt';
+      ctx.beginPath(); ctx.moveTo(gx, RULE_Y - 13); ctx.lineTo(sx, RULE_Y - 13); ctx.stroke();
+      C.label(ctx, (gx + sx) / 2, RULE_Y - 22, num(Math.abs(s.d - s.dFlat), 3) + ' а.е.', 17, COL_FLAT);
+    }
+
+    /* стороны треугольника: основание — геодезическая через центр карты,
+       то есть прямая; лучи зрения строятся по точкам */
+    ctx.strokeStyle = ink; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(SUN.x, ey); ctx.lineTo(SUN.x, ey2); ctx.stroke();
+    [1, -1].forEach(function (sgn) {
+      ctx.beginPath();
+      s.side.forEach(function (p, i) {
+        var x = px(p, k), y = SUN.y - sgn * (SUN.y - py(p, k));
+        if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      });
+      ctx.stroke();
+    });
+
+    /* измеренные углы при Земле: дуга от основания до луча зрения.
+       Карта конформная, поэтому дуга показывает настоящие 79,229°. */
+    ctx.strokeStyle = acc; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(SUN.x, ey, 46, Math.PI / 2 - A, Math.PI / 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(SUN.x, ey2, 46, -Math.PI / 2, A - Math.PI / 2); ctx.stroke();
+    C.label(ctx, SUN.x + 62, ey - 8, 'измерен, ' + num(A_DEG, 3) + '°', 18, acc, 'left');
+    C.label(ctx, SUN.x + 150, ey2 + 30, 'измерен', 18, acc, 'left');
+
+    /* угол при звезде: его никто не мерил, он такой, каким его делает
+       геометрия, и это он двигает сумму */
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.85)'; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.arc(sx, sy, 88, Math.PI - s.B, Math.PI + s.B); ctx.stroke();
+    ctx.restore();
+    C.label(ctx, sx - 96, sy + 74, 'не измерен, ' + num(2 * s.B * 180 / Math.PI, 3) + '°',
+            18, mut, 'right');
+
+    /* плоский ответ и настоящая звезда */
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = COL_FLAT; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(gx, sy, 13, 0, 6.284); ctx.stroke();
+    ctx.restore();
+    C.label(ctx, gx, RULE_Y - 40, 'плоский ответ', 18, COL_FLAT);
+
+    C.glow(ctx, sx, sy, 34, tone.accent, .5);
+    ctx.beginPath(); ctx.arc(sx, sy, 8, 0, 6.284); ctx.fillStyle = acc; ctx.fill();
+    C.label(ctx, sx + 20, sy + 6, 'звезда', 19, acc, 'left');
+
+    /* основание: две астрономические единицы, размерная линия как на рисунке */
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.6)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(SUN.x - 42, ey); ctx.lineTo(SUN.x - 26, ey);
+    ctx.moveTo(SUN.x - 34, ey); ctx.lineTo(SUN.x - 34, ey2);
+    ctx.moveTo(SUN.x - 42, ey2); ctx.lineTo(SUN.x - 26, ey2);
+    ctx.stroke();
+    ctx.save();
+    ctx.translate(SUN.x - 48, SUN.y); ctx.rotate(-Math.PI / 2);
+    C.label(ctx, 0, 0, '2 а.е.', 18, mut);
+    ctx.restore();
+
+    /* Солнце и две Земли */
+    ctx.fillStyle = ink;
+    ctx.beginPath(); ctx.arc(SUN.x, SUN.y, 9, 0, 6.284); ctx.fill();
+    ctx.beginPath(); ctx.arc(SUN.x, ey, 6, 0, 6.284); ctx.fill();
+    ctx.beginPath(); ctx.arc(SUN.x, ey2, 6, 0, 6.284); ctx.fill();
+    C.label(ctx, SUN.x + 16, SUN.y + 26, 'Солнце', 18, mut, 'left');
+    C.label(ctx, SUN.x, ey - 22, 'Земля', 19, mut);
+    C.label(ctx, SUN.x, ey2 + 30, 'Земля полгода назад', 19, mut);
+
+    /* шапка: какое сейчас пространство и что в нём с параллаксом */
+    var head = k === 0 ? 'Пространство плоское'
+      : (k > 0 ? 'Выпуклое пространство, сфера радиуса ' : 'Вогнутое пространство, псевдосфера радиуса ')
+        + num(Math.abs(1 / k), 2) + ' а.е.';
+    C.label(ctx, 44, 36, head, 21, acc, 'left');
+
+    var edge = k === 0
+      ? 'параллакс падает до нуля только на бесконечности, границы у него нет'
+      : k > 0
+        ? 'дальше ' + num(Math.PI / (2 * k), 2) + ' а.е. параллакс здесь уходит в ноль и меняет знак'
+        : 'ниже ' + num(Math.atan(-k * sn(AHALF, k)) * 180 / Math.PI, 3) + '° параллакс здесь не опускается ни для какой звезды';
+    C.label(ctx, W - 44, 62, edge, 17, mut, 'right');
+
+    /* показания */
+    var err = 100 * (s.d - s.dFlat) / s.dFlat;
+    C.readout(ctx, 260, ROW_Y, 'СУММА УГЛОВ ТРЕУГОЛЬНИКА', num(s.sum * 180 / Math.PI, 3) + '°', acc);
+    C.readout(ctx, 560, ROW_Y, 'РАССТОЯНИЕ ПО ПЛОСКОЙ ФОРМУЛЕ', num(s.dFlat, 3) + ' а.е.', COL_FLAT);
+    C.readout(ctx, 800, ROW_Y, 'РАССТОЯНИЕ НА САМОМ ДЕЛЕ', num(s.d, 3) + ' а.е.', acc);
+    C.readout(ctx, 960, ROW_Y, 'РАСХОЖДЕНИЕ', signed(err, 1) + ' %',
+              Math.abs(err) < 0.05 ? mut : acc);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) publish();
+
+  var s = st.sol;
+  var status = st.k === 0
+    ? 'Пространство плоское, сумма углов ровно 180°, и плоская формула даёт верное расстояние. ' +
+      'Масштаб на сцене нарушен нарочно, настоящий параллакс меньше угловой секунды.'
+    : 'Углы при Земле те же ' + num(A_DEG, 3) + '°, а сумма ' +
+      (st.k > 0 ? 'выросла на ' : 'недобрала ') +
+      '<span class="accent">' + num(Math.abs(s.sum * 180 / Math.PI - 180), 3) + '°</span>' +
+      ', и этот ' + (st.k > 0 ? 'избыток' : 'недостаток') +
+      ' равен площади треугольника, делённой на квадрат радиуса кривизны. ' +
+      'Тот же измеренный параллакс ставит звезду на <span class="accent">' + num(s.d, 2) +
+      ' а.е.</span> вместо ' + num(s.dFlat, 2) + '. ' +
+      'Масштаб на сцене нарушен нарочно, настоящий параллакс меньше угловой секунды.';
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Пространство:">
+          <${C.Btn} active=${ui.k < 0} onClick=${function () { st.kGoal = -0.12; }}>вогнутое<//>
+          <${C.Btn} active=${ui.k === 0} onClick=${function () { st.kGoal = 0; }}>плоское<//>
+          <${C.Btn} active=${ui.k > 0} onClick=${function () { st.kGoal = 0.12; }}>выпуклое<//>
+        <//>
+        <${C.Slider} label="Кривизна:" min=${-KMAX} max=${KMAX} step=${0.002} value=${ui.k}
+                     display=${signed(ui.k, 3) + ' 1/а.е.'}
+                     onChange=${function (v) { apply(Math.abs(v) < 1e-6 ? 0 : v, true); }} />
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${status} />
+    </div>`;
+}
+
+C.mount(Parallaks);
+</script>
+</body>
+</html>

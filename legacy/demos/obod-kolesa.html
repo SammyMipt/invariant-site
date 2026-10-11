@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Точка обода в четырёх наборах осей</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-02/">&larr; Неделя 02</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=obod-kolesa"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок sistema-otscheta, рисунок ris-obod-kolesa. Одна и та же точка обода
+   катящегося колеса записана в четырёх наборах осей. Движение при этом
+   одно; разные только оси, а значит и записи.
+
+   Колесо радиуса R катится без проскальзывания вправо; φ — угол поворота.
+   В осях, прикрученных к дороге, центр идёт по прямой C = (Rφ; R), а точка
+   обода вычерчивает циклоиду
+
+       P(φ) = ( R(φ − sin φ);  R(1 − cos φ) ).
+
+   Остальные три записи получаются из этой преобразованием координат, и
+   в демке они так и считаются — одна и та же P прогоняется через четыре
+   отображения, а не выписывается четырьмя формулами:
+
+     1. оси прикручены        P
+     2. те же, повёрнутые     поворот P на −30°
+     3. оси едут с колесом    P − C
+     4. оси на ободе          поворот (P − C) на +φ
+
+   Числа рисунка проверяются на φ = π: в первых осях (3,1416R; 2R), во
+   вторых (3,7207R; 0,1613R), длина у обеих √(π² + 4)·R = 3,7242R —
+   поворот длину не трогает. В третьих (0; R), в четвёртых (0; −R) при
+   любом φ, и это самая короткая запись из возможных.
+
+   ЧТО ЗДЕСЬ ГЛАВНОЕ. Острия циклоиды дало неподвижное начало, а не
+   отсутствие поворота: вторые оси повёрнуты, но начало у них то же, и
+   острия никуда не делись. А четвёртые оси запрещены обеими
+   договорённостями сразу — они и едут, и поворачиваются со временем,
+   а покомпонентная производная требует, чтобы направления осей от
+   времени не зависели (#uslovie-stolbca в sistema-otscheta).
+
+   СЦЕНА. Всё нарисовано так, как это видит наблюдатель в выбранных осях:
+   в третьих уезжает назад дорога, а не колесо, в четвёртых дорога ещё и
+   крутится вокруг колеса. Иначе разница между наборами осей остаётся
+   словами: точка-то во всех четырёх одна. */
+
+var TAU = Math.PI * 2;
+var UGOL2 = -30 * Math.PI / 180;      /* поворот вторых осей, как в рисунке */
+var PHI_MAX = 2 * TAU;                /* два оборота: у повёрнутых осей третий уходит под нижний край */
+
+function tochka(phi){ return { x: phi - Math.sin(phi), y: 1 - Math.cos(phi) }; }
+function centr(phi){ return { x: phi, y: 1 }; }
+
+function povernut(p, a){
+  var c = Math.cos(a), s = Math.sin(a);
+  return { x: p.x * c - p.y * s, y: p.x * s + p.y * c };
+}
+
+/* Отображение точки, заданной в осях дороги, в выбранный набор осей.
+   Четыре ветки — четыре набора; всё остальное в демке общее. */
+function vOsi(nabor, phi, p){
+  if (nabor === 0) return { x: p.x, y: p.y };
+  if (nabor === 1) return povernut(p, UGOL2);
+  var c = centr(phi);
+  var d = { x: p.x - c.x, y: p.y - c.y };
+  if (nabor === 2) return d;
+  return povernut(d, phi);
+}
+
+var NABORY = [
+  { imya: 'прикручены к дороге', korotko: 'к дороге' },
+  { imya: 'повёрнуты на 30°',    korotko: 'на 30°' },
+  { imya: 'едут с колесом',      korotko: 'с колесом' },
+  { imya: 'на самом ободе',      korotko: 'на ободе' }
+];
+
+function num(v, d){
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function kx(tex){
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+
+/* ══════════════════ сцена ══════════════════ */
+
+var W = 1000, HGT = 380;
+var S = 42;                          /* пикселей на радиус колеса */
+/* Начало координат ставится по набору, и это не косметика. У прикрученных
+   осей оно слева внизу, чтобы циклоида уместилась вправо. У повёрнутых —
+   слева вверху: поворот осей на −30° кладёт дорогу под уклон, и дальний
+   конец кривой уходит на четыре с половиной радиуса вниз. У едущих осей
+   начало посередине, потому что колесо там стоит, а мимо едет дорога. */
+var NACHALO = [{ x: 88, y: 316 }, { x: 118, y: 128 },
+               { x: 470, y: 214 }, { x: 470, y: 214 }];
+
+var CT = '#4db6c6';                  /* точка обода и её след: бирюза скорости из рисунков главы */
+var CW = '#c8cede';                  /* колесо */
+
+function Obod(){
+  var st = useRef({ phi: 1.9, nabor: 0, idet: true }).current;
+  var pair = useState({ phi: st.phi, nabor: 0, idet: true });
+  var ui = pair[0], setUi = pair[1];
+
+  function pokazaniya(){
+    var p = vOsi(st.nabor, st.phi, tochka(st.phi));
+    window.__demoState = {
+      nabor: st.nabor, imya: NABORY[st.nabor].imya, phi: st.phi,
+      x: p.x, y: p.y,
+      dlina: Math.hypot(p.x, p.y),
+      /* длина в первых двух наборах обязана совпадать: поворот её не трогает */
+      dlinaVPervyh: Math.hypot(tochka(st.phi).x, tochka(st.phi).y),
+      idet: st.idet
+    };
+  }
+
+  function step(dt){
+    if (st.idet) {
+      st.phi += dt * 1.15;
+      if (st.phi > PHI_MAX) st.phi -= PHI_MAX;
+    }
+    pokazaniya();
+  }
+
+  function draw(ctx){
+    var tone = C.tones(ctx);
+    var ink = 'rgb(' + tone.ink + ')', muted = 'rgb(' + tone.muted + ')';
+    var O = NACHALO[st.nabor];
+    var phi = st.phi;
+
+    function ekr(p){ return { x: O.x + p.x * S, y: O.y - p.y * S }; }
+    function tut(p){ return ekr(vOsi(st.nabor, phi, p)); }
+
+    /* ── дорога ──
+       В осях дороги она стоит, в едущих уезжает назад, в осях обода ещё и
+       поворачивается. Рисуется отрезком по двум концам: все четыре
+       отображения аффинные, прямая остаётся прямой. */
+    var a = tut({ x: -4, y: 0 }), b = tut({ x: PHI_MAX + 4, y: 0 });
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.55)'; ctx.lineWidth = 2;
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+
+    /* Метки на дороге через один радиус: без них в едущих осях не видно,
+       что дорога движется, — гладкая линия ползёт незаметно. */
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.55)'; ctx.lineWidth = 1.6;
+    for (var m = -3; m <= PHI_MAX + 3; m++) {
+      var t0 = tut({ x: m, y: 0 }), t1 = tut({ x: m, y: -0.38 });
+      ctx.beginPath(); ctx.moveTo(t0.x, t0.y); ctx.lineTo(t1.x, t1.y); ctx.stroke();
+    }
+
+    /* ── обе кривые: мел на дороге и след в выбранных осях ──
+
+       Правило у них одно (правка автора 07.09): целиком бледно, пройденная
+       часть в полную силу. Раньше так разгорался только след, а циклоида
+       во всех наборах оставалась ровно тусклой, и выходило, что в одних
+       осях кривая живёт со временем, а в других нет. Живёт она везде: мела
+       на дороге впереди колеса ещё нет, он появляется по мере проезда.
+
+       Разница между кривыми не в яркости, а в том, чьи они. Мел принадлежит
+       дороге: все его точки берутся при своём φ, но отображаются ОДНИМ,
+       текущим, — поэтому он вместе с дорогой уезжает и поворачивается. След
+       принадлежит наблюдателю: у каждой его точки своё отображение, и при
+       смене осей он пересчитывается целиком. В прикрученных осях они
+       совпадают, и это видно глазом. */
+    var N = 420;
+    function krivaya(vTochke, width){
+      var i, e;
+      ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(77,182,198,.34)'; ctx.lineWidth = width;
+      ctx.beginPath();
+      for (i = 0; i <= N; i++) {
+        e = vTochke(PHI_MAX * i / N);
+        if (i) ctx.lineTo(e.x, e.y); else ctx.moveTo(e.x, e.y);
+      }
+      ctx.stroke();
+
+      var M = Math.max(2, Math.round(N * phi / PHI_MAX));
+      ctx.strokeStyle = CT; ctx.lineWidth = width + 0.4;
+      ctx.beginPath();
+      for (i = 0; i <= M; i++) {
+        e = vTochke(phi * i / M);
+        if (i) ctx.lineTo(e.x, e.y); else ctx.moveTo(e.x, e.y);
+      }
+      ctx.stroke();
+    }
+
+    krivaya(function(f){ return tut(tochka(f)); }, 1.8);
+    krivaya(function(f){ return ekr(vOsi(st.nabor, f, tochka(f))); }, 2.2);
+
+    /* ── колесо ── */
+    var c = centr(phi), ce = tut(c), pe = tut(tochka(phi));
+    ctx.strokeStyle = CW; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(ce.x, ce.y, S, 0, TAU); ctx.stroke();
+    /* Спицы: без них в осях обода не видно, что колесо перестало крутиться.
+       Смещение спицы от центра берётся тем же выражением, что и у отмеченной
+       точки, (−sin; −cos): колесо, катящееся вправо, вращается по часовой
+       стрелке. В первой сборке здесь стоял +sin, спицы шли против часовой,
+       и при шести спицах через шестьдесят градусов глаз читал это как
+       медленное вращение в обратную сторону. */
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.5)'; ctx.lineWidth = 1.4;
+    for (var k = 0; k < 6; k++) {
+      var ug = phi + k * Math.PI / 3;
+      var sp = tut({ x: c.x - Math.sin(ug), y: c.y - Math.cos(ug) });
+      ctx.beginPath(); ctx.moveTo(ce.x, ce.y); ctx.lineTo(sp.x, sp.y); ctx.stroke();
+    }
+    ctx.strokeStyle = CT; ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.moveTo(ce.x, ce.y); ctx.lineTo(pe.x, pe.y); ctx.stroke();
+    ctx.fillStyle = CW;
+    ctx.beginPath(); ctx.arc(ce.x, ce.y, 4, 0, TAU); ctx.fill();
+    ctx.fillStyle = CT;
+    ctx.beginPath(); ctx.arc(pe.x, pe.y, 6.5, 0, TAU); ctx.fill();
+
+    /* ── оси выбранного набора ──
+       Они всегда стоят прямо: наблюдатель сидит в них, и для него они
+       неподвижны. Движется всё остальное. */
+    var AX = 3.4;
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.5)'; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(O.x - S * 0.9, O.y); ctx.lineTo(O.x + AX * S, O.y);
+    ctx.moveTo(O.x, O.y + S * 0.9); ctx.lineTo(O.x, O.y - AX * S * 0.62);
+    ctx.stroke();
+    ctx.fillStyle = ink;
+    ctx.beginPath(); ctx.arc(O.x, O.y, 3.4, 0, TAU); ctx.fill();
+    C.label(ctx, O.x + AX * S + 14, O.y + 6, 'x', 18, muted, 'left');
+    C.label(ctx, O.x - 14, O.y - AX * S * 0.62 - 6, 'y', 18, muted, 'right');
+
+    /* ── показания ── */
+    var p = vOsi(st.nabor, phi, tochka(phi));
+    /* Показания стоят у правого края: он свободен во всех четырёх наборах,
+       а середина и низ заняты то циклоидой, то наклонённой дорогой. */
+    C.readout(ctx, 962, 56, 'ЗАПИСЬ ТОЧКИ, В R',
+              '(' + num(p.x, 2) + '; ' + num(p.y, 2) + ')', CT);
+    C.readout(ctx, 962, 158, 'ДЛИНА, В R', num(Math.hypot(p.x, p.y), 2), ink);
+    C.readout(ctx, 962, 260, 'ОБОРОТ', num(phi / TAU, 2), muted);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+
+  function vzyat(i){ st.nabor = i; pokazaniya(); setUi({ phi: st.phi, nabor: i, idet: st.idet }); }
+  function pusk(){ st.idet = !st.idet; setUi({ phi: st.phi, nabor: st.nabor, idet: st.idet }); }
+  function vesti(v){
+    st.phi = v; st.idet = false; pokazaniya();
+    setUi({ phi: v, nabor: st.nabor, idet: false });
+  }
+
+  var slova = [
+    'Оси прикручены к дороге. Точка обода вычерчивает циклоиду, и острия у неё ' +
+      'оттого, что начало стоит на месте, а не оттого, что оси не поворачиваются: ' +
+      'соседний набор повёрнут, а острия те же. Бледная кривая — та же циклоида, ' +
+      'начерченная мелом по дороге; здесь она ложится на след точки.',
+    'Те же оси, повёрнутые на ' + kx('30^\\circ') + '. Кривая та же самая, числа другие: ' +
+      'при ' + kx('\\varphi = \\pi') + ' пара ' + kx('(3{,}14R;\\ 2R)') + ' стала ' +
+      kx('(3{,}72R;\\ 0{,}16R)') + ', а длина осталась ' + kx('\\sqrt{\\pi^2+4}\\,R') + '.',
+    'Оси едут с осью колеса. Назад поехала дорога, а точка обода пошла по окружности ' +
+      'радиуса ' + kx('R') + ': это та же циклоида минус ' + kx('(R\\varphi;\\ R)') + '. ' +
+      'Циклоида уезжает вместе с дорогой — она никуда не делась, её просто ' +
+      'записывают теперь иначе.',
+    'Оси привинчены к самому ободу. Запись самая короткая из возможных, ' +
+      kx('(0;\\ -R)') + ' при любом ' + kx('\\varphi') + ', и она же запрещена: такие оси ' +
+      'и едут, и поворачиваются со временем, а покомпонентная производная требует, ' +
+      'чтобы направления осей от времени не зависели. Циклоида здесь крутится ' +
+      'вокруг колеса: для этого наблюдателя движется дорога, а не он.'
+  ];
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Оси:">
+          ${NABORY.map(function (n, i) { return html`
+            <${C.Btn} key=${n.korotko} active=${ui.nabor === i}
+                      onClick=${function(){ vzyat(i); }}>${n.korotko}<//>`; })}
+        <//>
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+        <//>
+        <${C.Slider} label="Угол:" min=${0} max=${PHI_MAX} step=${0.01}
+                     value=${ui.phi} onChange=${vesti}
+                     display=${num(ui.phi / TAU, 2) + ' оборота'} />
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova[ui.nabor]} />
+    </div>`;
+}
+
+C.mount(Obod);
+</script>
+</body>
+</html>

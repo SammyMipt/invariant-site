@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Эллипс или розетка</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+<style>
+/* Местные правила, как у «дрожания с дрейфом» и «ракеты»: demo.css общий,
+   и сборке одной демки он закрыт.
+
+   KaTeX объявляет .katex кеглем 1,21em с высотой строки 1,2, и кнопки
+   рейки с формулой выходили на 5 px выше текстовых. Формула в кнопке
+   стоит на базовой линии текста и строку не раздвигает: высоту задаёт
+   сама кнопка, и все кнопки рейки выходят ровно по 34 px (на телефоне
+   по 27,6). Кегль формулы прежний. */
+.btn .katex { line-height: 0; }
+
+/* Сцена держит пропорцию кадра W × HGT = 1000 × 440 (числа обязаны
+   совпадать с кодом), ведёт высота. Потолок высоты по ширине экрана
+   нужен телефону: без него обёртка вытягивается в столб, канва рисует
+   кадр посередине, а слой формул в процентах от столба съезжает с кадра.
+   Раньше это был инлайн-стиль из JS, что правило 3 контракта запрещает. */
+.stage-wrap.okv-kadr {
+  aspect-ratio: 1000 / 440;
+  flex: 0 1 auto;
+  min-height: 0;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  align-self: center;
+  max-height: 44vw;
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-05/">&larr; Неделя 05</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=obratnyj-kvadrat"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `chto-daet-obratnyj-kvadrat` (бриф briefs/demki_nedelya05.md,
+   № 4; рамка lekciya05_ramka.md §6, п. 3). Последний шаг второго акта:
+   для любой силы к центру с модулем от расстояния законы сохранения дают
+   плоскую орбиту, равные площади и кольцо между двумя окружностями, а
+   эллипс с центром силы в фокусе даёт только обратный квадрат.
+
+   ЕДИНИЦЫ. Безразмерные, масса точки 1, коэффициент силы 1: ускорение
+   a = −r̂ / rⁿ, у упругой силы a = −r. Круговая скорость на r = 1 при любом
+   законе равна 1 (v²/r = 1/rⁿ при r = 1), и старт по брифу один на все
+   законы: r = 1, скорость по касательной, по умолчанию 0,9 круговой.
+   Потенциальная энергия: −1/((n − 1) rⁿ⁻¹) при n > 1, ноль на
+   бесконечности, как в главе у тяготения; при n = 1 это ln r, у которого
+   нуля на бесконечности нет, и отсчёт идёт от r = 1; у упругой силы r²/2.
+
+   ЧТО СЧИТАЕТСЯ. Орбита интегрируется скоростной схемой Верле: полшага
+   скорости, шаг положения, полшага скорости. Каждый толчок скорости
+   направлен вдоль радиус-вектора, поэтому момент L = x v_y − y v_x он не
+   меняет, а шаг положения вдоль старой скорости не меняет его тоже: момент
+   держится до ошибки округления при любом шаге, 10⁻¹⁴. Шаг переменный,
+   h = η·min(r/v, √(r/a)), η = 0,0005·√(K₀/K) (множитель не меньше 1/4 на
+   орбите, 1/40 при падении): около 13 000 шагов на оборот при r ≈ 1 и
+   мельче у центра, куда при n близком к трём точка подходит в десятки
+   раз ближе. Проверка прогоном __demoProgon, десять оборотов, без
+   предела по времени (30.09); числа ниже отнесены к |E₀|. При скорости
+   0,9 круговой энергия в апоцентрах отличается от начальной не больше
+   чем на 3·10⁻¹⁰, а наибольшее отклонение за прогон при n ≤ 2,5 во всём
+   диапазоне скоростей 3,6·10⁻⁷ (n = 2,5 и 1,1 круговой). Хуже всего
+   связанные орбиты с энергией около нуля: n от 2,65 до 2,9, скорость
+   выше круговой, E₀ около −10⁻³, дальняя точка на r от 11 до 38. Там
+   наибольшее отклонение 2,0·10⁻⁵ (n = 2,65 и 1,1 круговой, E₀ =
+   −0,00106), в апоцентрах до 1,7·10⁻⁵ (n = 2,88 и 1,03), то есть около
+   2·10⁻⁸ в абсолютных единицах. Отличие одно и то же после трёх, десяти
+   и тридцати оборотов: это колебание схемы, а не уход. Самый долгий
+   кадр 33 мс, при n = 2,9 и 0,85 круговой на проходе перицентра.
+
+   ПЕРИЦЕНТРЫ. Ближняя и дальняя точки находятся по смене знака радиальной
+   скорости v_r = (r·v)/r между двумя шагами; угол и положение в этот
+   момент берутся линейной интерполяцией по v_r. Угол φ набирается по
+   шагам без скачков через 2π. Измеряются два угла: Φ, на который радиус-
+   вектор поворачивается от перицентра до апоцентра (или обратно), и
+   поворот перицентра, угол между соседними перицентрами минус 360°,
+   то есть 2Φ − 360°. У упругой силы перицентров за оборот два, на
+   концах малой оси, и решение повторяется по углу через π; её поворот
+   меряется через один перицентр, 4Φ − 360°, и у замкнутого эллипса он
+   нулевой. От соседнего перицентра вышло бы −180° у орбиты, которая не
+   поворачивается.
+
+   ТЕОРИЯ. Для почти круговой орбиты малое отклонение радиуса колеблется
+   с частотой κ, κ² = U''_эфф на дне, и при силе 1/rⁿ κ/ω = √(3 − n), где
+   ω угловая скорость на окружности. От перицентра до апоцентра полколебания,
+   Φ = π/√(3 − n): при n = 1 это 127,28°, при n = 2 ровно 180°, при
+   n = 2,5 это 254,56°; у упругой силы n = −1 и Φ = 90°. При n = 2 и у
+   упругой силы Φ не зависит от вытянутости орбиты; при других n
+   зависит, и формула верна тем точнее, чем ближе скорость запуска к
+   круговой. При скорости 0,9 круговой модель даёт 127,17° при n = 1 и
+   256,80° при n = 2,5, при 0,99 круговой 127,28° и 254,59°.
+
+   КОЛЬЦО. Радиусы кольца находятся из законов сохранения, а не по следу:
+   корни уравнения U_эфф(r) = E, U_эфф = L²/2r² + U(r), делением отрезка
+   пополам. След обязан лечь в это кольцо, и ближайшее и дальнейшее
+   расстояния по следу сверяются с корнями.
+
+   n ≥ 3. Потенциальная энергия, пропорциональная −1/rⁿ⁻¹, уходит вниз к
+   центру не медленнее, чем растёт барьер L²/2r² (сила 1/rⁿ растёт не
+   медленнее центробежного члена L²/r³), и минимума у эффективной
+   энергии нет. С r = 1
+   без радиальной скорости точка при скорости меньше круговой падает на
+   центр, при большей уходит, при ровно круговой держится на окружности,
+   пока ошибка счёта не столкнёт её. При n = 3 падение считается точно:
+   ṙ² = (1 − L²)(1/r² − 1), время от r = 1 до r равно √(1 − r²)/√(1 − L²),
+   при L = 0,9 до r = 0,015 это 2,294, а угол
+   L/√(1 − L²)·ln((1 + √(1 − r²))/r) = 10,10 рад, 1,61 оборота. На
+   расстоянии 0,015 точка считается упавшей.
+
+   Меркурий цифрами не рисуется: 43″ за век на сцене не видны. */
+
+var ETA = 0.0005;                  /* доля местного времени на шаг */
+var SKOROST = 2.5;                 /* единиц времени модели в секунду показа */
+/* Темп показа. Связанные орбиты с энергией около нуля (n больше 2,6 и
+   скорость выше круговой) обходятся в десятки и сотни раз дольше
+   эллипса: при n = 2,88 и 1,03 круговой оборот при темпе SKOROST шёл бы
+   две с половиной минуты, при n = 2,65 и 1,1 дальняя точка на r = 38 при
+   поле зрения 8, и один дальний заход почти семь минут с пустой сценой.
+   Поэтому темп берётся на прогон: видимая часть одного радиального
+   колебания, от ближней точки до края сцены и обратно, идёт CEL секунд,
+   но не медленнее SKOROST (функция temp ниже). Пока точка за
+   краем сцены, время идёт ещё в USKOR раз быстрее. Шаг схемы от этого не
+   меняется, меняется только, сколько модельного времени идёт на кадр.
+   За краем значит дальше VIDNO·Rvid по x или по y: сцена обрезана на
+   1,1 поля зрения, и запас на радиус точки со свечением. */
+var CEL = 5, USKOR = 100, VIDNO = 1.2;
+var R_PAD = 0.015;                 /* ближе к центру точка считается упавшей */
+var N_MIN = 1, N_MAX = 2.9, N_SNAP = 0.04;
+var N3_MIN = 3, N3_MAX = 4;
+var V_MIN = 0.85, V_MAX = 1.1, V_NACH = 0.9;
+/* У упругой силы при 0,9 круговой эллипс с полуосями 1 и 0,9 почти не
+   отличить от окружности, и ей ползунок разрешает скорость до 0,5
+   круговой. У степеней предел 0,85: при n = 2,9 и меньшей скорости
+   перицентр уходит ближе 0,02 к центру, внутрь точки на сцене. */
+var V_MIN_UPR = 0.5;
+function vMin(rezhim) { return rezhim === 'uprugaya' ? V_MIN_UPR : V_MIN; }
+var OBOROTOV_V_SLEDE = 10;
+var TWO_PI = 2 * Math.PI, GRAD = 180 / Math.PI;
+
+/* Показатель степени: у упругой силы F ∝ r, то есть n = −1. */
+function pokazatel(s) { return s.rezhim === 'uprugaya' ? -1 : s.n; }
+
+/* Поле в точке (x, y) на расстоянии r: пишет ускорение в s.ax, s.ay и
+   возвращает потенциальную энергию. Степень считается одна на шаг:
+   f = r^(−n−1), ускорение −f·r, энергия −f·r²/(n − 1). */
+function pole(s, x, y, r) {
+  if (s.rezhim === 'uprugaya') { s.ax = -x; s.ay = -y; return r * r / 2; }
+  var f = Math.pow(r, -s.n - 1);
+  s.ax = -f * x; s.ay = -f * y;
+  return s.n === 1 ? Math.log(r) : -f * r * r / (s.n - 1);
+}
+function potencial(s, r) {
+  if (s.rezhim === 'uprugaya') return r * r / 2;
+  if (s.n === 1) return Math.log(r);
+  return -1 / ((s.n - 1) * Math.pow(r, s.n - 1));
+}
+function energiya(s) { return (s.vx * s.vx + s.vy * s.vy) / 2 + potencial(s, Math.hypot(s.x, s.y)); }
+function moment(s) { return s.x * s.vy - s.y * s.vx; }
+
+/* Теория для почти круговой орбиты, градусы; при n ≥ 3 её нет. */
+function fiTeoriya(s) { var p = pokazatel(s); return p < 3 ? 180 / Math.sqrt(3 - p) : null; }
+/* Поворот за оборот: от перицентра до следующего 2Φ, у упругой силы до
+   перицентра через один 4Φ; минус полный оборот. */
+function periodPeri(s) { return s.rezhim === 'uprugaya' ? 2 : 1; }
+function povorotTeoriya(s) { var f = fiTeoriya(s); return f == null ? null : 2 * periodPeri(s) * f - 360; }
+
+/* Кольцо из законов сохранения: корни U_эфф(r) = E. Старт r = 1 без
+   радиальной скорости, это одна из точек поворота; вторая ищется делением
+   пополам в логарифме r между дном кривой и краем. Для n ≥ 3 кольца нет. */
+function kolco(s) {
+  if (s.rezhim === 'stepen3') return null;
+  if (s.krug) return { rMin: 1, rMax: 1, finit: true };
+  var L = s.L0, E = s.E0, p = pokazatel(s);
+  function f(r) { return L * L / (2 * r * r) + potencial(s, r) - E; }
+  function delit(a, b) {
+    var fa = f(a) > 0;
+    for (var i = 0; i < 200; i++) {
+      var m = Math.sqrt(a * b);
+      if ((f(m) > 0) === fa) a = m; else b = m;
+    }
+    return Math.sqrt(a * b);
+  }
+  var rDno = Math.pow(L * L, 1 / (3 - p));      /* минимум U_эфф: L²/r³ = 1/rⁿ */
+  if (s.v0 < 1) return { rMin: delit(1e-12, rDno), rMax: 1, finit: true };
+  var R = 2;
+  while (f(R) < 0 && R < 1e6) R *= 2;
+  if (f(R) < 0) return { rMin: 1, rMax: Infinity, finit: false };
+  return { rMin: 1, rMax: delit(rDno, R), finit: true };
+}
+
+function nachalo(rezhim, n, v0) {
+  var s = {
+    rezhim: rezhim, n: n, v0: v0,
+    x: 1, y: 0, vx: 0, vy: v0, ax: 0, ay: 0, t: 0, fi: 0,
+    aps: [], fiAps: null, povorot: null, nPeri: 0, nApo: 0,
+    rMinSled: 1, rMaxSled: 1, dEmax: 0, dLmax: 0,
+    upala: false, ushla: false, tPad: null
+  };
+  s.L0 = v0; s.E0 = v0 * v0 / 2 + pole(s, 1, 0, 1);
+  s.krug = Math.abs(v0 - 1) < 1e-9;
+  s.kol = kolco(s);
+  /* Старт сам точка поворота: при скорости меньше круговой апоцентр,
+     при большей перицентр. На окружности точек поворота нет. */
+  s.startPeri = false;
+  if (!s.krug && rezhim !== 'stepen3') {
+    s.aps.push({ fi: 0, x: 1, y: 0, tip: v0 < 1 ? 'apo' : 'peri' });
+    s.startPeri = v0 > 1;
+  }
+  /* Поле зрения: кольцо целиком, а у уходящей точки три единицы. */
+  if (s.kol && s.kol.finit) s.Rvid = C.clamp(1.12 * s.kol.rMax, 1.25, 8);
+  else if (rezhim === 'stepen3' && v0 < 1) s.Rvid = 1.25;
+  else if (rezhim === 'stepen3' && s.krug) s.Rvid = 2;      /* виден срыв с окружности */
+  else s.Rvid = 3;
+  s.temp = temp(s);
+  return s;
+}
+
+function zapisatApsidu(s, a) {
+  var pred = s.aps[s.aps.length - 1];
+  s.fiAps = (a.fi - pred.fi) * GRAD;
+  if (a.tip === 'peri') {
+    for (var i = s.aps.length - 1, nazad = periodPeri(s); i >= 0; i--) {
+      if (s.aps[i].tip === 'peri' && --nazad === 0) { s.povorot = (a.fi - s.aps[i].fi - TWO_PI) * GRAD; break; }
+    }
+    s.nPeri++;
+  } else s.nApo++;
+  s.aps.push(a);
+  if (s.aps.length > 80) s.aps.shift();
+}
+
+/* Один шаг Верле, не длиннее hMax; возвращает сделанный шаг. */
+function shag(s, hMax) {
+  var x = s.x, y = s.y, vx = s.vx, vy = s.vy;
+  var r = Math.sqrt(x * x + y * y), v2 = vx * vx + vy * vy, v = Math.sqrt(v2);
+  var am = Math.sqrt(s.ax * s.ax + s.ay * s.ay);
+  /* У центра кинетическая энергия растёт в сотни раз против начальной (при
+     n = 2,9 в перицентре) или в десятки тысяч (при падении), а ошибка
+     схемы растёт вместе с ней; шаг мельчится как √(K₀/K). На орбите не
+     больше чем вчетверо: мельче проход перицентра при n = 2,9 считался бы
+     дольше кадра. При падении, которое бывает один раз, до 40 раз, и
+     энергия на показаниях стоит до самого падения. */
+  var eta = ETA * C.clamp(s.v0 / v, s.rezhim === 'stepen3' ? 1 / 40 : 1 / 4, 1);
+  var h = Math.min(hMax, eta * Math.min(r / v, Math.sqrt(r / am)));
+  var vhx = vx + h / 2 * s.ax, vhy = vy + h / 2 * s.ay;
+  var nx = x + h * vhx, ny = y + h * vhy;
+  var nr = Math.sqrt(nx * nx + ny * ny);
+  var U = pole(s, nx, ny, nr);
+  var nvx = vhx + h / 2 * s.ax, nvy = vhy + h / 2 * s.ay;
+  var dfi = Math.atan2(x * ny - y * nx, x * nx + y * ny);
+  var vr0 = (x * vx + y * vy) / r, vr1 = (nx * nvx + ny * nvy) / nr;
+  if (s.aps.length && ((vr0 > 0 && vr1 <= 0) || (vr0 < 0 && vr1 >= 0))) {
+    var f = vr0 / (vr0 - vr1);
+    zapisatApsidu(s, { fi: s.fi + f * dfi, x: x + f * (nx - x), y: y + f * (ny - y), tip: vr0 > 0 ? 'apo' : 'peri' });
+  }
+  s.x = nx; s.y = ny; s.vx = nvx; s.vy = nvy;
+  s.fi += dfi; s.t += h;
+  var dE = Math.abs((nvx * nvx + nvy * nvy) / 2 + U - s.E0), dL = Math.abs(nx * nvy - ny * nvx - s.L0);
+  if (dE > s.dEmax) s.dEmax = dE;
+  if (dL > s.dLmax) s.dLmax = dL;
+  if (nr < s.rMinSled) s.rMinSled = nr;
+  if (nr > s.rMaxSled) s.rMaxSled = nr;
+  if (s.rezhim === 'stepen3' && nr < R_PAD) { s.upala = true; s.tPad = s.t; }
+  /* уходит только незамкнутая орбита; связанная с дальней точкой за краем
+     сцены вернётся, её след просто режется краем */
+  if (nr > 1.03 * s.Rvid && vr1 > 0 && !(s.kol && s.kol.finit)) s.ushla = true;
+  return h;
+}
+function stoit(s) { return s.upala || s.ushla; }
+function zaKraem(s) { return Math.max(Math.abs(s.x), Math.abs(s.y)) > VIDNO * s.Rvid; }
+
+/* Темп прогона, единиц времени модели в секунду показа. Время видимой
+   части радиального колебания считается из законов сохранения,
+   2∫dr/|v_r| от ближней точки до min(r_max, 1,1·Rvid), с заменой
+   r = r_min + (r_max − r_min)(1 − cos θ)/2: она снимает корневые
+   особенности в точках поворота, и хватает средних точек. У окружности,
+   незамкнутой орбиты и при n ≥ 3 темп обычный. */
+function temp(s) {
+  if (!s.kol || !s.kol.finit || s.krug) return SKOROST;
+  var a = s.kol.rMin, b = s.kol.rMax, rv = Math.min(b, 1.1 * s.Rvid);
+  var thMax = rv >= b ? Math.PI : Math.acos(1 - 2 * (rv - a) / (b - a));
+  var N = 2000, dth = thMax / N, T = 0;
+  for (var i = 0; i < N; i++) {
+    var th = (i + 0.5) * dth, r = a + (b - a) * (1 - Math.cos(th)) / 2;
+    var vr2 = 2 * (s.E0 - s.L0 * s.L0 / (2 * r * r) - potencial(s, r));
+    if (vr2 > 0) T += (b - a) * Math.sin(th) / 2 / Math.sqrt(vr2) * dth;
+  }
+  return Math.max(SKOROST, 2 * T / CEL);
+}
+/* Может ли связанная орбита вообще уйти за край сцены. */
+function kolcoShireSceny(s) { return !!(s.kol && s.kol.finit && s.kol.rMax > VIDNO * s.Rvid); }
+
+/* Уход энергии относится к |E₀|; при E₀ около нуля (n = 3 на круговой
+   скорости) к начальной кинетической энергии. */
+function masshtabE(s) { return Math.abs(s.E0) > 1e-6 ? Math.abs(s.E0) : s.v0 * s.v0 / 2; }
+
+function izmereniya(s) {
+  var E = energiya(s);
+  return {
+    n: pokazatel(s), preset: s.rezhim, v0: s.v0, t: s.t, r: Math.hypot(s.x, s.y),
+    L: moment(s), E: E, E0: s.E0,
+    energyDrift: s.dEmax / masshtabE(s), Ldrift: s.dLmax,
+    apsidalMeasured: s.krug ? null : s.fiAps, apsidalTheory: fiTeoriya(s),
+    precessionMeasured: s.krug ? null : s.povorot, precessionTheory: povorotTeoriya(s),
+    revolutions: s.fi / TWO_PI, pericenters: s.nPeri + (s.startPeri ? 1 : 0),
+    rMin: s.kol ? s.kol.rMin : null, rMax: s.kol ? s.kol.rMax : null,
+    rMinSeen: s.rMinSled, rMaxSeen: s.rMaxSled,
+    fell: s.upala, escaped: s.ushla, fallTime: s.tPad
+  };
+}
+
+/* Прогон без анимации для автопроверки: заданное число оборотов (по
+   углу) или до падения, ухода, предельного времени. */
+function progon(opt) {
+  var rezhim = opt.preset || (opt.n >= 3 ? 'stepen3' : 'stepen');
+  var s = nachalo(rezhim, opt.n == null ? 2 : opt.n, opt.v0 == null ? V_NACH : opt.v0);
+  var ob = opt.turns || 10, tMax = opt.tMax || 2000;
+  var eApo = [];
+  var nApo = 0;
+  while (s.fi < ob * TWO_PI && !stoit(s) && s.t < tMax) {
+    shag(s, Infinity);
+    if (s.nApo !== nApo) { nApo = s.nApo; eApo.push(energiya(s)); }
+  }
+  var q = izmereniya(s);
+  q.energyDriftApo = eApo.length ? Math.abs(eApo[eApo.length - 1] - s.E0) / masshtabE(s) : null;
+  return q;
+}
+
+/* Русская запятая и настоящий минус; крохи печатаются нулём. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function kx(tex) {
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+/* Число для KaTeX: запятая в фигурных скобках, чтобы не было пробела. */
+function tik(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', '{,}');
+}
+/* Закон силы в строке состояния: 1/r при n = 1, показатель без
+   хвостовых нулей (2,5, а не 2,50). */
+function stepenTex(p) {
+  if (p === 1) return '1/r';
+  return '1/r^{' + String(Math.round(p * 100) / 100).replace('.', '{,}') + '}';
+}
+function razA(k) { var d = k % 10, dd = k % 100; return d >= 2 && d <= 4 && (dd < 12 || dd > 14) ? 'раза' : 'раз'; }
+function polnyhOborotov(k) {
+  return ['', 'один полный оборот', 'два полных оборота', 'три полных оборота', 'четыре полных оборота'][k] ||
+    k + ' полных оборотов';
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева плоскость орбиты: центр силы, кольцо из законов сохранения
+   (закрашено бледно, края пунктиром), след за последние десять оборотов,
+   перицентры охряными точками и лучи к двум последним: у обратного
+   квадрата лучи совпадают, у розетки расходятся на поворот перицентра.
+   При n = 2 кружком отмечен второй фокус эллипса. Справа показания;
+   формулы под теоретическими числами набраны KaTeX поверх канвы. */
+
+var W = 1000, HGT = 440;
+var CX = 230, CY = 220, RPX = 200;          /* центр силы на канве и радиус поля зрения */
+var CV = '#4db6c6', CP = '#e08a52', CL = '#a6c35a';
+var KOL1 = 720, KOL2 = 965;                 /* правые края столбцов показаний */
+var RYAD = [40, 128, 216, 318];
+
+function ObratnyjKvadrat() {
+  var st = useRef(null);
+  if (!st.current) st.current = { s: nachalo('stepen', 2, V_NACH), idet: true, sled: [], ver: 0 };
+  var S = st.current;
+  var pair = useState({ rezhim: 'stepen', n: 2, v0: V_NACH, idet: true, ver: 0 });
+  var ui = pair[0], setUi = pair[1];
+
+  function pokazaniya() { window.__demoState = izmereniya(S.s); }
+  function obnovit() {
+    S.ver++;
+    setUi({ rezhim: S.s.rezhim, n: S.s.n, v0: S.s.v0, idet: S.idet, ver: S.ver });
+    pokazaniya();
+  }
+  function nachat(rezhim, n, v0) {
+    S.s = nachalo(rezhim, n, v0);
+    S.sled = [[1, 0, 0]];
+    S.idet = true;
+    obnovit();
+  }
+  if (!S.sled.length) S.sled.push([1, 0, 0]);
+
+  function step(dt) {
+    var s = S.s;
+    if (!S.idet || stoit(s)) return;
+    var T = dt * s.temp, apsid = s.nPeri + s.nApo;
+    var shagSled2 = Math.pow(s.Rvid / 300, 2), ugolSled = 0.5 / GRAD;
+    while (T > 1e-12 && !stoit(s)) {
+      var k = zaKraem(s) ? USKOR : 1;               /* за краем сцены время быстрее */
+      T -= shag(s, T * k) / k;
+      var pt = S.sled[S.sled.length - 1], dx = s.x - pt[0], dy = s.y - pt[1];
+      if (Math.abs(s.fi - pt[2]) > ugolSled || dx * dx + dy * dy > shagSled2)
+        S.sled.push([s.x, s.y, s.fi]);
+    }
+    S.sled.push([s.x, s.y, s.fi]);
+    var predel = s.fi - OBOROTOV_V_SLEDE * TWO_PI;
+    var k = 0;
+    while (k < S.sled.length - 2 && S.sled[k][2] < predel) k++;
+    if (k) S.sled.splice(0, k);
+    if (S.sled.length > 30000) S.sled.splice(0, S.sled.length - 30000);
+    pokazaniya();
+    /* строка под сценой пересчитывается, когда появилось новое измерение
+       или точка упала или ушла */
+    if (s.nPeri + s.nApo !== apsid || stoit(s)) obnovit();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted, mut = 'rgb(' + muted + ')';
+    var s = S.s, i, sc = RPX / s.Rvid;
+    function X(x) { return CX + x * sc; }
+    function Y(y) { return CY - y * sc; }
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(CX - RPX - 20, 0, 2 * RPX + 40, HGT); ctx.clip();
+
+    /* кольцо из законов сохранения */
+    if (s.kol && s.kol.finit && !s.krug) {
+      ctx.fillStyle = 'rgba(' + ink + ',.05)';
+      ctx.beginPath();
+      ctx.arc(CX, CY, s.kol.rMax * sc, 0, TWO_PI);
+      ctx.arc(CX, CY, s.kol.rMin * sc, 0, TWO_PI, true);
+      ctx.fill('evenodd');
+      ctx.setLineDash([5, 6]); ctx.strokeStyle = 'rgba(' + muted + ',.55)'; ctx.lineWidth = 1.2;
+      [s.kol.rMin, s.kol.rMax].forEach(function (R) { ctx.beginPath(); ctx.arc(CX, CY, R * sc, 0, TWO_PI); ctx.stroke(); });
+      ctx.setLineDash([]);
+    }
+
+    /* след */
+    if (S.sled.length > 1) {
+      ctx.strokeStyle = CV; ctx.globalAlpha = 0.85; ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (i = 0; i < S.sled.length; i++) {
+        var px = X(S.sled[i][0]), py = Y(S.sled[i][1]);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.lineTo(X(s.x), Y(s.y));
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+
+    /* перицентры за время следа и лучи к двум последним */
+    var peri = s.aps.filter(function (a) { return a.tip === 'peri' && a.fi >= S.sled[0][2] - 1e-9; });
+    var posl = peri.slice(-2);
+    ctx.setLineDash([4, 5]); ctx.strokeStyle = 'rgba(224,138,82,.6)'; ctx.lineWidth = 1.4;
+    posl.forEach(function (a) {
+      var ra = Math.hypot(a.x, a.y), ext = (s.kol && s.kol.finit ? s.kol.rMax : s.Rvid) / ra;
+      ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(X(a.x * ext), Y(a.y * ext)); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+    ctx.fillStyle = CP;
+    peri.forEach(function (a, j) {
+      ctx.beginPath(); ctx.arc(X(a.x), Y(a.y), j === peri.length - 1 ? 6 : 4.5, 0, TWO_PI); ctx.fill();
+    });
+
+    /* второй фокус эллипса при n = 2: F₂ = P + A по последним перицентру и
+       апоцентру (центр эллипса посередине между ними) */
+    var fokus = null;
+    if (s.rezhim === 'stepen' && s.n === 2 && !s.krug && s.kol.finit) {
+      var P = null, A = null;
+      for (i = s.aps.length - 1; i >= 0 && !(P && A); i--) {
+        if (s.aps[i].tip === 'peri' && !P) P = s.aps[i];
+        if (s.aps[i].tip === 'apo' && !A) A = s.aps[i];
+      }
+      if (P && A) fokus = [P.x + A.x, P.y + A.y];
+    }
+    if (fokus) {
+      ctx.strokeStyle = 'rgb(' + ink + ')'; ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.arc(X(fokus[0]), Y(fokus[1]), 5.5, 0, TWO_PI); ctx.stroke();
+      C.label(ctx, X(fokus[0]), Y(fokus[1]) + 28, 'второй фокус', 17, mut);
+    }
+
+    /* центр силы */
+    C.glow(ctx, CX, CY, 16, ink, 0.35);
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(CX, CY, 5, 0, TWO_PI); ctx.fill();
+    /* подпись центра, только если она помещается внутри кольца: у розетки
+       с близким перицентром она легла бы на след */
+    var vlevo = !fokus || fokus[0] >= 0;
+    if (s.rezhim === 'stepen3' || (s.kol && s.kol.rMin * sc > 105))
+      C.label(ctx, CX + (vlevo ? -12 : 12), CY - 14, 'центр силы', 17, mut, vlevo ? 'right' : 'left');
+
+    /* точка */
+    if (!s.upala) {
+      C.glow(ctx, X(s.x), Y(s.y), 20, '77,182,198', 0.5);
+      ctx.fillStyle = 'rgb(' + ink + ')';
+      ctx.beginPath(); ctx.arc(X(s.x), Y(s.y), 7, 0, TWO_PI); ctx.fill();
+    }
+    ctx.restore();
+
+    /* показания */
+    var q = izmereniya(s), p = pokazatel(s), ink1 = 'rgb(' + ink + ')';
+    var ft = fiTeoriya(s), pt2 = povorotTeoriya(s);
+    C.readout(ctx, KOL1, RYAD[0], 'ПОКАЗАТЕЛЬ СТЕПЕНИ', s.rezhim === 'uprugaya' ? '−1' : num(p, 2), ink1);
+    C.readout(ctx, KOL2, RYAD[0], 'ОБОРОТОВ', String(Math.max(0, Math.floor(q.revolutions + 1e-9))), ink1);
+    C.readout(ctx, KOL1, RYAD[1], 'МОМЕНТ ИМПУЛЬСА', num(q.L, 4), CL);
+    C.readout(ctx, KOL2, RYAD[1], 'ЭНЕРГИЯ', num(q.E, 4), CV);
+    C.readout(ctx, KOL1, RYAD[2], 'ОТ ПЕРИЦЕНТРА ДО АПОЦЕНТРА', q.apsidalMeasured == null ? '—' : num(q.apsidalMeasured, 2) + '°', CP);
+    C.readout(ctx, KOL2, RYAD[2], 'ПО ФОРМУЛЕ', ft == null ? '—' : num(ft, 2) + '°', ink1);
+    C.readout(ctx, KOL1, RYAD[3], 'ПОВОРОТ ПЕРИЦЕНТРА', q.precessionMeasured == null ? '—' : num(q.precessionMeasured, 2) + '°', CP);
+    C.readout(ctx, KOL2, RYAD[3], 'ПО ФОРМУЛЕ', pt2 == null ? '—' : num(pt2, 2) + '°', ink1);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+  window.__demoProgon = progon;
+
+  function vybrat(rezhim) {
+    var n = rezhim === 'stepen3' ? N3_MIN : rezhim === 'stepen' ? (S.s.rezhim === 'stepen' ? S.s.n : 2) : S.s.n;
+    nachat(rezhim, n, C.clamp(S.s.v0, vMin(rezhim), V_MAX));
+  }
+  function pokaz(v) {
+    v = Math.round(v * 100) / 100;
+    if (S.s.rezhim === 'stepen') {
+      v = C.clamp(v, N_MIN, N_MAX);
+      /* защёлка на обратном квадрате, окно от 1,96 до 2,04 включительно;
+         запас 1e-9 нужен двоичной арифметике: |1,96 − 2| выходит чуть
+         больше 0,04 */
+      if (Math.abs(v - 2) <= N_SNAP + 1e-9) v = 2;
+    } else v = C.clamp(v, N3_MIN, N3_MAX);
+    nachat(S.s.rezhim, v, S.s.v0);
+  }
+  function skorost(v) { nachat(S.s.rezhim, S.s.n, C.clamp(Math.round(v * 100) / 100, vMin(S.s.rezhim), V_MAX)); }
+  function pauza() { S.idet = !S.idet; obnovit(); }
+  function sbros() { nachat(S.s.rezhim, S.s.n, S.s.v0); }
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var s = S.s, q = izmereniya(s), p = pokazatel(s);
+    var ugol = function (v) { return A(num(v, 2) + '°'); };
+    /* ускоренный темп называется словами: читатель видит, что точка
+       бежит быстрее, чем на эллипсе, и должен знать почему */
+    var vo = Math.round(s.temp / SKOROST);
+    var daleko = (vo >= 2 ? ' Такая орбита обходится долго, и время на ней показано в ' + vo + ' ' + razA(vo) + ' быстрее обычного.' : '') +
+      (kolcoShireSceny(s) ? ' Дальний край кольца лежит за краем сцены, и там время идёт ещё в сто раз быстрее.' : '');
+    if (s.rezhim === 'uprugaya') {
+      var upr = 'Упругая сила растёт пропорционально расстоянию, это показатель ' + kx('n = -1') + '. ';
+      if (s.krug)
+        return upr + 'Скорость запуска равна круговой, и точка идёт по окружности радиуса 1: ближней и дальней точки у неё нет, и поворачиваться нечему. Сдвиньте скорость, и появится эллипс.';
+      return upr + 'От перицентра до апоцентра радиус-вектор поворачивается на ' + (q.apsidalMeasured == null ? kx('90^\\circ') : ugol(q.apsidalMeasured)) +
+        ', и перицентров за оборот два, на концах малой оси. Поэтому поворот перицентра меряется через один, за полный оборот, и он нулевой: орбита замкнута. ' +
+        'Это тоже эллипс, но центр силы сидит в его центре, а не в фокусе.';
+    }
+    if (s.rezhim === 'stepen3') {
+      var baza = 'При ' + kx('n \\geq 3') + ' потенциальная энергия, пропорциональная ' + kx('-1/r^{n-1}') +
+        ', уходит вниз к центру не медленнее, чем растёт центробежный барьер ' + kx('l^2/2r^2') +
+        '. Минимума у эффективной энергии нет, и устойчивой окружности тоже. ';
+      var otkuda = s.krug ? 'Ошибка счёта в последних знаках выросла и сорвала точку с окружности, и она по спирали '
+        : s.v0 < 1 ? 'Скорость меньше круговой, и точка по спирали ' : 'Скорость больше круговой, и точка по спирали ';
+      if (s.upala)
+        return baza + otkuda + 'упала на центр за время ' + kx('t = ' + tik(s.tPad, 2)) +
+          ', сделав ' + A(num(q.revolutions, 1) + ' оборота') + '. Момент стоит, поэтому у центра она вращается всё быстрее.';
+      if (s.ushla) return baza + otkuda + 'ушла за край сцены.';
+      if (s.krug)
+        return baza + (s.n === 3
+          ? 'При ' + kx('n = 3') + ' и круговой скорости радиальной силы нет на любом расстоянии: точка держится на окружности, но любой толчок к центру или от него уже ничто не остановит.'
+          : 'Скорость ровно круговая, и точка держится на окружности, пока ошибка счёта в последних знаках не вырастет и не сорвёт её к центру или наружу.');
+      return baza + otkuda + (s.v0 < 1 ? 'падает на центр.' : 'уходит.');
+    }
+    var sila = 'Сила убывает как ' + kx(stepenTex(p)) + '. ';
+    if (s.krug)
+      return sila + 'Скорость запуска равна круговой, и точка идёт по окружности радиуса 1: ближней и дальней точки у неё нет, и поворачиваться нечему. Сдвиньте скорость, и появится кольцо.';
+    if (!s.kol.finit)
+      return sila + 'Энергия ' + kx('E = ' + tik(s.E0, 3)) + ' не меньше нуля, и такая сила точку не удерживает: ' +
+        (s.ushla ? 'она ушла за край сцены.' : 'точка уходит на бесконечность.') + ' Уменьшите скорость запуска.';
+    if (p === 2)
+      return sila + 'От перицентра до апоцентра радиус-вектор поворачивается ровно на ' + kx('180^\\circ') +
+        ', следующий перицентр приходится на то же место, и все обороты ложатся на один эллипс. Центр силы сидит в его фокусе, второй фокус отмечен кружком.';
+    var kol = 'Законы сохранения держат точку в кольце от ' + kx('r = ' + tik(s.kol.rMin, 2)) + ' до ' + kx(tik(s.kol.rMax, 2)) + ', ';
+    /* Поворот меряется от перицентра до перицентра. При скорости больше
+       круговой старт сам перицентр, и хватает первого возвращения в него;
+       при меньшей старт в апоцентре, и нужны два прохода. В оборотах это
+       не выразить: при n около трёх до второго перицентра бывает и восемь. */
+    if (q.apsidalMeasured == null || q.precessionMeasured == null)
+      return sila + kol + 'а на сколько от раза к разу поворачивается перицентр, ' +
+        (s.v0 > 1 ? 'покажет первое возвращение точки в него.' : 'покажут первые два прохода через него.') + daleko;
+    /* Поворот больше 360° (при n около трёх) печатается честным числом, а
+       на сцене виден только остаток от полных оборотов: оба названы. */
+    var pov = q.precessionMeasured, modul = Math.abs(pov), celyh = Math.floor(modul / 360);
+    var tekst = sila + kol + 'но от перицентра до апоцентра радиус-вектор поворачивается на ' + ugol(q.apsidalMeasured) +
+      ', а не на ' + kx('180^\\circ') + '. Каждый следующий перицентр ' + (pov > 0 ? 'уходит вперёд' : 'отстаёт') +
+      ' на ' + ugol(modul) +
+      (celyh ? '. Это ' + polnyhOborotov(celyh) + ' и ещё ' + ugol(modul - 360 * celyh) +
+        ', и на сцене виден только остаток. Орбита становится розеткой.' : ', и орбита становится розеткой.');
+    if (Math.abs(q.apsidalMeasured - q.apsidalTheory) > 0.5)
+      tekst += ' Формула ' + kx('\\pi/\\sqrt{3-n}') + ' написана для почти круговой орбиты: чем ближе скорость запуска к круговой, тем точнее совпадение.';
+    return tekst + daleko;
+  }
+
+  /* подписи-формулы под теоретическими показаниями; у упругой силы поворот
+     меряется через один перицентр, и в формуле 4π вместо 2π */
+  var podpisi = ui.rezhim === 'stepen3' ? [] : [
+    { x: KOL2, y: RYAD[2] + 64, tex: '\\pi/\\sqrt{3-n}' },
+    { x: KOL2, y: RYAD[3] + 64, tex: (ui.rezhim === 'uprugaya' ? '4' : '2') + '\\pi/\\sqrt{3-n} - 2\\pi' }
+  ];
+  function spanAt(sp, i) {
+    return html`<span key=${i} class="ax-right"
+      style=${{ left: (sp.x / W * 100) + '%', top: (sp.y / HGT * 100) + '%' }}
+      dangerouslySetInnerHTML=${{ __html: kx(sp.tex) }}></span>`;
+  }
+  function tex(t) { return html`<span dangerouslySetInnerHTML=${{ __html: kx(t) }}></span>`; }
+
+  var stepen = ui.rezhim !== 'uprugaya';
+  var nMin = ui.rezhim === 'stepen3' ? N3_MIN : N_MIN, nMax = ui.rezhim === 'stepen3' ? N3_MAX : N_MAX;
+  return html`
+    <div class="demo">
+      <div class="controls">
+        ${/* Рейка обязана влезать в одну строку при ширине около 1200: подписи
+              ползунков сняты, их значения сами говорят, что задают. */''}
+        <${C.Group} label="Сила:">
+          <${C.Btn} active=${ui.rezhim === 'stepen'} onClick=${function () { vybrat('stepen'); }}>${tex('n < 3')}<//>
+          <${C.Btn} active=${ui.rezhim === 'stepen3'} onClick=${function () { vybrat('stepen3'); }}>${tex('n \\geq 3')}<//>
+          <${C.Btn} active=${ui.rezhim === 'uprugaya'} onClick=${function () { vybrat('uprugaya'); }}>упругая<//>
+        <//>
+        ${stepen ? html`
+          <${C.Slider} min=${nMin} max=${nMax} step=${0.01} value=${ui.n}
+                       onChange=${pokaz} display=${tex('n = ' + tik(ui.n, 2))} />` : null}
+        <${C.Slider} min=${vMin(ui.rezhim)} max=${V_MAX} step=${0.01} value=${ui.v0}
+                     onChange=${skorost} display=${tex(tik(ui.v0, 2) + '\\,v_{\\text{круг}}')} />
+        <${C.Group}>
+          <${C.Btn} onClick=${pauza}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      ${/* Пропорцию сцены держит класс okv-kadr из стиля в голове файла. */''}
+      <div class="stage-wrap okv-kadr">
+        <canvas class="stage" ref=${ref}></canvas>
+        <div class="ax is-on">${podpisi.map(spanAt)}</div>
+      </div>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(ObratnyjKvadrat);
+</script>
+</body>
+</html>

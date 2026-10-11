@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пушка Ньютона</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-05/">&larr; Неделя 05</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=pushka-nyutona"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `kosmicheskie-skorosti` (бриф briefs/demki_nedelya05.md, № 6).
+   Постановка из «Системы мира» Ньютона: пушка на вершине горы стреляет
+   горизонтально, и чем быстрее ядро, тем дальше оно падает, пока
+   поверхность не начнёт загибаться из-под него так же быстро, как оно к
+   ней падает. Числа главы: GM = 3,986·10¹⁴ м³/с², R = 6371 км, атмосферы
+   нет. У самой поверхности v₁ = √(GM/R) = 7,91 км/с, v₂ = √(2GM/R) =
+   11,19 км/с (в главе 11,2), период низкой орбиты 2πR/v₁ = 84,3 мин. С
+   вершины горы высотой h пороги круговая v_кр = √(GM/(R+h)) и скорость
+   ухода v_ух = √(2GM/(R+h)): глава кончается тем, что обе скорости
+   убывают как 1/√r. Буквы v₁ и v₂ глава отдаёт скоростям у самой
+   поверхности, поэтому на экране они стоят только при h = 0, а пороги
+   для вершины горы подписаны v_кр и v_ух (v_кр так пишет и задача
+   zadacha-uhod-s-orbity).
+
+   ЧТО СЧИТАЕТСЯ. На ядро действует одна сила, −GM·r/r³ на килограмм, и
+   путь интегрируется скоростным Верле: полшага скорости, шаг положения,
+   полшага скорости. Каждый полушаг скорости идёт вдоль радиуса, поэтому
+   момент r×v от шага к шагу не меняется до ошибки округления (10⁻¹⁴).
+   Шаг переменный: доля η местного динамического времени √(r³/GM). У
+   поверхности это время 805 с, при η = 0,001 шаг 0,8 с и 6284 шага на
+   низкий оборот; вдали шаг растёт вместе с временем, за которое там что-то
+   меняется, и эллипс с апогеем 65 тысяч километров стоит 7644 шага.
+   Ошибка энергии Верле набирается в перигее и растёт как η²/(1 − e), где
+   e эксцентриситет; поэтому для вытянутых эллипсов η уменьшается как
+   √((1 − e)/0,02), и ошибка держится на одном уровне при любом e.
+   Эксцентриситет для выбора шага берётся из энергии и момента на старте,
+   в сам счёт он не входит. Проверено прогоном __demoProgon на десять
+   оборотов (числа в отчёте): уход энергии от 3·10⁻¹³ у окружности до
+   2,5·10⁻⁵ у самого вытянутого эллипса, какой даёт ползунок при любой
+   высоте горы (прочёсаны все 101 высота), момент 10⁻¹³.
+
+   ТИП ОРБИТЫ по знаку энергии на килограмм ℰ = v²/2 − GM/r на старте:
+   ℰ < 0 орбита замкнута, ℰ = 0 парабола, ℰ > 0 гипербола; парабола
+   ставится при |ℰ| < 10⁻⁶·GM/r₀, это 60 Дж/кг, и попадает в неё только
+   кнопка «вторая», ползунок с шагом 10 м/с меняет ℰ на 10⁵ Дж/кг. Упало
+   ли ядро и окружность ли это, говорит сам счёт: удар отмечается, когда
+   радиус стал меньше R (точка и время удара уточняются внутри шага),
+   окружность, когда радиус за оборот гулял меньше чем на 10⁻⁴ своей
+   величины. Период есть время, за которое радиус-вектор заметает угол 2π;
+   наибольшее удаление есть наибольший радиус на счёте. Рядом для сверки
+   лежат формулы Кеплера, 2π√(a³/GM) и 2a − r₀ с a = −GM/2ℰ.
+
+   Между скоростью касания √(2GM·R/(r₀(R + r₀))), r₀ = R + h, и круговой
+   ядро тоже не падает: вершина горы становится дальней точкой эллипса, а
+   ближняя проходит над землёй. При h = 200 км это полоса от 7,73 до
+   7,79 км/с; на шкале скоростей охра кончается у касания, а не у v₁.
+
+   ДОПУСКИ. Пока ядро не обошло Землю, удар отмечается при r < R − 1 мм.
+   У самой поверхности (h = 0) ядро на первой космической или быстрее
+   стартует из перигея, лежащего на земле, и через оборот возвращается
+   туда же; счёт Верле подводит его к земле с точностью до миллиметров
+   (замер: от 3·10⁻⁸ м у окружности до 3 мм у эллипсов). Поэтому в
+   последней десятой радиана перед замыканием оборота допуск метр. После
+   полного оборота удар не проверяется: орбита замкнута и повторяет себя,
+   и к земле её может подвести только ошибка счёта.
+
+   ГОРА нарисована в масштабе сцены, как Земля и пути ядра; преувеличена
+   сама её высота: 200 км по умолчанию, выше Эвереста в двадцать с лишним
+   раз. Настоящая гора на Земле целиком заняла бы долю пикселя и сдвинула
+   бы пороги на третьем знаке. Ширина горы в модель не входит: ядро
+   стартует с вершины, и путь, вернувшийся к пушке, склонов не задевает,
+   потому что у апогея эллипс опускается квадратично, а склон линейно.
+
+   ВРЕМЯ на экране ускорено для каждого выстрела своим множителем: падение
+   длится на экране 4 с, оборот 6 с, уход из кадра 4 с. Множитель
+   печатается в углу сцены. Прогон __demoTick идёт теми же шагами, что и
+   расчёт выстрела при нажатии «Огонь», и приходит в ту же точку удара. */
+
+var GM = 3.986e14;                 /* м³/с² */
+var R = 6.371e6;                   /* радиус Земли, м */
+var TWO_PI = 2 * Math.PI;
+var ETA0 = 1e-3, ETA_MIN = 2e-5, E_KRAJ = 0.02;
+var DOPUSK_UDAR = 1e-3;            /* м: удар при r < R − 1 мм */
+var DOPUSK_VOZVRAT = 1;            /* м: у замыкания оборота */
+var UGOL_VOZVRAT = 0.1;            /* рад до 2π, где действует метровый допуск */
+var DOPUSK_KRUG = 1e-4;            /* окружность: (r_max − r_min)/r_min */
+var DOPUSK_E = 1e-6;               /* парабола: |ℰ| < 10⁻⁶·GM/r₀ */
+var R_KADR = 6 * R;                /* замкнутый путь в кадр берётся до 6 R */
+var R_KADR_OTKR = 4 * R;           /* открытый до 4 R */
+var R_UHOD = 8 * R;                /* дальше открытый путь не ведём: ядро давно за кадром */
+var SHAGOV_MAX = 3e6;
+var DS = 0.0015;                   /* точка следа через 0,15 % текущего радиуса */
+var V_MAX = 12000, H_MAX = 1e6, H_NACH = 2e5, V_NACH = 6000;
+var EKRAN_PADENIE = 4, EKRAN_OBOROT = 6, EKRAN_UHOD = 4;   /* секунд экрана на выстрел */
+var VYSTRELOV = 6;                 /* сколько следов хранится */
+
+/* Длина вектора; Math.hypot втрое медленнее, а шагов на выстрел до сотни тысяч. */
+function dl(x, y) { return Math.sqrt(x * x + y * y); }
+function energiya(v, r0) { return v * v / 2 - GM / r0; }
+function vKrug(h) { return Math.sqrt(GM / (R + h)); }
+function vUhod(h) { return Math.sqrt(2 * GM / (R + h)); }
+/* Скорость, при которой ближняя точка эллипса ложится ровно на землю:
+   из сохранения энергии и момента между r₀ и R. */
+function vKasanie(h) { var r0 = R + h; return Math.sqrt(2 * GM * R / (r0 * (R + r0))); }
+
+/* Доля шага η: только для выбора шага, в счёт не входит. */
+function dolyaShaga(v, r0) {
+  var eps = energiya(v, r0);
+  if (eps > -DOPUSK_E * GM / r0) return ETA0;
+  var l = r0 * v;
+  var e = Math.sqrt(Math.max(0, 1 + 2 * eps * l * l / (GM * GM)));
+  return Math.max(ETA_MIN, ETA0 * Math.min(1, Math.sqrt((1 - e) / E_KRAJ)));
+}
+
+/* Состояние на срезе ствола: вершина горы сверху, выстрел вправо, то есть
+   по часовой стрелке; угол, заметённый радиус-вектором, копится со знаком. */
+function nachalo(v, h) {
+  var r0 = R + h;
+  var s = {
+    x: 0, y: r0, vx: v, vy: 0, t: 0, fi: Math.PI / 2, ugol: 0,
+    eta: dolyaShaga(v, r0), otkr: energiya(v, r0) > -DOPUSK_E * GM / r0,
+    period: null, udar: false
+  };
+  var k = -GM / (r0 * r0 * r0);
+  s.ax = k * s.x; s.ay = k * s.y;
+  return s;
+}
+
+/* Один шаг скоростного Верле; возвращает длину шага, с. */
+function shag(s) {
+  var r = dl(s.x, s.y), h = s.eta * Math.sqrt(r * r * r / GM);
+  s.vx += s.ax * h / 2; s.vy += s.ay * h / 2;
+  s.x += s.vx * h; s.y += s.vy * h;
+  var r2 = s.x * s.x + s.y * s.y, rr = Math.sqrt(r2), k = -GM / (r2 * rr);
+  s.ax = k * s.x; s.ay = k * s.y;
+  s.vx += s.ax * h / 2; s.vy += s.ay * h / 2;
+  s.t += h;
+  var fi = Math.atan2(s.y, s.x), d = fi - s.fi;
+  if (d > Math.PI) d -= TWO_PI; else if (d < -Math.PI) d += TWO_PI;
+  s.fi = fi; s.ugol += d;
+  return h;
+}
+
+/* Шаг с проверкой событий: 'udar' (ядро на земле, точка и время уточнены
+   внутри шага), 'oborot' (заметён угол 2π, период уточнён так же),
+   'ushlo' (открытая орбита дальше 8 R). Им пользуются и расчёт выстрела,
+   и живой счёт на экране: шаги у них одни и те же. */
+function shagSobytie(s) {
+  var px = s.x, py = s.y, pt = s.t, pu = s.ugol, pr = dl(px, py);
+  var h = shag(s), r = dl(s.x, s.y);
+  if (s.period == null) {
+    var dop = Math.abs(s.ugol) > TWO_PI - UGOL_VOZVRAT ? DOPUSK_VOZVRAT : DOPUSK_UDAR;
+    if (r < R - dop) {
+      var f = pr > R ? (pr - R) / (pr - r) : 0;
+      s.x = px + f * (s.x - px); s.y = py + f * (s.y - py);
+      s.t = pt + f * h; s.ugol = pu + f * (s.ugol - pu);
+      s.udar = true;
+      return 'udar';
+    }
+    if (!s.otkr && Math.abs(s.ugol) >= TWO_PI) {
+      var g = (TWO_PI - Math.abs(pu)) / (Math.abs(s.ugol) - Math.abs(pu));
+      s.period = pt + g * h;
+      return 'oborot';
+    }
+  }
+  if (s.otkr && r > R_UHOD) return 'ushlo';
+  return null;
+}
+
+/* Расчёт выстрела целиком, до удара, до замыкания оборота или до ухода.
+   Отсюда всё, что демка утверждает о выстреле, и путь для рисования. */
+function polet(v, h) {
+  var r0 = R + h, eps = energiya(v, r0);
+  var s = nachalo(v, h);
+  var L0 = s.x * s.vy - s.y * s.vx;
+  var put = [[s.x, s.y, 0]], lx = s.x, ly = s.y;
+  var box = { x0: 0, x1: 0, y0: r0, y1: r0 };
+  var rk = s.otkr ? R_KADR_OTKR : R_KADR;
+  var rMin = r0, rMax = r0, dE = 0, dL = 0, n = 0, sob = null, tKadr = null;
+  while (n < SHAGOV_MAX) {
+    sob = shagSobytie(s); n++;
+    var r = dl(s.x, s.y);
+    if (sob !== 'udar') {
+      var E = (s.vx * s.vx + s.vy * s.vy) / 2 - GM / r, L = s.x * s.vy - s.y * s.vx;
+      dE = Math.max(dE, Math.abs(E - eps));
+      if (L0 !== 0) dL = Math.max(dL, Math.abs((L - L0) / L0));
+    }
+    if (r < rMin) rMin = r;
+    if (r > rMax) rMax = r;
+    if (r <= rk) {
+      if (s.x < box.x0) box.x0 = s.x; if (s.x > box.x1) box.x1 = s.x;
+      if (s.y < box.y0) box.y0 = s.y; if (s.y > box.y1) box.y1 = s.y;
+    } else if (tKadr == null) tKadr = s.t;
+    if (sob || dl(s.x - lx, s.y - ly) > DS * r) {
+      put.push([s.x, s.y, s.t]); lx = s.x; ly = s.y;
+    }
+    if (sob) break;
+  }
+  var rez = {
+    v: v, h: h, r0: r0, eps: eps, otkr: s.otkr, udar: s.udar, sob: sob, n: n, eta: s.eta,
+    period: s.period, tKonec: s.t, tHit: s.udar ? s.t : null, tKadr: tKadr,
+    range: s.udar ? R * Math.abs(s.ugol) : null,
+    rMin: rMin, rMax: rMax, put: put, box: box,
+    /* уход энергии: к |ℰ| у замкнутых, к GM/r₀ у открытых (у параболы ℰ = 0) */
+    dE: s.otkr ? dE / (GM / r0) : dE / Math.abs(eps), dL: dL,
+    periodKepler: null, apogeeKepler: null
+  };
+  if (!s.otkr) {
+    var a = -GM / (2 * eps);
+    rez.periodKepler = TWO_PI * Math.sqrt(a * a * a / GM);
+    rez.apogeeKepler = Math.max(r0, 2 * a - r0);
+  }
+  if (s.udar) rez.type = 'fall';
+  else if (s.otkr) rez.type = Math.abs(eps) < DOPUSK_E * GM / r0 ? 'parabola' : 'hyperbola';
+  else rez.type = (rMax - rMin) / rMin < DOPUSK_KRUG ? 'circle' : 'ellipse';
+  /* у падения наибольший радиус есть сама вершина горы: это не орбита, прочерк */
+  rez.apogee = s.otkr || s.udar ? null : rMax;
+  return rez;
+}
+
+/* Прогон без экрана на несколько оборотов, для проверки ухода энергии и
+   момента: __demoProgon({ v, h, oborotov }). Удар здесь не проверяется. */
+function progon(opt) {
+  var v = opt.v, h = opt.h || 0, N = opt.oborotov || 10;
+  var r0 = R + h, s = nachalo(v, h), E0 = energiya(v, r0);
+  if (s.otkr) return { otkr: true };
+  var L0 = s.x * s.vy - s.y * s.vx;
+  var per = [], dE = 0, dL = 0, rMin = r0, rMax = r0, n = 0, tPred = 0, k = 1;
+  while (per.length < N && n < 5e7) {
+    var pu = s.ugol, pt = s.t, hh = shag(s); n++;
+    var r = dl(s.x, s.y);
+    if (r < rMin) rMin = r;
+    if (r > rMax) rMax = r;
+    var E = (s.vx * s.vx + s.vy * s.vy) / 2 - GM / r, L = s.x * s.vy - s.y * s.vx;
+    dE = Math.max(dE, Math.abs(E - E0));
+    dL = Math.max(dL, Math.abs((L - L0) / L0));
+    if (Math.abs(s.ugol) >= k * TWO_PI) {
+      var g = (k * TWO_PI - Math.abs(pu)) / (Math.abs(s.ugol) - Math.abs(pu));
+      var tk = pt + g * hh;
+      per.push(tk - tPred); tPred = tk; k++;
+    }
+  }
+  var a = -GM / (2 * E0);
+  return {
+    oborotov: per.length, periods: per, energyDrift: dE / Math.abs(E0), angMomDrift: dL,
+    rMin: rMin, rMax: rMax, steps: n, eta: s.eta, hitsGround: rMin < R - DOPUSK_VOZVRAT,
+    periodKepler: TWO_PI * Math.sqrt(a * a * a / GM), apogeeKepler: Math.max(r0, 2 * a - r0)
+  };
+}
+
+/* ── числа по-русски ── */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* Целое с пробелами по тысячам, начиная с пяти знаков: 1936, 42 164. */
+function celoe(v) {
+  var s = String(Math.round(Math.abs(v)));
+  if (s.length > 4) s = s.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return (v < 0 && Math.round(v) !== 0 ? '−' : '') + s;
+}
+function km(m) { return celoe(m / 1000); }
+function vremya(t) {
+  var m = t / 60;
+  if (m < 120) return num(m, 1) + ' мин';
+  var ch = m / 60;
+  if (ch < 48) return num(ch, 2) + ' ч';
+  var d = ch / 24;
+  if (d < 1000) return num(d, d < 100 ? 2 : 0) + ' сут';
+  return num(d / 365.25, 1) + ' года';
+}
+/* Множитель времени словами: два значащих знака, падеж по напечатанному
+   числу, а не по точному («в 840 раз», а не «в 840 раза»). */
+function mnozhitel(x) {
+  if (x < 10) return num(x, 1) + ' раза';
+  var p = Math.pow(10, Math.floor(Math.log10(x)) - 1), n = Math.round(x / p) * p;
+  return celoe(n) + ' ' + C.plural(n, 'раз', 'раза', 'раз');
+}
+function kx(tex) {
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+function tnum(v, d) { return num(v, d).replace(',', '{,}'); }
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева Земля в масштабе, сверху гора с пушкой, пути выстрелов цветом
+   исхода: охра упал, бирюза замкнутая орбита, красный ушёл. Кадр сам
+   подбирается под выстрелы: медленные падают в сотне километров от горы,
+   и Земля тогда видна дугой; быстрые обходят её, и видна она вся. Линейка
+   в углу даёт масштаб. Справа шкала скоростей с порогами для вершины горы
+   и показания: они относятся к скорости, выставленной ползунком. */
+
+var W = 1000, HGT = 440;
+var SC = { x0: 12, y0: 12, x1: 560, y1: 428 };           /* окно сцены */
+var SCX = (SC.x0 + SC.x1) / 2, SCY = (SC.y0 + SC.y1) / 2;
+var POLE = { t: 46, b: 56, l: 18, r: 18 };               /* поля кадра в пикселях: подпись горы; линейка и время */
+var MIN_W = 0.28 * R, MIN_H = 0.18 * R;                  /* меньше кадр не сжимается */
+var SK = { x0: 598, x1: 972, y: 78, hgt: 10 };           /* шкала скоростей */
+var COL = [772, 985], ROW = [196, 280, 364];             /* показания */
+var CF = '#e08a52', CB = '#4db6c6', CO = '#ff7a66';      /* упал, замкнута, ушла */
+var ZEMLYA = 'rgba(70,112,150,.30)';
+var TIPY = {
+  fall: 'падает', circle: 'окружность', ellipse: 'эллипс',
+  parabola: 'парабола', hyperbola: 'гипербола'
+};
+function cvet(rez) { return rez.udar ? CF : rez.otkr ? CO : CB; }
+function SX(v) { return SK.x0 + v / V_MAX * (SK.x1 - SK.x0); }
+
+/* Кадр: коробка в метрах вписывается в окно с полями. */
+function vpisat(b) {
+  var bw = Math.max(b.x1 - b.x0, MIN_W), bh = Math.max(b.y1 - b.y0, MIN_H);
+  var cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+  var uw = SC.x1 - SC.x0 - POLE.l - POLE.r, uh = SC.y1 - SC.y0 - POLE.t - POLE.b;
+  var s = Math.min(uw / bw, uh / bh);
+  var ux = SC.x0 + POLE.l + uw / 2, uy = SC.y0 + POLE.t + uh / 2;
+  return { x: cx - (ux - SCX) / s, y: cy + (uy - SCY) / s, s: s };
+}
+function vsyaZemlya(h) { return { x0: -R, x1: R, y0: -R, y1: R + h }; }
+
+var LINEJKI = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000,
+               100000, 200000, 500000, 1000000];             /* км */
+
+function PushkaNyutona() {
+  var st = useRef(null);
+  if (!st.current) {
+    var k0 = vpisat(vsyaZemlya(H_NACH));
+    st.current = {
+      v: V_NACH, h: H_NACH, rez: polet(V_NACH, H_NACH),
+      vystrely: [], tek: null,
+      kam: { x: k0.x, y: k0.y, s: k0.s }, kamCel: k0
+    };
+  }
+  var s = st.current;
+  var pair = useState({ v: V_NACH, h: H_NACH, n: 0 });
+  var ui = pair[0], setUi = pair[1];
+
+  function obnovit() { setUi({ v: s.v, h: s.h, n: s.vystrely.length }); pokazaniya(); }
+
+  /* Показания пишутся из шага: автопроверка двигает модель __demoTick без рендера. */
+  function pokazaniya() {
+    var rz = s.rez, p = s.tek;
+    window.__demoState = {
+      v: s.v, h: s.h, eps: rz.eps, type: rz.type, period: rz.period, apogee: rz.apogee, hit: rz.udar,
+      perigee: rz.rMin, range: rz.range, flightTime: rz.tHit,
+      vCirc: vKrug(s.h), vEsc: vUhod(s.h), vGraze: vKasanie(s.h), v1: vKrug(0), v2: vUhod(0),
+      periodKepler: rz.periodKepler, apogeeKepler: rz.apogeeKepler,
+      energyDrift: rz.dE, angMomDrift: rz.dL, eta: rz.eta, steps: rz.n,
+      shots: s.vystrely.length,
+      t: p ? p.s.t : null, r: p ? dl(p.s.x, p.s.y) : null,
+      x: p ? p.s.x : null, y: p ? p.s.y : null,
+      flying: !!(p && !p.konec), landed: p ? p.konec : null, timeScale: p ? p.temp : null
+    };
+  }
+
+  /* Кадр по всем хранимым выстрелам, а без них вся Земля. */
+  function kadr() {
+    if (!s.vystrely.length) return vpisat(vsyaZemlya(s.h));
+    var b = { x0: 0, x1: 0, y0: R, y1: R + s.h };
+    s.vystrely.forEach(function (p) {
+      var q = p.rez.box;
+      b.x0 = Math.min(b.x0, q.x0); b.x1 = Math.max(b.x1, q.x1);
+      b.y0 = Math.min(b.y0, q.y0); b.y1 = Math.max(b.y1, q.y1);
+    });
+    return vpisat(b);
+  }
+
+  function temp(rz) {
+    if (rz.udar) return Math.max(1, rz.tHit / EKRAN_PADENIE);
+    if (!rz.otkr) return rz.period / EKRAN_OBOROT;
+    return (rz.tKadr || rz.tKonec) / EKRAN_UHOD;
+  }
+
+  function ogon() {
+    if (s.tek && !s.tek.konec) s.tek.konec = 'smenen';
+    var p = { rez: s.rez, s: nachalo(s.v, s.h), budget: 0, idx: 1, konec: null, temp: temp(s.rez) };
+    s.vystrely.push(p);
+    if (s.vystrely.length > VYSTRELOV) s.vystrely.shift();
+    s.tek = p;
+    s.kamCel = kadr();
+    obnovit();
+  }
+
+  function steret() {
+    s.vystrely = []; s.tek = null; s.kamCel = kadr(); obnovit();
+  }
+
+  function step(dt) {
+    /* кадр подъезжает к цели за треть секунды */
+    var a = 1 - Math.exp(-dt / 0.3), k = s.kam, c = s.kamCel;
+    k.x += (c.x - k.x) * a; k.y += (c.y - k.y) * a;
+    k.s = Math.exp(Math.log(k.s) + (Math.log(c.s) - Math.log(k.s)) * a);
+
+    var p = s.tek;
+    if (p && !p.konec) {
+      p.budget += dt * p.temp;
+      for (var n = 0; n < 400000; n++) {
+        var r = dl(p.s.x, p.s.y);
+        var hn = p.s.eta * Math.sqrt(r * r * r / GM);
+        if (hn > p.budget) break;
+        var sob = shagSobytie(p.s);
+        p.budget -= hn;
+        if (sob === 'udar' || sob === 'ushlo') { p.konec = sob; p.budget = 0; break; }
+      }
+      var put = p.rez.put;
+      while (p.idx < put.length && put[p.idx][2] <= p.s.t) p.idx++;
+    }
+    pokazaniya();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted, mut = 'rgb(' + muted + ')';
+    var k = s.kam, i, j;
+    function X(x) { return SCX + (x - k.x) * k.s; }
+    function Y(y) { return SCY - (y - k.y) * k.s; }
+
+    /* ── окно сцены ── */
+    ctx.strokeStyle = 'rgba(' + muted + ',.28)'; ctx.lineWidth = 1.2;
+    C.roundRect(ctx, SC.x0, SC.y0, SC.x1 - SC.x0, SC.y1 - SC.y0, 10);
+    ctx.stroke();
+    ctx.save();
+    C.roundRect(ctx, SC.x0, SC.y0, SC.x1 - SC.x0, SC.y1 - SC.y0, 10);
+    ctx.clip();
+
+    /* Земля: круг в масштабе, центр силы точкой */
+    ctx.fillStyle = ZEMLYA;
+    ctx.strokeStyle = 'rgba(' + muted + ',.7)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(X(0), Y(0), R * k.s, 0, TWO_PI); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(' + ink + ',.7)';
+    ctx.beginPath(); ctx.arc(X(0), Y(0), 3, 0, TWO_PI); ctx.fill();
+
+    /* окружность через вершину горы: по ней идёт ядро на круговой скорости */
+    var h = s.h, r0 = R + h;
+    if (h > 0) {
+      ctx.save();
+      ctx.setLineDash([5, 7]); ctx.strokeStyle = 'rgba(' + muted + ',.45)'; ctx.lineWidth = 1.1;
+      ctx.beginPath(); ctx.arc(X(0), Y(0), r0 * k.s, 0, TWO_PI); ctx.stroke();
+      ctx.restore();
+    }
+
+    /* гора: в масштабе, склон под сорок пять градусов */
+    if (h > 0) {
+      var w = h / R;
+      ctx.fillStyle = 'rgba(' + ink + ',.42)';
+      ctx.strokeStyle = 'rgba(' + ink + ',.65)'; ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(X(R * Math.cos(Math.PI / 2 + w)), Y(R * Math.sin(Math.PI / 2 + w)));
+      ctx.lineTo(X(0), Y(r0));
+      ctx.lineTo(X(R * Math.cos(Math.PI / 2 - w)), Y(R * Math.sin(Math.PI / 2 - w)));
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+
+    /* Время выстрела и множитель стоят в правом нижнем углу, напротив
+       линейки. Открытые пути уходят из кадра как раз через этот угол,
+       поэтому пути под подписями вырезаны клипом. Плашка цвета фона тут не
+       годится: в витрине канва прозрачна и фон даёт страница, светлая или
+       тёмная. Выстрел с земли медленнее первой космической кончается у
+       ствола (temp = 1, время 0): печатать нечего, ни время, ни ускорение
+       в 1,0 раза. */
+    var t = s.tek, tz = null, tr = null;
+    if (t && t.temp > 1) {
+      tz = ['с выстрела ' + vremya(t.s.t), 'время ускорено в ' + mnozhitel(t.temp)];
+      ctx.font = '17px "Golos Text", system-ui, sans-serif';
+      var tw = Math.max(ctx.measureText(tz[0]).width, ctx.measureText(tz[1]).width);
+      tr = [SC.x1 - 24 - tw, SC.y1 - 56, tw + 16, 50];
+    }
+
+    /* пути: старые бледнее, текущий до того места, куда дошло ядро */
+    ctx.save();
+    if (tr) {
+      ctx.beginPath();
+      ctx.rect(SC.x0, SC.y0, SC.x1 - SC.x0, SC.y1 - SC.y0);
+      ctx.rect(tr[0], tr[1], tr[2], tr[3]);
+      ctx.clip('evenodd');
+    }
+    for (j = 0; j < s.vystrely.length; j++) {
+      var p = s.vystrely[j], put = p.rez.put, tek = p === s.tek;
+      var zhivoj = tek && !p.konec && p.s.period == null;
+      var nn = zhivoj ? p.idx : put.length;
+      ctx.strokeStyle = cvet(p.rez); ctx.globalAlpha = tek ? 1 : 0.5;
+      ctx.lineWidth = tek ? 2.4 : 1.8; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(X(put[0][0]), Y(put[0][1]));
+      for (i = 1; i < nn; i++) ctx.lineTo(X(put[i][0]), Y(put[i][1]));
+      if (zhivoj) ctx.lineTo(X(p.s.x), Y(p.s.y));
+      ctx.stroke();
+      /* место падения */
+      if (p.rez.udar && (!tek || p.konec)) {
+        var e = put[put.length - 1];
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(X(e[0]) - 6, Y(e[1]) - 6); ctx.lineTo(X(e[0]) + 6, Y(e[1]) + 6);
+        ctx.moveTo(X(e[0]) + 6, Y(e[1]) - 6); ctx.lineTo(X(e[0]) - 6, Y(e[1]) + 6);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+
+    /* пушка: значок постоянного размера на вершине, ствол по горизонтали места */
+    var gx = X(0), gy = Y(r0);
+    ctx.fillStyle = 'rgba(' + ink + ',.9)';
+    C.roundRect(ctx, gx - 9, gy - 7, 12, 7, 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(' + ink + ',.9)'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(gx - 4, gy - 6); ctx.lineTo(gx + 12, gy - 6); ctx.stroke();
+    ctx.lineCap = 'butt';
+    /* подпись над пушкой и правее: слева от вершины кадр кончается, когда
+       в нём одни падения, а пути уходят вправо и вниз, над ними пусто */
+    C.label(ctx, gx - 12, gy - 18, h > 0 ? 'гора ' + km(h) + ' км' : 'пушка на земле', 17, mut, 'left');
+
+    /* ядро текущего выстрела */
+    if (t && !t.konec) {
+      var bx = X(t.s.x), by = Y(t.s.y);
+      C.glow(ctx, bx, by, 16, '255,180,84', .55);
+      ctx.fillStyle = 'rgb(' + tone.accent + ')';
+      ctx.beginPath(); ctx.arc(bx, by, 5, 0, TWO_PI); ctx.fill();
+    }
+
+    /* линейка */
+    var Lkm = LINEJKI[0];
+    for (i = 0; i < LINEJKI.length; i++) if (LINEJKI[i] * 1000 * k.s <= 150) Lkm = LINEJKI[i];
+    var lx0 = SC.x0 + 18, lx1 = lx0 + Lkm * 1000 * k.s, ly = SC.y1 - 20;
+    ctx.strokeStyle = 'rgba(' + muted + ',.9)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(lx0, ly); ctx.lineTo(lx1, ly);
+    ctx.moveTo(lx0, ly - 6); ctx.lineTo(lx0, ly + 6);
+    ctx.moveTo(lx1, ly - 6); ctx.lineTo(lx1, ly + 6);
+    ctx.stroke();
+    C.label(ctx, lx1 + 10, ly + 6, celoe(Lkm) + ' км', 17, mut, 'left');
+
+    /* время выстрела и множитель (см. выше, у путей) */
+    if (tz) {
+      C.label(ctx, SC.x1 - 16, SC.y1 - 36, tz[0], 17, mut, 'right');
+      C.label(ctx, SC.x1 - 16, SC.y1 - 14, tz[1], 17, mut, 'right');
+    }
+    ctx.restore();
+
+    /* ── шкала скоростей ── */
+    var vk = vKasanie(h), v1 = vKrug(h), v2 = vUhod(h);
+    C.label(ctx, SK.x0, 34, 'скорость ядра, км/с', 17, mut, 'left');
+    var zony = [[0, vk, CF], [vk, v2, CB], [v2, V_MAX, CO]];
+    for (i = 0; i < zony.length; i++) {
+      ctx.fillStyle = zony[i][2]; ctx.globalAlpha = .55;
+      ctx.fillRect(SX(zony[i][0]), SK.y, SX(zony[i][1]) - SX(zony[i][0]), SK.hgt);
+    }
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = 'rgba(' + muted + ',.8)'; ctx.lineWidth = 1.2;
+    for (i = 0; i <= 12; i += 2) {
+      var tx = SX(i * 1000);
+      ctx.beginPath(); ctx.moveTo(tx, SK.y + SK.hgt); ctx.lineTo(tx, SK.y + SK.hgt + 5); ctx.stroke();
+      C.label(ctx, tx, SK.y + 38, String(i), 17, mut);
+    }
+    /* пороги для вершины горы: подписи v_кр и v_ух (при h = 0 это v₁ и v₂)
+       набирает KaTeX поверх канвы */
+    ctx.strokeStyle = 'rgba(' + ink + ',.85)'; ctx.lineWidth = 1.6;
+    [v1, v2].forEach(function (vv) {
+      ctx.beginPath(); ctx.moveTo(SX(vv), SK.y - 8); ctx.lineTo(SX(vv), SK.y + SK.hgt + 2); ctx.stroke();
+    });
+    /* ползунок: риска и треугольник под шкалой */
+    var mx = SX(s.v);
+    ctx.strokeStyle = 'rgb(' + tone.accent + ')'; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(mx, SK.y - 3); ctx.lineTo(mx, SK.y + SK.hgt + 3); ctx.stroke();
+    ctx.fillStyle = 'rgb(' + tone.accent + ')';
+    ctx.beginPath(); ctx.moveTo(mx, SK.y + SK.hgt + 4); ctx.lineTo(mx - 6, SK.y + SK.hgt + 14);
+    ctx.lineTo(mx + 6, SK.y + SK.hgt + 14); ctx.closePath(); ctx.fill();
+    /* легенда цветов */
+    var lg = [['падает', CF], ['замкнута', CB], ['уходит', CO]], lxg = SK.x0;
+    ctx.font = '17px "Golos Text", system-ui, sans-serif';
+    for (i = 0; i < lg.length; i++) {
+      ctx.fillStyle = lg[i][1]; ctx.fillRect(lxg, SK.y + 58, 14, 8);
+      C.label(ctx, lxg + 20, SK.y + 67, lg[i][0], 17, mut, 'left');
+      lxg += 20 + ctx.measureText(lg[i][0]).width + 26;
+    }
+
+    /* ── показания: к скорости с ползунка ── */
+    var rz = s.rez;
+    /* Знак энергии и есть показание: у самой второй космической ℰ меньше
+       0,05 МДж/кг, и ноль печатается со знаком, пока это не парабола. */
+    var nol = Math.abs(rz.eps) < DOPUSK_E * GM / rz.r0;
+    var cE = nol ? 'rgb(' + ink + ')' : rz.eps < 0 ? CB : CO;
+    var eTxt = num(rz.eps / 1e6, 1);
+    if (!nol && rz.eps > 0 && eTxt.charAt(0) !== '−') eTxt = '+' + eTxt;
+    if (!nol && rz.eps < 0 && eTxt.charAt(0) !== '−') eTxt = '−' + eTxt;
+    C.readout(ctx, COL[0], ROW[0], 'СКОРОСТЬ, км/с', num(s.v / 1000, 2), 'rgb(' + tone.accent + ')');
+    C.readout(ctx, COL[1], ROW[0], 'ЭНЕРГИЯ, МДж/кг', eTxt, cE);
+    C.readout(ctx, COL[0], ROW[1], 'ОРБИТА', TIPY[rz.type], cvet(rz));
+    C.readout(ctx, COL[1], ROW[1], 'ПЕРИОД', rz.period != null ? vremya(rz.period) : '—',
+      rz.period != null ? CB : mut);
+    /* Наибольший радиус, то есть удаление от центра Земли, а не высота над
+       землёй: «наибольшее удаление от центра» в колонку шириной 213 px не
+       входит, а радиус и есть расстояние от центра, так его зовёт глава. */
+    C.readout(ctx, COL[0], ROW[2], 'ДАЛЬНОСТЬ, км', rz.udar ? km(rz.range) : '—', rz.udar ? CF : mut);
+    C.readout(ctx, COL[1], ROW[2], 'НАИБОЛЬШИЙ РАДИУС, км', rz.apogee != null ? km(rz.apogee) : '—',
+      rz.apogee != null ? 'rgb(' + ink + ')' : mut);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+  window.__demoProgon = progon;
+  window.__demoFizika = { polet: polet, vKrug: vKrug, vUhod: vUhod, vKasanie: vKasanie, GM: GM, R: R };
+  /* Для прогона без рук: выставить скорость и высоту в СИ и выстрелить. */
+  window.__demoVystrel = function (v, h) {
+    if (h != null && h !== s.h) { s.h = C.clamp(h, 0, H_MAX); s.vystrely = []; s.tek = null; }
+    if (v != null) s.v = C.clamp(v, 0, V_MAX);
+    s.rez = polet(s.v, s.h);
+    ogon();
+  };
+
+  function skorost(vkm) { s.v = C.clamp(vkm * 1000, 0, V_MAX); s.rez = polet(s.v, s.h); obnovit(); }
+  function vysota(hkm) {
+    var hn = C.clamp(Math.round(hkm) * 1000, 0, H_MAX);
+    if (hn === s.h) return;
+    s.h = hn; s.vystrely = []; s.tek = null;
+    s.rez = polet(s.v, s.h); s.kamCel = kadr(); obnovit();
+  }
+  function kosmicheskaya(n) { s.v = n === 1 ? vKrug(s.h) : vUhod(s.h); s.rez = polet(s.v, s.h); obnovit(); }
+
+  /* Строка под сценой: пороги для горы и что даёт выставленная скорость. */
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var rz = s.rez, h = s.h, ish;
+    if (rz.type === 'fall') {
+      if (h === 0 && s.v === 0)
+        ish = 'Пушка стоит на самой земле, и ядро без скорости лежит у ствола. Задайте скорость или поднимите гору.';
+      else if (h === 0)
+        ish = 'Пушка стоит на самой земле, и ядро медленнее первой космической касается её сразу у ствола. Поднимите гору.';
+      else if (s.v === 0)
+        ish = 'Ядро без скорости падает отвесно и долетает до земли за ' + A(vremya(rz.tHit)) + '.';
+      else
+        ish = 'Ядро падает в ' + A(km(rz.range) + ' км') + ' от горы через ' + A(vremya(rz.tHit)) +
+          '. Сила смотрит в центр Земли, и путь ядра есть дуга эллипса с фокусом в центре; ' +
+          'на плоской Земле третьей недели была бы парабола.';
+    } else if (rz.type === 'circle') {
+      ish = (h === 0
+        ? 'Скорость первая космическая: ядро обходит Землю у самой поверхности и через '
+        : 'Скорость круговая: ядро обходит Землю по окружности и через ') +
+        A(vremya(rz.period)) + ' возвращается к пушке.';
+    } else if (rz.type === 'ellipse' && s.v < vKrug(h)) {
+      ish = 'Скорость меньше круговой, но ядро не падает: вершина горы стала дальней точкой эллипса, а ближняя ' +
+        'прошла в ' + A(km(rz.rMin - R) + ' км') + ' над землёй. Период ' + A(vremya(rz.period)) + '.';
+    } else if (rz.type === 'ellipse') {
+      ish = 'Энергия отрицательна, орбита замкнута: эллипс с ближней точкой у пушки и дальней в ' +
+        A(km(rz.apogee) + ' км') + ' от центра Земли, период ' + A(vremya(rz.period)) + '.' +
+        (rz.apogee > 60 * R ? ' Это дальше Луны, а ни Луны, ни Солнца в модели нет.' : '');
+    } else if (rz.type === 'parabola') {
+      ish = 'Энергия ровно ноль: ядро уходит по параболе, и вдали его скорость стремится к нулю.';
+    } else {
+      /* скорость вдали из энергии, v = √(2ℰ); без корня в строке, см. ниже */
+      ish = 'Энергия положительна: ядро уходит по гиперболе, и вдали у него остаётся ' +
+        A(num(Math.sqrt(2 * rz.eps) / 1000, 2) + ' км/с') + '.';
+    }
+    /* Пороги идут первыми, а исход последним, и корней в исходе нет: KaTeX
+       свешивает знак корня на пару пикселей ниже строки, и в последней
+       строке витрины (?flat, нижнего поля нет) это давало прокрутку всего
+       iframe на 4 px (замер 30.09 при 1000×560). Надёжное лекарство в
+       demo.css, .status { overflow: hidden }, см. отчёт. */
+    /* v₁ и v₂ только у самой поверхности, как в главе; с горы свои буквы */
+    var RZ = 'R_{\\text{З}}';
+    var por = h > 0
+      ? 'С вершины горы круговая скорость ' + kx('v_{\\text{кр}} = \\sqrt{GM/(' + RZ + '+h)} = ' + tnum(vKrug(h) / 1000, 2)) +
+        ' и скорость ухода ' + kx('v_{\\text{ух}} = \\sqrt{2GM/(' + RZ + '+h)} = ' + tnum(vUhod(h) / 1000, 2)) +
+        ' км/с, у самой поверхности первая и вторая космические ' +
+        num(vKrug(0) / 1000, 2) + ' и ' + num(vUhod(0) / 1000, 2) + ' км/с. '
+      : 'У самой поверхности первая и вторая космические ' + kx('v_1 = \\sqrt{GM/' + RZ + '} = ' + tnum(vKrug(0) / 1000, 2)) + ' и ' +
+        kx('v_2 = \\sqrt{2GM/' + RZ + '} = ' + tnum(vUhod(0) / 1000, 2)) + ' км/с. ';
+    return por + ish;
+  }
+
+  /* KaTeX поверх канвы: пороги на шкале скоростей */
+  var labs = [
+    { x: SX(vKrug(ui.h)), y: SK.y - 20, tex: ui.h > 0 ? 'v_{\\text{кр}}' : 'v_1' },
+    { x: SX(vUhod(ui.h)), y: SK.y - 20, tex: ui.h > 0 ? 'v_{\\text{ух}}' : 'v_2' }
+  ];
+  function spanAt(sp, i) {
+    return html`<span key=${i}
+      style=${{ left: (sp.x / W * 100) + '%', top: (sp.y / HGT * 100) + '%' }}
+      dangerouslySetInnerHTML=${{ __html: kx(sp.tex) }}></span>`;
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Slider} label="Скорость:" min=${0} max=${V_MAX / 1000} step=${0.01} value=${ui.v / 1000}
+                     onChange=${skorost} display=${num(ui.v / 1000, 2) + ' км/с'} />
+        ${/* Кнопки ставят пороги для выставленной высоты; «первая» и
+              «вторая» они только при h = 0, поэтому названы круговой и
+              скоростью ухода. Подписи постоянные: смена их длины на h = 0
+              сдвинула бы ползунок горы прямо под пальцем. По той же причине
+              в подписи группы нет горы: при h = 0 на сцене «пушка на земле». */''}
+        <${C.Group} label="Поставить скорость:">
+          <${C.Btn} onClick=${function () { kosmicheskaya(1); }}>круговая<//>
+          <${C.Btn} onClick=${function () { kosmicheskaya(2); }}>ухода<//>
+        <//>
+        <${C.Slider} label="Гора:" min=${0} max=${H_MAX / 1000} step=${10} value=${ui.h / 1000}
+                     onChange=${vysota} display=${km(ui.h) + ' км'} />
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${ogon}>Огонь<//>
+          <${C.Btn} disabled=${!ui.n} onClick=${steret}>Стереть следы<//>
+        <//>
+      </div>
+      ${/* Сцена держит пропорцию, иначе слой KaTeX разъехался бы с канвой
+            (так же сделано в raketa и podobie). */''}
+      <div class="stage-wrap"
+           style=${{ aspectRatio: W + ' / ' + HGT, flex: '0 1 auto', minHeight: 0,
+                     height: '100%', width: 'auto', maxWidth: '100%',
+                     alignSelf: 'center' }}>
+        <canvas class="stage" ref=${ref}></canvas>
+        ${/* Слой подписей держит пропорцию кадра и стоит по центру. На
+              узком экране обёртка упирается в ширину, а по высоте тянется
+              на весь столбец; канва рисует кадр по центру (paint в
+              demo-core), а слой с inset: 0 растягивался на всю обёртку, и
+              при 375×800 риски v_кр и v_ух висели на 115 px выше шкалы.
+              Когда ведёт высота, обёртка и так равна кадру, и слой с ней
+              совпадает. */''}
+        <div class="ax is-on"
+             style=${{ top: '50%', bottom: 'auto', height: 'auto',
+                       aspectRatio: W + ' / ' + HGT, transform: 'translateY(-50%)' }}>${labs.map(spanAt)}</div>
+      </div>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(PushkaNyutona);
+</script>
+</body>
+</html>

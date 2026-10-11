@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Разворот спутника маховиком</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-05/">&larr; Неделя 05</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=razvorot-mahovikom"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `moment-vnutrennih-sil`, абзац о маховике (бриф
+   briefs/demki_nedelya05.md, № 8; решение автора 25.09 «можно добавить
+   все»). Спутник висит в пустоте, внешних сил нет. Внутри корпуса на оси,
+   проходящей через центр масс спутника, стоит маховик; мотор между ними
+   крутит маховик относительно корпуса. Центр масс стоит, и задача сводится
+   к вращению двух тел вокруг одной неподвижной оси, вид сверху.
+
+   ЧТО СЧИТАЕТСЯ. У каждой точки части, которая вращается как целое с
+   угловой скоростью ω, момент импульса относительно оси m r² ω (как у
+   шарика на нити, m r² φ̇), и момент части равен ω, умноженной на сумму
+   m r² по её точкам. Эта сумма и есть момент инерции, но на экране слово
+   не звучит: оно из шестой недели, и автор просил не бежать впереди
+   программы (замечание к слайду 13, 01.10). Ползунок назван
+   «Маховик : корпус» и показывает 1 : N, строка под рисунком сравнивает
+   части по сумме m r² всех точек. В модель сумма входит только отношением
+   маховика к корпусу, k = I_м / I_к, от 1/1000 до 1/10 (числа брифа).
+
+   Мотор внутренний: сколько момента силы M он прикладывает к маховику,
+   столько же, −M, получает корпус, потому что моменты внутренних сил
+   системы в сумме ноль (#vneshnie главы). Дальше две части живут каждая
+   по своему уравнению моментов:
+       I_м dω_м/dt = M,    I_к dω_к/dt = −M,
+   и интегрируются порознь. Полный момент L = I_м ω_м + I_к ω_к нигде не
+   закладывается нулём: он снимается с состояния и держится на нуле с
+   ошибкой округления. Она копится с числом кадров, пока работает мотор, и
+   зависит от частоты кадров. За разворот на 90° при моментах частей около
+   1 кг·м²/с наибольший |L| по всей сетке ползунка (замер 30.09 прогоном
+   progon) 3,9·10⁻¹⁵ кг·м²/с на кадре 1/60 с, 9,5·10⁻¹⁵ на 1/144 с,
+   1,5·10⁻¹⁴ на 1/240 с и 1,1·10⁻¹³ при шаге 1 мс.
+
+   Момент мотора кусочно-постоянный, поэтому на каждом куске углы и
+   скорости меняются по формулам равноускоренного вращения точно, без шага
+   интегрирования. Кадр режется на куски в моменты переключения: конец
+   разгона, конец выбега программы, остановка маховика относительно
+   корпуса. Последний момент находится из относительного ускорения
+   M (1/I_м + 1/I_к); в конце торможения части сцепляются, и обе получают
+   общую скорость L / (I_м + I_к), то есть ноль с ошибкой округления.
+
+   ЧИСЛА. Корпус I_к = 2 кг·м² (микроспутник). Мотор держит момент силы
+   0,5 Н·м и разгоняет маховик 2 с: маховик получает момент импульса
+   1 кг·м²/с, корпус −1 кг·м²/с, и корпус поворачивается со скоростью
+   0,5 рад/с при любом отношении k. Маховик при k = 1/1000 крутится со
+   скоростью 500 рад/с, около 80 оборотов в секунду, при k = 1/10 со
+   скоростью 5 рад/с. Время сжато: мотор взят сильнее, чтобы разгон шёл
+   секунды.
+
+   Из L = 0 в каждый момент интегрированием по времени I_м φ_м + I_к φ_к = 0:
+   угол маховика в 1/k раз больше угла корпуса и противоположен ему, а
+   относительно корпуса маховик поворачивается в 1 + 1/k раз больше. При
+   k = 1/1000 повернуть корпус на 90° значит провернуть маховик
+   относительно корпуса на 1001/4 = 250,25 оборота, при 1/10 на 2,75.
+   Демка этого не подставляет: число снимается с проинтегрированных углов.
+
+   ПРОГРАММА «развернуть на 90°»: разгон 2 с, выбег, торможение до
+   остановки маховика в корпусе (тоже 2 с, ускорения те же). Корпус за
+   разгон и торможение поворачивается на (L₀/I_к)·2 с = 1 рад, за выбег
+   на 0,5 рад/с × τ, и выбег τ = (π/2)·I_к/L₀ − 2 с = π − 2 ≈ 1,1416 с
+   ставит его ровно на 90° по часовой стрелке. От k время не зависит.
+
+   ЭНЕРГИЯ. Работа мотора набирается интегралом M (ω_м − ω_к) dt, точно
+   на каждом куске: относительная скорость там линейна по времени. После
+   разгона при k = 1/1000 она 250,25 Дж и вся лежит в энергии вращения
+   ½ I_м ω_м² + ½ I_к ω_к²; при торможении мотор забирает её обратно.
+   Работа пары сил мотора не ноль, момент пары ноль: те же три записи пары,
+   что в разделе главы «Поставим три записи рядом». */
+
+var I_K = 2;                        /* кг·м², корпус */
+var M_MOT = 0.5;                    /* Н·м, момент силы мотора */
+var T_RAZGON = 2;                   /* с, разгон одной кнопкой */
+var L0 = M_MOT * T_RAZGON;          /* кг·м²/с, момент, который получает маховик за разгон */
+var K_MIN = 1 / 1000, K_MAX = 1 / 10, K_NACH = 1 / 1000;
+var CEL = Math.PI / 2;              /* разворот программой, рад */
+var T_VYBEG = CEL * I_K / L0 - T_RAZGON;
+var TWO_PI = 2 * Math.PI;
+
+/* Ползунок ходит по сетке отношений 1/N с двумя значащими цифрами N:
+   подпись 1/980 читается, 1/977,24 нет. N от 1000 до 100 через 10 и от 100
+   до 10 через 1, всего 181 положение, по декаде на половину рейки. Позиция
+   ползунка равна номеру в списке. Непрерывная логарифмическая рейка с
+   округлением N после неё залипала на клавиатуре: шаг рейки 2,3 %, и там,
+   где это меньше половины единицы округления, стрелка возвращала то же N. */
+var SETKA_N = (function () {
+  var a = [], n;
+  for (n = 1 / K_MIN; n > 100; n -= 10) a.push(n);
+  for (n = 100; n >= 1 / K_MAX; n--) a.push(n);
+  return a;
+})();
+function nomerNaSetke(k) {
+  var N = Math.round(1 / k), i = SETKA_N.indexOf(N);
+  if (i >= 0) return i;
+  for (i = 0; i < SETKA_N.length - 1 && SETKA_N[i + 1] >= N; i++);
+  return i;
+}
+
+function nachalo(k) {
+  return {
+    k: k, Im: k * I_K,
+    t: 0, fk: 0, fm: 0, wk: 0, wm: 0, A: 0,
+    faza: null,                     /* null | razgon | vybeg | tormoz */
+    ost: 0,                         /* сколько осталось разгона или выбега, с */
+    prog: false,                    /* идёт разворот по программе */
+    start: null,                    /* углы в начале программы */
+    itog: null,                     /* что дала последняя программа */
+    Lmax: 0                         /* наибольший |L| за опыт: проверка сохранения */
+  };
+}
+
+/* Кусок длительностью tau с моментом мотора Mw на маховике (−Mw на корпусе). */
+function dvigat(s, tau, Mw) {
+  var am = Mw / s.Im, ak = -Mw / I_K;
+  var om0 = s.wm - s.wk;
+  s.fm += s.wm * tau + am * tau * tau / 2;
+  s.fk += s.wk * tau + ak * tau * tau / 2;
+  s.wm += am * tau;
+  s.wk += ak * tau;
+  s.A += Mw * (om0 + (s.wm - s.wk)) / 2 * tau;
+  s.t += tau;
+}
+
+/* Что происходит на границе куска. */
+function perehod(s) {
+  if (s.faza === 'razgon') {
+    if (s.prog) { s.faza = 'vybeg'; s.ost = T_VYBEG; }
+    else s.faza = null;
+  } else if (s.faza === 'vybeg') {
+    s.faza = 'tormoz';
+  } else if (s.faza === 'tormoz') {
+    /* маховик встал в корпусе: части сцеплены, общая скорость из полного
+       момента, так что сцепка момента не меняет */
+    var w = (s.Im * s.wm + I_K * s.wk) / (s.Im + I_K);
+    s.wm = w; s.wk = w;
+    s.faza = null;
+    if (s.prog) {
+      s.prog = false;
+      s.itog = {
+        k: s.k,
+        dfk: s.fk - s.start.fk,
+        dfm: s.fm - s.start.fm,
+        drel: (s.fm - s.fk) - (s.start.fm - s.start.fk),
+        dt: s.t - s.start.t
+      };
+    }
+  }
+}
+
+/* Один шаг модели на h секунд, с разрезом на переключениях. */
+function shag(s, h) {
+  for (var n = 0; h > 0 && n < 8; n++) {
+    var Mw = 0, te = Infinity;
+    if (s.faza === 'razgon') { Mw = M_MOT; te = s.ost; }
+    else if (s.faza === 'vybeg') { te = s.ost; }
+    else if (s.faza === 'tormoz') {
+      var om = s.wm - s.wk;
+      Mw = om > 0 ? -M_MOT : om < 0 ? M_MOT : 0;
+      te = Math.abs(om) / (M_MOT * (1 / s.Im + 1 / I_K));
+    }
+    if (te <= h) {
+      dvigat(s, te, Mw); h -= te; perehod(s);
+    } else {
+      dvigat(s, h, Mw);
+      if (s.faza === 'razgon' || s.faza === 'vybeg') s.ost -= h;
+      h = 0;
+    }
+  }
+  var L = Math.abs(s.Im * s.wm + I_K * s.wk);
+  if (L > s.Lmax) s.Lmax = L;
+}
+
+function momentMotora(s) {
+  if (s.faza === 'razgon') return M_MOT;
+  if (s.faza === 'tormoz') { var om = s.wm - s.wk; return om > 0 ? -M_MOT : om < 0 ? M_MOT : 0; }
+  return 0;
+}
+
+function velichiny(s) {
+  var Lm = s.Im * s.wm, Lk = I_K * s.wk;
+  var K = s.Im * s.wm * s.wm / 2 + I_K * s.wk * s.wk / 2;
+  return {
+    Lm: Lm, Lk: Lk, L: Lm + Lk, K: K,
+    rel: (s.fm - s.fk) / TWO_PI,     /* обороты маховика относительно корпуса */
+    om: s.wm - s.wk
+  };
+}
+
+/* Покой: маховик в корпусе не крутится и мотор выключен. */
+function pokoj(s) { return s.faza === null && s.wm === s.wk; }
+
+/* Прогон без анимации для проверки: разворот на 90° по программе при
+   отношении k; шаг кадра h. */
+function progon(k, h) {
+  var s = nachalo(k || K_NACH);
+  s.faza = 'razgon'; s.ost = T_RAZGON; s.prog = true;
+  s.start = { fk: 0, fm: 0, t: 0 };
+  var dt = h || 1 / 60;
+  for (var i = 0; i < 100000 && (s.prog || s.faza); i++) shag(s, dt);
+  var q = velichiny(s);
+  return {
+    k: k, t: s.t, bodyDeg: s.fk * 180 / Math.PI, wheelRevs: s.fm / TWO_PI, relRevs: q.rel,
+    omegaBody: s.wk, omegaWheel: s.wm, Ltotal: q.L, Lmax: s.Lmax, Wmotor: s.A, K: q.K
+  };
+}
+
+/* Русская запятая и настоящий минус; крохи печатаются нулём. До печати
+   число обрезается до 12 значащих цифр. Моменты корпуса и маховика равны
+   по модулю только до 10⁻¹⁶, а время кадра в браузере кратно 0,1 мс, и
+   момент 0,5·t часто ложится на половинку третьего знака: без обрезки
+   toFixed округлял части в разные стороны, −0,404 у корпуса и 0,405 у
+   маховика при сумме 10⁻¹⁶ (на разгоне так было в 2,4 % кадров). */
+function num(v, d) {
+  v = +v.toPrecision(12);
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* Угловая скорость маховика бывает от сотых до сотен рад/с. */
+function numW(v) { var a = Math.abs(v); return num(v, a >= 100 ? 1 : a >= 10 ? 2 : 3); }
+/* Полный момент печатается как есть, порядком: он ноль с ошибкой округления. */
+var SUP = { '-': '⁻', '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' };
+function poryadok(v) {
+  if (v === 0) return '0';
+  var e = Math.floor(Math.log10(Math.abs(v)));
+  var m = v / Math.pow(10, e);
+  if (Math.abs(m) >= 9.95) { e += 1; m /= 10; }   /* 9,96 печатается 1,0·10ᵉ⁺¹, а не 10,0·10ᵉ */
+  return num(m, 1) + '·10' + String(e).split('').map(function (c) { return SUP[c] || c; }).join('');
+}
+function kx(tex) {
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева спутник сверху на фоне неподвижных звёзд: корпус с двумя
+   панелями и антенной, внутри маховик со спицами, одна спица цветная.
+   Пунктир вверх отмечает, куда смотрела антенна в начале, дуга показывает
+   поворот корпуса. Пока мотор работает, рядом с маховиком и корпусом
+   стоят дуги-стрелки момента мотора: на маховик в одну сторону, на корпус
+   в другую.
+
+   Радиус маховика на рисунке растёт с отношением как корень четвёртой
+   степени: так было бы у диска той же толщины из того же материала.
+   Быстрый маховик смазан, как на фотографии с выдержкой 1/60 с: спицы
+   рисуются несколько раз по дуге, которую маховик проходит за это время,
+   и на 80 оборотах в секунду сливаются в диск. Иначе частота кадров
+   рисовала бы маховик стоящим или крутящимся назад.
+
+   Справа показания: корпус и маховик по столбцам, внизу сумма моментов
+   и обороты маховика относительно корпуса. */
+
+var W = 1000, HGT = 440;
+var CX = 236, CY = 220;
+var KORP = 96;                      /* полуширина корпуса, px */
+var PAN_L = 98, PAN_W = 40;         /* панель: длина от борта и ширина, px */
+var R_MAH_MAX = 76;                 /* радиус маховика на рисунке при k = 1/10, px */
+var R_DUGA = 206;                   /* дуга поворота корпуса */
+var VYDERZHKA = 1 / 60;             /* с, «выдержка» смаза маховика */
+var CK = '#4db6c6', CM = '#e08a52', CS = '#a6c35a', CP = '122,166,255';
+
+/* Звёзды: одна и та же россыпь при каждом запуске. */
+var ZVEZDY = (function () {
+  var z = [], a = 12345;
+  function rnd() { a = (a * 1103515245 + 12345) % 2147483648; return a / 2147483648; }
+  while (z.length < 34) {
+    var x = 16 + rnd() * 440, y = 12 + rnd() * 416;
+    z.push([x, y, 0.8 + rnd() * 1.2, 0.25 + rnd() * 0.5]);
+  }
+  return z;
+})();
+
+function rMah(k) { return R_MAH_MAX * Math.pow(k / K_MAX, 0.25); }
+
+/* Дуга со стрелкой: от угла a0 к углу a1 (углы канвы), наконечник на a1. */
+function duga(ctx, x, y, R, a0, a1, color, width) {
+  var dir = a1 > a0 ? 1 : -1;
+  var head = 11, dA = head / R;
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(x, y, R, a0, a1 - dir * dA * 0.7, dir < 0); ctx.stroke();
+  var ex = x + R * Math.cos(a1), ey = y + R * Math.sin(a1);
+  var tx = -Math.sin(a1) * dir, ty = Math.cos(a1) * dir;     /* касательная по ходу */
+  var nx = Math.cos(a1), ny = Math.sin(a1);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(ex, ey);
+  ctx.lineTo(ex - tx * head + nx * head * 0.42, ey - ty * head + ny * head * 0.42);
+  ctx.lineTo(ex - tx * head - nx * head * 0.42, ey - ty * head - ny * head * 0.42);
+  ctx.closePath(); ctx.fill();
+}
+
+function Razvorot() {
+  var st = useRef(null);
+  if (!st.current) st.current = { s: nachalo(K_NACH), idet: true, sig: '' };
+  var S = st.current;
+  var pair = useState({ k: K_NACH, idet: true, sig: '' });
+  var ui = pair[0], setUi = pair[1];
+
+  function podpis(s) {
+    return [s.faza, s.prog, pokoj(s), !!s.itog, s.fk === 0, Math.abs(velichiny(s).Lm) > 1.5 * L0].join('|');
+  }
+
+  function pokazaniya() {
+    var s = S.s, q = velichiny(s);
+    window.__demoState = {
+      ratio: s.k, t: s.t,
+      omegaBody: s.wk, omegaWheel: s.wm,
+      angleBody: s.fk, angleWheel: s.fm,
+      angleBodyDeg: s.fk * 180 / Math.PI, wheelRevs: s.fm / TWO_PI, relRevs: q.rel,
+      Lbody: q.Lk, Lwheel: q.Lm, Ltotal: q.L, LmaxAbs: s.Lmax,
+      Ibody: I_K, Iwheel: s.Im, torqueWheel: momentMotora(s),
+      phase: s.faza, program: s.prog, atRest: pokoj(s),
+      K: q.K, Wmotor: s.A, balanceError: q.K - s.A,
+      lastTurn: s.itog ? {
+        ratio: s.itog.k, bodyDeg: s.itog.dfk * 180 / Math.PI,
+        wheelRevs: s.itog.dfm / TWO_PI, relRevs: s.itog.drel / TWO_PI, duration: s.itog.dt
+      } : null,
+      running: S.idet
+    };
+  }
+
+  function obnovit() {
+    S.sig = podpis(S.s);
+    setUi({ k: S.s.k, idet: S.idet, sig: S.sig });
+    pokazaniya();
+  }
+
+  function step(dt) {
+    if (!S.idet) return;
+    shag(S.s, dt);
+    if (podpis(S.s) !== S.sig) obnovit();
+    else pokazaniya();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted, mut = 'rgb(' + muted + ')';
+    var s = S.s, q = velichiny(s), i, j;
+    var rw = rMah(s.k);
+
+    /* Фон виден только вне спутника: корпус полупрозрачный, и звезда или
+       пунктир сквозь него читались бы как деталь корпуса. Контур спутника
+       вырезается из фона правилом чёт-нечет. */
+    var m0 = ctx.getTransform();
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, HGT);
+    ctx.translate(CX, CY); ctx.rotate(-s.fk);
+    ctx.rect(-KORP, -KORP, 2 * KORP, 2 * KORP);
+    ctx.rect(KORP, -PAN_W / 2, PAN_L, PAN_W);
+    ctx.rect(-KORP - PAN_L, -PAN_W / 2, PAN_L, PAN_W);
+    ctx.moveTo(-15, -KORP); ctx.lineTo(0, -KORP - 26); ctx.lineTo(15, -KORP); ctx.closePath();
+    ctx.setTransform(m0);
+    ctx.clip('evenodd');
+
+    /* звёзды: неподвижная система отсчёта */
+    for (i = 0; i < ZVEZDY.length; i++) {
+      var zv = ZVEZDY[i];
+      ctx.fillStyle = 'rgba(' + ink + ',' + zv[3] + ')';
+      ctx.beginPath(); ctx.arc(zv[0], zv[1], zv[2], 0, TWO_PI); ctx.fill();
+    }
+
+    /* исходное направление антенны и дуга поворота корпуса */
+    ctx.save();
+    ctx.setLineDash([5, 6]); ctx.strokeStyle = 'rgba(' + muted + ',.7)'; ctx.lineWidth = 1.3;
+    ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(CX, CY - R_DUGA - 6); ctx.stroke();
+    ctx.restore();
+    var ugol = C.clamp(s.fk, -TWO_PI + 1e-6, TWO_PI - 1e-6);
+    if (Math.abs(ugol) > 1e-3) {
+      ctx.strokeStyle = 'rgba(77,182,198,.75)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(CX, CY, R_DUGA, -Math.PI / 2, -Math.PI / 2 - ugol, ugol > 0); ctx.stroke();
+    }
+    ctx.restore();
+
+    /* корпус: в его собственной системе, повёрнутой на угол корпуса */
+    ctx.save();
+    ctx.translate(CX, CY); ctx.rotate(-s.fk);
+    [-1, 1].forEach(function (sg) {
+      var x0 = sg > 0 ? KORP : -KORP - PAN_L;
+      ctx.fillStyle = 'rgba(' + CP + ',.16)'; ctx.strokeStyle = 'rgba(' + CP + ',.75)'; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.rect(x0 + (sg > 0 ? 8 : 0), -PAN_W / 2, PAN_L - 8, PAN_W); ctx.fill(); ctx.stroke();
+      ctx.beginPath();
+      for (var c = 1; c < 4; c++) {
+        var xc = x0 + (sg > 0 ? 8 : 0) + c * (PAN_L - 8) / 4;
+        ctx.moveTo(xc, -PAN_W / 2); ctx.lineTo(xc, PAN_W / 2);
+      }
+      ctx.moveTo(x0 + (sg > 0 ? 8 : 0), 0); ctx.lineTo(x0 + (sg > 0 ? PAN_L : PAN_L - 8), 0);
+      ctx.strokeStyle = 'rgba(' + CP + ',.4)'; ctx.lineWidth = 1; ctx.stroke();
+      /* кронштейн */
+      ctx.strokeStyle = 'rgba(' + ink + ',.55)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(sg * KORP, 0); ctx.lineTo(sg * (KORP + 8), 0); ctx.stroke();
+    });
+    ctx.fillStyle = 'rgba(77,182,198,.13)'; ctx.strokeStyle = CK; ctx.lineWidth = 2.2;
+    C.roundRect(ctx, -KORP, -KORP, 2 * KORP, 2 * KORP, 12); ctx.fill(); ctx.stroke();
+    /* антенна: куда смотрит спутник */
+    ctx.fillStyle = CK;
+    ctx.beginPath(); ctx.moveTo(-15, -KORP); ctx.lineTo(15, -KORP); ctx.lineTo(0, -KORP - 26); ctx.closePath(); ctx.fill();
+    /* гнездо маховика с риской на корпусе */
+    ctx.strokeStyle = 'rgba(' + ink + ',.45)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(0, 0, rw + 7, 0, TWO_PI); ctx.stroke();
+    for (i = 0; i < 8; i++) {
+      var ai = i * Math.PI / 4;
+      ctx.beginPath();
+      ctx.moveTo((rw + 7) * Math.cos(ai), (rw + 7) * Math.sin(ai));
+      ctx.lineTo((rw + 3) * Math.cos(ai), (rw + 3) * Math.sin(ai));
+      ctx.stroke();
+    }
+    /* момент мотора на корпус: дуга вне корпуса, в его системе */
+    var Mw = momentMotora(s);
+    if (Mw !== 0) {
+      var sk = Mw > 0 ? -1 : 1;           /* знак момента на корпус (против часовой +) */
+      var ck = -3 * Math.PI / 4, spk = Math.PI / 3;
+      duga(ctx, 0, 0, KORP + 52, ck + sk * spk / 2, ck - sk * spk / 2, CK, 3);
+      var sm = -sk, cm = Math.PI / 4, spm = Math.PI / 2.2;
+      duga(ctx, 0, 0, rw + 16, cm + sm * spm / 2, cm - sm * spm / 2, CM, 3);
+    }
+    ctx.restore();
+
+    /* маховик: в неподвижной системе, повёрнут на свой угол; смаз за выдержку */
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.fillStyle = 'rgba(224,138,82,.16)'; ctx.strokeStyle = CM; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, rw, 0, TWO_PI); ctx.fill(); ctx.stroke();
+    var mazok = s.wm * VYDERZHKA;
+    /* отпечатки спицы через 0,02 рад: реже спица двоится, чаще дорого */
+    var n = Math.max(1, Math.min(60, Math.ceil(Math.abs(mazok) / 0.02)));
+    var alfa = n <= 2 ? 1 : Math.min(1, 3 / n);
+    for (j = 0; j < n; j++) {
+      var a = -(s.fm - mazok * j / n);
+      for (i = 0; i < 3; i++) {
+        var b = a + i * TWO_PI / 3;
+        ctx.strokeStyle = i === 0 ? 'rgba(224,138,82,' + alfa + ')' : 'rgba(' + ink + ',' + (0.8 * alfa) + ')';
+        ctx.lineWidth = i === 0 ? 4 : 2.4;
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo((rw - 3) * Math.cos(b), (rw - 3) * Math.sin(b)); ctx.stroke();
+      }
+    }
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, TWO_PI); ctx.fill();
+    ctx.restore();
+
+    /* показания */
+    var c1 = 700, c2 = 960, inkc = 'rgb(' + ink + ')';
+    C.label(ctx, c1, 34, 'корпус', 19, CK, 'right');
+    C.label(ctx, c2, 34, 'маховик', 19, CM, 'right');
+    C.readout(ctx, c1, 72, 'УГОЛ, °', num(s.fk * 180 / Math.PI, 1), CK);
+    C.readout(ctx, c2, 72, 'УГОЛ, об', num(s.fm / TWO_PI, 2), CM);
+    C.readout(ctx, c1, 160, 'УГЛОВАЯ СКОРОСТЬ, рад/с', numW(s.wk), CK);
+    C.readout(ctx, c2, 160, 'УГЛОВАЯ СКОРОСТЬ, рад/с', numW(s.wm), CM);
+    C.readout(ctx, c1, 248, 'МОМЕНТ L, кг·м²/с', num(q.Lk, 3), CK);
+    C.readout(ctx, c2, 248, 'МОМЕНТ L, кг·м²/с', num(q.Lm, 3), CM);
+    ctx.strokeStyle = 'rgba(' + muted + ',.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(480, 312); ctx.lineTo(c2, 312); ctx.stroke();
+    C.readout(ctx, c1, 340, 'СУММА L, кг·м²/с', poryadok(q.L), CS);
+    C.readout(ctx, c2, 340, 'МАХОВИК В КОРПУСЕ, об', num(q.rel, 2), inkc);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+  window.__demoProgon = progon;
+
+  function nachat(k) { S.s = nachalo(k); obnovit(); }
+
+  function raskrutit() {
+    var s = S.s;
+    if (s.faza || s.prog || Math.abs(velichiny(s).Lm) > 1.5 * L0) return;
+    s.itog = null; s.faza = 'razgon'; s.ost = T_RAZGON; S.idet = true; obnovit();
+  }
+  function ostanovit() {
+    var s = S.s;
+    if (pokoj(s) || s.faza === 'tormoz') return;
+    s.itog = null; s.prog = false; s.faza = 'tormoz'; S.idet = true; obnovit();
+  }
+  function razvernut() {
+    var s = S.s;
+    if (!pokoj(s)) return;
+    s.itog = null; s.faza = 'razgon'; s.ost = T_RAZGON; s.prog = true;
+    s.start = { fk: s.fk, fm: s.fm, t: s.t };
+    S.idet = true; obnovit();
+  }
+  /* Событие без смены отношения опыт не сбрасывает: для этого есть «Сброс». */
+  function otnoshenie(v) {
+    var k = 1 / SETKA_N[C.clamp(Math.round(v), 0, SETKA_N.length - 1)];
+    if (k === S.s.k) return;
+    nachat(k);
+  }
+  function pauza() { S.idet = !S.idet; obnovit(); }
+  function sbros() { nachat(S.s.k); }
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var s = S.s, q = velichiny(s), N = Math.round(1 / s.k);
+    var Lm = kx(String.raw`L_\text{м}`), Lk = kx(String.raw`L_\text{к}`);
+    if (s.prog && s.faza === 'razgon')
+      return 'Разворот на 90° по программе. Мотор разгоняет маховик против часовой стрелки ' + A('2 с') +
+        ', корпус набирает скорость по часовой. Потом мотор выключится, корпус довернётся по инерции, ' +
+        'и торможение маховика остановит его ровно на 90°.';
+    if (s.prog && s.faza === 'vybeg')
+      return 'Мотор выключен на ' + A(num(T_VYBEG, 2) + ' с') + ': корпус доворачивается со скоростью ' +
+        A(num(Math.abs(s.wk) * 180 / Math.PI, 1) + '° в секунду') + ', маховик делает в корпусе ' +
+        A(num(Math.abs(q.om) / TWO_PI, 1) + ' оборота в секунду') + '. Выбег подобран так, чтобы торможение кончилось на 90°.';
+    if (s.prog && s.faza === 'tormoz')
+      return 'Мотор тормозит маховик и тем же моментом силы тормозит корпус. Маховик встанет в корпусе, и корпус остановится на 90°.';
+    if (s.itog && pokoj(s)) {
+      var Ni = Math.round(1 / s.itog.k);
+      return 'Корпус развёрнут на ' + A(num(Math.abs(s.itog.dfk) * 180 / Math.PI, 1) + '°') + ' и стоит. Для этого маховик провернулся в корпусе на ' +
+        A(num(Math.abs(s.itog.drel) / TWO_PI, 2) + ' оборота') + '. Полный момент импульса всё время ноль, а сумма ' + kx('mr^2') +
+        ' у маховика в ' + Ni + ' раз меньше, чем у корпуса, поэтому маховик крутится в ' + Ni + ' раз быстрее корпуса и в обратную сторону, а относительно корпуса в ' +
+        (Ni + 1) + ' раз быстрее. Топлива на разворот не ушло.';
+    }
+    if (s.faza === 'razgon')
+      return 'Мотор разгоняет маховик против часовой стрелки и с тем же моментом силы толкает корпус по часовой. Момент маховика ' + Lm +
+        ' растёт, момент корпуса ' + Lk + ' растёт в обратную сторону, их сумма стоит на нуле.';
+    if (s.faza === 'tormoz')
+      return 'Мотор тормозит маховик и тем же моментом силы тормозит корпус. Остановятся они одновременно: полный момент ноль, ' +
+        'и когда маховик перестанет крутиться в корпусе, стоять будут оба.';
+    if (!pokoj(s))
+      return 'Мотор выключен, части крутятся в разные стороны: маховик делает ' + A(num(Math.abs(s.wm) / TWO_PI, 1) + ' оборота в секунду') +
+        ', корпус поворачивается на ' + A(num(Math.abs(s.wk) * 180 / Math.PI, 1) + '° в секунду') + '. ' + Lm + ' и ' + Lk +
+        ' равны по модулю и противоположны. Работа мотора, ' + A(num(s.A, 2) + ' Дж') +
+        ', ушла в энергию вращения, а момента его пара сил системе не добавила. «Остановить маховик» тормозит его тем же мотором.';
+    if (s.fk !== 0)
+      return 'Маховик остановлен, и корпус стоит, но повёрнут на ' + A(num(Math.abs(s.fk) * 180 / Math.PI, 1) + '°') + ' ' +
+        (s.fk < 0 ? 'по часовой стрелке' : 'против часовой стрелки') + '. Маховик за это время провернулся в корпусе на ' +
+        A(num(Math.abs(q.rel), 2) + ' оборота') + '. Полный момент всё время был нулём, топлива на разворот не ушло: ' +
+        'энергию вращения мотор при торможении забрал обратно.';
+    return 'Спутник висит неподвижно, его полный момент импульса ноль, и внешних сил, чтобы это изменить, нет. Мотор действует между ' +
+      'маховиком и корпусом: сколько момента получит маховик, столько же в обратную сторону получит корпус. Ползунок сравнивает маховик ' +
+      'с корпусом по сумме ' + kx('mr^2') + ' всех точек: у части, которая вращается целиком, момент импульса равен этой сумме, ' +
+      'умноженной на угловую скорость. У маховика сумма в ' + A(N + ' раз') + ' меньше, чем у корпуса, потому что маховик легче ' +
+      'и его точки ближе к оси.';
+  }
+
+  var s = S.s;
+  var bolshe = Math.abs(velichiny(s).Lm) > 1.5 * L0;
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Мотор:">
+          <${C.Btn} action=${true} disabled=${!!s.faza || s.prog || bolshe} onClick=${raskrutit}>Раскрутить маховик<//>
+          <${C.Btn} disabled=${pokoj(s) || s.faza === 'tormoz'} onClick=${ostanovit}>Остановить маховик<//>
+        <//>
+        <${C.Group}>
+          <${C.Btn} disabled=${!pokoj(s)} onClick=${razvernut}>Развернуть на 90°<//>
+        <//>
+        <${C.Slider} label="Маховик : корпус" min=${0} max=${SETKA_N.length - 1} step=${1}
+                     value=${nomerNaSetke(ui.k)}
+                     onChange=${otnoshenie} display=${'1 : ' + Math.round(1 / ui.k)} />
+        <${C.Group}>
+          <${C.Btn} onClick=${pauza}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(Razvorot);
+</script>
+</body>
+</html>

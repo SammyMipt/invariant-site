@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Свободное вращение</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-06/">&larr; Неделя 06</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/demo-3d.js"></script>
+<script src="../shared/analytics.js?demo=svobodnoe-vrashchenie"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html, D3 = window.Demo3D;
+var useState = React.useState, useRef = React.useRef, useEffect = React.useEffect;
+
+/* ══════════════════ физика ══════════════════
+
+   Демка 3 шестой недели (бриф briefs/demki_nedelya06.md, № 3; рамка
+   lekciya06_ramka.md §4, шаг «Без опор», §6, демка 3; решения без автора
+   № 8 и № 9). Блоки главы `vrashchenie-bez-opor` и `uravneniya-ejlera`.
+   Тело без опор, внешних сил нет, момента сил относительно центра масс нет.
+   Центр масс стоит, и смотреть есть на что одно: на вращение.
+
+   ЧТО СЧИТАЕТСЯ. Уравнения Эйлера в осях тела, где тензор инерции
+   постоянен и диагонален (оси 1, 2, 3 — главные, I₁ < I₂ < I₃):
+
+       dL/dt = L × ω,     ω = I⁻¹L,  то есть ωᵢ = Lᵢ/Iᵢ.
+
+   Это dL/dt = 0 в пространстве, записанное в осях, которые вращаются с ω.
+   Ориентация тела q (кватернион, тело → мир) идёт отдельно: dq/dt = q·ω/2.
+   Момент импульса в пространстве снимается с состояния, Lмир = R(q)·L, и
+   постоянным не закладывается; стрелка L на сцене рисуется по нему.
+
+   СХЕМА (решение рамки № 8). Неявная средняя точка для L:
+
+       L₊ = L + h·Lm × ω(Lm),     Lm = (L + L₊)/2,
+
+   простыми итерациями от предиктора явного Эйлера, пока поправка убывает,
+   то есть до застоя на округлении (в среднем 8–11 итераций на шаг, не
+   больше 13 на всех пресетах, сотые доли миллисекунды). Ориентация:
+
+       q₊ = q ⊗ (1, h·ωm/2)/√(1 + h²ωm²/4),    ωm = ω(Lm),
+
+   это поворот Кэли cay(hω̂m) = (1 − hω̂m/2)⁻¹(1 + hω̂m/2), записанный
+   кватернионом: поворот вокруг ωm на угол 2·arctg(h|ωm|/2). Почему так.
+   Оба инварианта, |L|² и 2E = L·I⁻¹L, квадратичны, и средняя точка их
+   держит точно: L₊ − L перпендикулярно Lm (держит |L|) и перпендикулярно
+   ωm (держит E). А cay(hω̂m)·L₊ = L равносильно шагу средней точки, поэтому
+   R₊·L₊ = R·L: направление L в пространстве не меняется ни на одном шаге.
+   Все три величины держатся на округлении. Явная схема так не умеет:
+   |L₊|² = |L|² + h²|L × ω|², у средней оси за 100 оборотов +5 % при шаге
+   1/1600 оборота (рамка, решение № 8); РК4 теряет |L| линейно со временем.
+
+   ШАГ 1/100 оборота, h = 2π/(100·ω₀), ω₀ — скорость раскрутки пресета.
+   Шаг задаёт только фазу: время между переворотами у бруска уходит от
+   точного эллиптического на −3,9·10⁻⁵ (4,06637 против 4,06653 оборота).
+
+   ПРОВЕРКА (04.10, hcheck по __demoState и __demoProgon, сверено с
+   python-моделью того же алгоритма; отчёт briefs/demki_nedelya06_
+   svobodnoe-vrashchenie_REPORT.md). Наибольший уход в долях начального
+   значения за 100 оборотов у средней оси бруска: |L| 5,1·10⁻¹⁵, энергия
+   1,1·10⁻¹⁴, вектор L в пространстве 1,6·10⁻¹⁴; за 1000 оборотов
+   1,2·10⁻¹⁴, 2,4·10⁻¹⁴, 3,0·10⁻¹⁴; телефон за 1000 оборотов 1,3·10⁻¹⁴,
+   2,6·10⁻¹⁴, 4,7·10⁻¹⁴. С рассеянием |L| и L в пространстве держатся так
+   же, 10⁻¹⁴. Заявлено «до 10⁻¹² и лучше», запас в 20 раз и больше. Демка
+   меряет эти уходы на ходу (dLmod, dE, dLspace в __demoState).
+
+   ТЕЛА. Брусок со сторонами 1:2:3: 10 × 20 × 30 см, 1,2 кг (абсолютных
+   величин в брифе нет, они выбраны так, что m·a²/12 = 10⁻³ кг·м²). Главные
+   моменты m(b² + c²)/12 выходят ровно 0,005; 0,010; 0,013 кг·м², то есть
+   5:10:13. Ось 1 (наименьший момент) идёт вдоль длинной стороны, ось 3
+   (наибольший) вдоль короткой. Раскрутка 1 об/с: числа брифа для бруска в
+   оборотах, от скорости они не зависят. Телефон 15 × 7 × 0,8 см, 0,2 кг
+   (опись демок, lekciya06_demki_minuty.md): 8,27·10⁻⁵; 3,76·10⁻⁴;
+   4,57·10⁻⁴ кг·м², 1 : 4,55 : 5,52; ось 1 вдоль длины, ось 2 поперёк
+   экрана, ось 3 по толщине. Раскрутка 2 об/с, как в брифе.
+
+   СТАРТ. Угловая скорость в осях тела, в долях ω₀. Брусок вокруг средней
+   оси: (0,01; 1; 0,01), как в брифе; переворот каждые 4,0664 оборота
+   (точно 4,0665 по эллиптическому интегралу, бриф 4,07). Телефон вокруг
+   средней: отклонение 0,1 к длинной оси, (0,1; 1; 0). Почему не
+   (0,1; 1; 0,1) по образцу бруска: тогда первый переворот через 0,515 с, а
+   рамка требует от пресета 0,3–0,5 с. При отклонении 0,1 вдоль осей и по
+   диагоналям, (0,1; 1; 0), (0; 1; 0,1), (0,1; 1; ±0,1), первый переворот
+   выходит от 0,29 до 0,52 с, промежуток от 0,70 до 0,80 с; при (0,1; 1; 0)
+   это 0,369 и 0,739 с, середина обоих диапазонов главы. В промежуточных
+   направлениях промежуток бывает длиннее, сколько угодно: при отклонении
+   (ε cos φ; 1; ε sin φ) с tg φ = √(I₁(I₂ − I₁)/(I₃(I₃ − I₂))), то есть
+   φ = 39,1° у телефона и 38,7° у бруска, старт ложится на сепаратрису,
+   2E = L²/I₂, и промежуток между переворотами уходит в бесконечность.
+   Крайние оси получают тот же по величине толчок: брусок (1; 0,01; 0,01) и
+   (0,01; 0,01; 1), телефон 0,1 к средней оси, (1; 0,1; 0) и (0; 0,1; 1).
+   Ось отходит от L не дальше чем на 2,0° и 0,7° у бруска, на 24,4° и 4,7°
+   у телефона: у телефона ось 1 лёгкая, I₂/I₁ = 4,55, и тот же толчок по ω
+   даёт широкий конус, но переворота нет и там. Ползунок «Отклонение»
+   меняет ε от 0,001 до 0,1 по логарифмической шкале, узор толчка тот же:
+   глава обещает брусок и телефон «с любым отклонением». Выбор тела ставит
+   ε пресета, 0,01 у бруска и 0,1 у телефона.
+
+   ПЕРЕВОРОТ. Средняя ось меняет направление относительно L: знак L₂ (её
+   проекции на L в осях тела) сменился, и |L₂|/|L| перед этим и после было
+   больше 0,9. Время переворота — момент смены знака, линейной
+   интерполяцией между шагами. Порог с запасом: у средней оси |L₂|/|L|
+   доходит до 0,9997 и выше, у крайних осей пресетов не выше 0,41 (телефон
+   вокруг длинной оси). Счётчик прибавляет переворот, когда |L₂|/|L| прошло
+   0,9 по другую сторону: у бруска через полоборота после смены знака, у
+   телефона через 0,3 оборота, на глаз как раз когда тело уже перевернулось.
+
+   РАССЕЯНИЕ. Тело чуть нежёсткое: энергия уходит в тепло, а внешнего
+   момента по-прежнему нет. Модель феноменологическая, без механизма
+   (это говорит подпись):
+
+       dL/dt = L × Ω,    Ω = ω + γ·(L × ω)/|L|,    γ = 0,05.
+
+   Добавка γ·L̂ × (L × ω) перпендикулярна L, и средняя точка держит |L| и с
+   ней; dE/dt = −γ|L × ω|²/|L| ≤ 0, энергия убывает, пока ω не встанет вдоль
+   L, то есть пока тело не закрутится вокруг главной оси, и устойчив из них
+   только минимум энергии при данном |L|: ось наибольшего момента, где
+   E = L²/2I₃. Оси тела поворачиваются с Ω, а не с ω: тогда L × Ω и есть
+   правая часть, тождество Кэли сохраняется, и L в пространстве стоит и с
+   рассеянием. Стрелка ω рисует I⁻¹L; от Ω она отличается на 5 % поперечной
+   части, на глаз это не видно. При γ = 0,05 брусок от наименьшей оси
+   приходит к наибольшей за 44 оборота (|L₃|/|L| > 0,99 дальше всё время),
+   половину энергии теряет к 20-му обороту и по дороге переворачивается
+   дважды, на 23,3 и 25,8 оборота; от средней приходит за 11 оборотов, без
+   переворота. Телефон от длинной оси за 23 оборота, 12 с натуры. Энергия
+   идёт к L²/(2I₃): 0,3849 от начальной у бруска со старта у наименьшей оси
+   (при точном старте на оси было бы I₁/I₃ = 0,3846), 0,7692 у средней.
+
+   ЧЕГО ЗДЕСЬ НЕТ. Тяжести и опор (центр масс стоит), сферы постоянного |L|
+   в осях тела (бриф её не просит). Числа на сцене снимаются с модели, а не
+   подставляются из брифа. */
+
+var TWO_PI = 2 * Math.PI;
+var N_OB = 100;                    /* шагов на оборот: шаг 1/100 оборота */
+var POROG = 0.9;                   /* |L₂|/|L| для засчёта переворота */
+var GAMMA = 0.05;                  /* рассеяние, доля гироскопического члена */
+var ITMAX = 60;                    /* предел итераций средней точки на шаг */
+var SLED_N = 300;                  /* точек следа конца ω: три оборота */
+
+/* Главные моменты бруска (стороны вдоль осей 1, 2, 3) по m(b² + c²)/12. */
+function momenty(m, s) {
+  return [m * (s[1] * s[1] + s[2] * s[2]) / 12, m * (s[0] * s[0] + s[2] * s[2]) / 12,
+          m * (s[0] * s[0] + s[1] * s[1]) / 12];
+}
+
+/* uzor — в какие оси уходит толчок ε у каждой кнопки: брусок по двум
+   другим осям, как (0,01; 1; 0,01) в брифе, телефон по одной (см. СТАРТ). */
+var TELA = {
+  brusok: {
+    m: 1.2, s: [0.30, 0.20, 0.10], w0: TWO_PI, temp: 1, ed: 'об.', eps: 0.01,
+    uzor: { max: [1, 1, 0], mid: [1, 0, 1], min: [0, 1, 1] }
+  },
+  telefon: {
+    m: 0.2, s: [0.15, 0.07, 0.008], w0: 2 * TWO_PI, temp: 0.25, ed: 'с', eps: 0.1,
+    uzor: { max: [0, 1, 0], mid: [1, 0, 0], min: [0, 1, 0] }
+  }
+};
+Object.keys(TELA).forEach(function (k) { TELA[k].I = momenty(TELA[k].m, TELA[k].s); });
+var OS_NOMER = { min: 0, mid: 1, max: 2 };
+var EPS_MIN = 0.001, EPS_MAX = 0.1;    /* ползунок отклонения, логарифмический */
+
+/* Угловая скорость старта в осях тела, в долях ω₀: единица по оси кнопки,
+   ε по осям узора. */
+function startVektor(telo, os, eps) {
+  var u = TELA[telo].uzor[os], st = [u[0] * eps, u[1] * eps, u[2] * eps];
+  st[OS_NOMER[os]] = 1;
+  return st;
+}
+
+/* Отклонение без хвоста знаков: 0,01, 0,012, 0,1. */
+function epsTekst(e) { return String(Number(e.toPrecision(2))).replace('.', ','); }
+
+/* ── векторы ── (короткие имена ради плотности формул) */
+var sub = D3.sub, mul = D3.mul, dot = D3.dot, cross = D3.cross, len = D3.len;
+
+function energiya(L, I) {
+  return 0.5 * (L[0] * L[0] / I[0] + L[1] * L[1] / I[1] + L[2] * L[2] / I[2]);
+}
+
+/* Угловая скорость, с которой поворачиваются оси тела. Без рассеяния это
+   ω = I⁻¹L; с рассеянием добавка γ(L × ω)/|L| (см. выше). */
+function omegaOsej(L, I, g) {
+  var w = [L[0] / I[0], L[1] / I[1], L[2] / I[2]];
+  if (g) {
+    var c = cross(L, w), k = g / len(L);
+    w = [w[0] + k * c[0], w[1] + k * c[1], w[2] + k * c[2]];
+  }
+  return w;
+}
+
+/* Ориентация на старте: L тела уходит в мировую z (вверх), ось тела, хуже
+   всех выровненная с L, кладётся в плоскость xz. Матрица строками a, b, l̂
+   переводит l̂ в z; её кватернион и есть начальная ориентация. */
+function orientaciyaStarta(L) {
+  var l = D3.unit(L), k = 0;
+  for (var i = 1; i < 3; i++) if (Math.abs(l[i]) < Math.abs(l[k])) k = i;
+  var e = [0, 0, 0]; e[k] = 1;
+  var a = D3.unit(sub(e, mul(l, dot(e, l)))), b = cross(l, a);
+  return D3.matToQuat([a[0], a[1], a[2], b[0], b[1], b[2], l[0], l[1], l[2]]);
+}
+
+function nachalo(telo, os, eps) {
+  var T = TELA[telo], I = T.I, w0 = T.w0;
+  if (eps == null) eps = T.eps;
+  var st = startVektor(telo, os, eps);
+  var L = [I[0] * st[0] * w0, I[1] * st[1] * w0, I[2] * st[2] * w0];
+  var q = orientaciyaStarta(L);
+  var M0 = len(L), s0 = L[1] / M0;
+  var s = {
+    telo: telo, os: os, k: OS_NOMER[os], I: I, w0: w0, eps: eps, start: st,
+    Tob: TWO_PI / w0, h: TWO_PI / w0 / N_OB,
+    L: L, q: q, Lpred: L, qpred: q,     /* текущее и предыдущее: кадр рисуется между ними */
+    t: 0, n: 0, acc: 0,
+    Lmir0: D3.quatRotate(q, L), M0: M0, E0: energiya(L, I),
+    g: 0, bylaDissipaciya: false,
+    sL2: s0, storona: Math.abs(s0) > POROG ? (s0 > 0 ? 1 : -1) : 0, tSmeny: null,
+    perevoroty: [],
+    dM: 0, dE: 0, dLs: 0, ugolOsiMax: 0, it: 0, itMax: 0,
+    sled: [], kOmega: 0
+  };
+  s.ugolOsiMax = ugolOsiSL(s);
+  return s;
+}
+
+/* Угол оси старта с L, в градусах: atan2, а не arccos, иначе у нуля шум. */
+function ugolOsiSL(s) {
+  var L = s.L, k = s.k, a = L[(k + 1) % 3], b = L[(k + 2) % 3];
+  return Math.atan2(Math.sqrt(a * a + b * b), Math.abs(L[k])) * 180 / Math.PI;
+}
+
+/* Один шаг h: средняя точка для L, поворот Кэли для q, учёт переворотов и
+   уходов инвариантов. Итерации идут, пока поправка убывает, то есть до
+   застоя на округлении: инварианты держатся точно только в неподвижной
+   точке итераций, и порог 1e−15 оставлял телефону за 1000 оборотов уход
+   1,5·10⁻¹³, а застой даёт 1,3·10⁻¹⁴ ценой полутора итераций на шаг. */
+function shag(s) {
+  var L = s.L, h = s.h, I = s.I, g = s.g;
+  var f = cross(L, omegaOsej(L, I, g));
+  var Ln = [L[0] + h * f[0], L[1] + h * f[1], L[2] + h * f[2]];
+  var it = 0, dPred = Infinity;
+  for (it = 1; it <= ITMAX; it++) {
+    var Lm = [(L[0] + Ln[0]) / 2, (L[1] + Ln[1]) / 2, (L[2] + Ln[2]) / 2];
+    f = cross(Lm, omegaOsej(Lm, I, g));
+    var Lx = [L[0] + h * f[0], L[1] + h * f[1], L[2] + h * f[2]];
+    var d = Math.max(Math.abs(Lx[0] - Ln[0]), Math.abs(Lx[1] - Ln[1]), Math.abs(Lx[2] - Ln[2]));
+    Ln = Lx;
+    if (d === 0 || d >= dPred) break;
+    dPred = d;
+  }
+  var Om = omegaOsej([(L[0] + Ln[0]) / 2, (L[1] + Ln[1]) / 2, (L[2] + Ln[2]) / 2], I, g);
+  var a = mul(Om, h / 2), c = 1 / Math.sqrt(1 + dot(a, a));
+  s.Lpred = L; s.qpred = s.q;
+  s.q = D3.quatNorm(D3.quatMul(s.q, [c, a[0] * c, a[1] * c, a[2] * c]));
+  s.L = Ln;
+  s.n += 1; s.t = s.n * h;
+  s.it += Math.min(it, ITMAX); s.itMax = Math.max(s.itMax, Math.min(it, ITMAX));
+
+  /* уходы инвариантов, в долях начальных */
+  var M = len(Ln);
+  s.dM = Math.max(s.dM, Math.abs(M / s.M0 - 1));
+  if (!s.bylaDissipaciya) s.dE = Math.max(s.dE, Math.abs(energiya(Ln, I) / s.E0 - 1));
+  s.dLs = Math.max(s.dLs, len(sub(D3.quatRotate(s.q, Ln), s.Lmir0)) / s.M0);
+  s.ugolOsiMax = Math.max(s.ugolOsiMax, ugolOsiSL(s));
+
+  /* переворот средней оси: смена знака L₂ между порогами ±0,9 */
+  var sp = s.sL2, sn = Ln[1] / M;
+  if ((sn > 0) !== (sp > 0)) s.tSmeny = s.t - h * Math.abs(sn) / (Math.abs(sn) + Math.abs(sp));
+  if (Math.abs(sn) > POROG && (sn > 0 ? 1 : -1) !== s.storona) {
+    if (s.storona !== 0 && s.tSmeny !== null) s.perevoroty.push(s.tSmeny);
+    s.storona = sn > 0 ? 1 : -1;
+  }
+  s.sL2 = sn;
+
+  /* след конца ω в пространстве, в рад/с; в длину стрелки его переводит
+     kOmega при рисовании */
+  s.sled.push(D3.quatRotate(s.q, [Ln[0] / I[0], Ln[1] / I[1], Ln[2] / I[2]]));
+  if (s.sled.length > SLED_N) s.sled.shift();
+}
+
+/* Прогон без анимации для автопроверки: тело, ось, сколько оборотов,
+   с рассеянием или без. Тот же shag, что в кадре. */
+function progon(opt) {
+  var s = nachalo(opt.telo || 'brusok', opt.os || 'mid', opt.eps);
+  if (opt.rasseyanie) { s.g = GAMMA; s.bylaDissipaciya = true; }
+  var n = Math.round((opt.oboroty || 100) * N_OB);
+  for (var i = 0; i < n; i++) shag(s);
+  return svodka(s);
+}
+
+/* Показания: всё в СИ, кроме оговорённого (обороты — в оборотах раскрутки,
+   углы в градусах, уходы безразмерные). */
+function svodka(s) {
+  var I = s.I, L = s.L, M = len(L), E = energiya(L, I);
+  var w = [L[0] / I[0], L[1] / I[1], L[2] / I[2]];
+  var R = D3.quatToMat(s.q);
+  var Lm = D3.matVec(R, L), wm = D3.matVec(R, w);
+  var p = s.perevoroty, np = p.length;
+  return {
+    preset: s.telo, axis: s.os, eps: s.eps, start: s.start.slice(),
+    I: I.slice(), omega0: s.w0, Tturn: s.Tob, h: s.h,
+    t: s.t, turns: s.t / s.Tob,
+    omegaBody: w, omegaWorld: wm, Lbody: L.slice(), L: Lm, Lmod: M, E: E,
+    Lmod0: s.M0, E0: s.E0, Lratio: M / s.M0, Eratio: E / s.E0,
+    Elimit: M * M / (2 * I[2]) / s.E0,
+    flips: np, flipTimes: p.slice(-40),
+    firstFlip: np ? p[0] : null,
+    flipPeriod: np > 1 ? p[np - 1] - p[np - 2] : null,
+    flipPeriodTurns: np > 1 ? (p[np - 1] - p[np - 2]) / s.Tob : null,
+    firstFlipTurns: np ? p[0] / s.Tob : null,
+    dissipation: s.g > 0, gamma: s.g,
+    dLmod: s.dM, dE: s.bylaDissipaciya ? null : s.dE, dLspace: s.dLs,
+    omegaLAngle: D3.angle(w, L) * 180 / Math.PI,
+    axisLAngle: ugolOsiSL(s), axisLAngleMax: s.ugolOsiMax,
+    L3share: Math.abs(L[2]) / M, omegaAlongL: dot(w, L) / M,
+    iterMean: s.n ? s.it / s.n : 0, iterMax: s.itMax
+  };
+}
+
+/* Русская запятая и настоящий минус; крохи печатаются нулём. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева тело в пространстве, камера ортографическая (Demo3D), её можно
+   вращать мышью. Момент импульса L смотрит вверх, по мировой z, и стоит.
+   Тело нарисовано двумя половинами вдоль средней оси: зелёная половина
+   со стороны +2, серая со стороны −2. Переворот виден так: зелёная
+   половина была сверху, у L, и ушла вниз. Стрелки идут из центра масс;
+   часть внутри тела идёт штрихом поверх него, как невидимая линия на
+   чертеже. Длины в наибольших полуразмерах тела: у L всегда 1,8, у ω 1,45
+   на старте, дальше по модулю ω. L шире и длиннее, ω тоньше и рисуется
+   поверх: когда они вдоль, видны обе. В свободном вращении проекция ω на L
+   постоянна, ω·L = 2E, поэтому конец ω ходит в плоскости, перпендикулярной
+   L, и след его плоский; с рассеянием плоскость опускается. Справа
+   показания. */
+
+var W = 1000, HGT = 440;
+/* Цвета векторов те же, что у гантели на моторе и на рисунках главы: L
+   бирюзовый (palette.teal, --fig-a), ω оранжевый (palette.orange, --fig-b).
+   Половина тела со стороны +2 зелёная: не спорит ни с L, ни с ω. */
+var CVET_L = D3.palette.teal, CVET_W = D3.palette.orange;
+var CVET_PLUS = D3.palette.green, CVET_MINUS = [112, 122, 150];
+var DL_L = 1.8, DL_W = 1.45;       /* длины стрелок в полуразмерах тела */
+var RX = 985, RY = [46, 126, 206, 286, 366];
+
+function SvobodnoeVrashchenie() {
+  var st = useRef(null);
+  if (!st.current) {
+    st.current = {
+      s: nachalo('brusok', 'mid'), temp: TELA.brusok.temp, eps: TELA.brusok.eps, idet: true,
+      cam: D3.camera({ cx: 360, cy: 252, scale: 95, az: 30, el: 18 })
+    };
+  }
+  var m = st.current;
+  var uiPara = useState({ telo: 'brusok', os: 'mid', diss: false, temp: TELA.brusok.temp,
+                          eps: TELA.brusok.eps, idet: true });
+  var ui = uiPara[0], setUi = uiPara[1];
+
+  function obnovit() {
+    setUi({ telo: m.s.telo, os: m.s.os, diss: m.s.g > 0, temp: m.temp, eps: m.eps, idet: m.idet });
+  }
+
+  /* Объект показаний живёт весь сеанс и правится на месте: проверка читает
+     его после __demoTick, когда рендера компонента не было. */
+  var sost = useRef({}).current;
+  function pokazaniya() {
+    var v = svodka(m.s);
+    for (var k in v) sost[k] = v[k];
+    sost.tempo = m.temp; sost.running = m.idet;
+    window.__demoState = sost;
+  }
+
+  function start(telo, os) {
+    var bylo = m.s.g > 0;
+    m.s = nachalo(telo, os, m.eps);
+    m.s.kOmega = 0;
+    if (bylo) { m.s.g = GAMMA; m.s.bylaDissipaciya = true; }
+    m.idet = true; pokazaniya(); obnovit();
+  }
+
+  /* Строка под сценой собирается React-ом и сама не обновляется: её
+     перерисовывают новый переворот и, раз в полсекунды показа, рост угла
+     у крайних осей и уход энергии в рассеянии. */
+  function step(dt) {
+    var s = m.s;
+    if (m.idet) {
+      s.acc += dt * m.temp;
+      var n = Math.min(4000, Math.floor(s.acc / s.h + 1e-9));
+      for (var i = 0; i < n; i++) shag(s);
+      s.acc -= n * s.h;
+      if (s.acc < 0) s.acc = 0;
+      m.tik = (m.tik || 0) + dt;
+      if (s.perevoroty.length !== m.pokazano || m.tik > 0.5) {
+        m.pokazano = s.perevoroty.length; m.tik = 0; obnovit();
+      }
+    }
+    pokazaniya();
+  }
+
+  /* Кадр рисуется между предыдущим и текущим шагом (запаздывание на один
+     шаг, около 10 мс): шагов на кадр бывает то один, то два, и без
+     сглаживания тело бы дёргалось. Модель и показания стоят на сетке шагов. */
+  function kadr() {
+    var s = m.s, f = s.h > 0 ? Math.min(1, s.acc / s.h) : 1;
+    var a = s.qpred, b = s.q;
+    if (D3.dot([a[1], a[2], a[3]], [b[1], b[2], b[3]]) + a[0] * b[0] < 0) b = b.map(function (x) { return -x; });
+    var q = D3.quatNorm([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f,
+                         a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f]);
+    var L = D3.lerp(s.Lpred, s.L, f);
+    return { q: q, L: L };
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = 'rgb(' + tone.ink + ')', mut = 'rgba(' + tone.muted + ',.95)';
+    var s = m.s, T = TELA[s.telo], cam = m.cam, v = cam.frame().v;
+    var k0 = kadr(), R = D3.quatToMat(k0.q), I = s.I;
+
+    /* полуразмеры тела в долях наибольшего */
+    var hm = Math.max(T.s[0], T.s[1], T.s[2]) / 2;
+    var hh = [T.s[0] / 2 / hm, T.s[1] / 2 / hm, T.s[2] / 2 / hm];
+
+    /* стрелки: L по z постоянной длины, ω в долях её начальной длины */
+    var wb = [k0.L[0] / I[0], k0.L[1] / I[1], k0.L[2] / I[2]];
+    if (!s.kOmega) {
+      var st0 = s.start;
+      s.kOmega = DL_W / (s.w0 * Math.sqrt(st0[0] * st0[0] + st0[1] * st0[1] + st0[2] * st0[2]));
+    }
+    var konL = [0, 0, DL_L], konW = mul(D3.matVec(R, wb), s.kOmega);
+
+    /* Где стрелка из центра выходит из тела: луч в осях тела, ближайшая
+       грань. Грань смотрит на зрителя: наружная часть стрелки перед телом,
+       иначе за ним. */
+    function vyhod(kon) {
+      var d = D3.matVec(D3.matT(R), D3.unit(kon)), t = Infinity, os = 0;
+      for (var i = 0; i < 3; i++) {
+        var ti = Math.abs(d[i]) > 1e-12 ? hh[i] / Math.abs(d[i]) : Infinity;
+        if (ti < t) { t = ti; os = i; }
+      }
+      var n = [R[os] * Math.sign(d[os]), R[3 + os] * Math.sign(d[os]), R[6 + os] * Math.sign(d[os])];
+      return { t: t, vperedi: dot(n, v) > 0 };
+    }
+    /* Стрелка в три захода. 'zad': наружная часть, если выходит через грань,
+       которая смотрит от зрителя (до тела, тело её закроет). 'vnutri': часть
+       внутри тела штрихом поверх него, как невидимая линия на чертеже; если
+       стрелка целиком внутри (ω в рассеянии короче полуразмера тела), то вся
+       штрихом и с остриём. 'pered': наружная часть перед телом. */
+    function strelka(kon, st0, zahod) {
+      var dl = len(kon), vy = vyhod(kon), vnutri = dl <= vy.t + 0.02;
+      var shtrih = { color: st0.color, width: Math.max(2, st0.width * 0.45), dash: [6, 5], alpha: 0.85 };
+      if (zahod === 'vnutri') {
+        if (vnutri) D3.arrow(ctx, cam, [0, 0, 0], kon, Object.assign({ head: 14 }, shtrih));
+        else D3.segment(ctx, cam, [0, 0, 0], mul(D3.unit(kon), vy.t), shtrih);
+        return;
+      }
+      if (vnutri || vy.vperedi !== (zahod === 'pered')) return;
+      D3.arrow(ctx, cam, mul(D3.unit(kon), vy.t), kon, st0);
+    }
+    /* Подписи ставятся после всего, чтобы тело их не закрыло. У L подпись за
+       концом, вдоль стрелки (как у Demo3D.arrow): L длиннее ω, и над её
+       концом ничего нет. У ω сбоку от конца, с той стороны от линии L, где
+       конец ω: когда ω почти вдоль L, подпись за концом легла бы на древко L. */
+    function podpis(kon, tekst, cvet, sboku) {
+      var pk = cam.project(kon), pn = cam.project(mul(kon, 0.9)), size = 22;
+      ctx.font = size + 'px "Golos Text", system-ui, sans-serif';
+      var tw = ctx.measureText(tekst).width, th = size * 0.55;
+      if (sboku) {
+        var p0 = cam.project([0, 0, 0]), pl = cam.project(konL);
+        var lx = p0[0] + (pl[0] - p0[0]) * (pk[1] - p0[1]) / ((pl[1] - p0[1]) || 1);
+        var zn = pk[0] > lx + 3 ? 1 : -1;
+        C.label(ctx, pk[0] + zn * (12 + tw / 2), pk[1] + size * 0.34, tekst, size, cvet, 'center');
+        return;
+      }
+      var dx = pk[0] - pn[0], dy = pk[1] - pn[1], dl = Math.sqrt(dx * dx + dy * dy) || 1;
+      var ux = dx / dl, uy = dy / dl, gap = 8 + Math.abs(ux) * tw / 2 + Math.abs(uy) * th;
+      C.label(ctx, pk[0] + ux * gap, pk[1] + uy * gap + size * 0.34, tekst, size, cvet, 'center');
+    }
+    var stL = { color: CVET_L, width: 9, head: 26 };
+    var stW = { color: CVET_W, width: 4 };
+
+    /* что за телом */
+    strelka(konL, stL, 'zad');
+    strelka(konW, stW, 'zad');
+
+    /* тело двумя половинами вдоль оси 2, дальняя первой */
+    var c2 = [R[1], R[4], R[7]];
+    var polovina = function (zn) {
+      var c = mul(c2, zn * hh[1] / 2);
+      D3.box(ctx, cam, c, R, [hh[0], hh[1] / 2, hh[2]],
+             { color: zn > 0 ? CVET_PLUS : CVET_MINUS, edge: 'rgba(18,20,28,.55)' });
+    };
+    if (dot(c2, v) > 0) { polovina(-1); polovina(1); } else { polovina(1); polovina(-1); }
+
+    /* части стрелок внутри тела, штрихом */
+    strelka(konL, stL, 'vnutri');
+    strelka(konW, stW, 'vnutri');
+
+    /* след конца ω за последние три оборота: старое бледнее */
+    var sl = s.sled, ns = sl.length;
+    if (ns > 2) {
+      var P = sl.slice(0, ns - 1).map(function (p) { return mul(p, s.kOmega); });
+      P.push(konW);
+      var KUS = 12;
+      for (var i0 = 0; i0 < P.length - 1; i0 += KUS) {
+        var kus = P.slice(i0, Math.min(P.length, i0 + KUS + 1));
+        D3.curve(ctx, cam, kus, { color: CVET_W, width: 2, alpha: 0.08 + 0.62 * (i0 + KUS) / P.length });
+      }
+    }
+
+    /* что перед телом, и подписи поверх всего */
+    strelka(konL, stL, 'pered');
+    strelka(konW, stW, 'pered');
+    podpis(konL, 'L', CVET_L, false);
+    podpis(konW, 'ω', CVET_W, true);
+
+    /* показания */
+    var p = s.perevoroty, np = p.length, ed = T.ed;
+    var naEd = function (tt) { return ed === 'с' ? num(tt, 2) : num(tt / s.Tob, 2); };
+    C.readout(ctx, RX, RY[0], 'ПЕРЕВОРОТЫ', String(np), 'rgb(' + tone.accent + ')');
+    C.readout(ctx, RX, RY[1], 'ПЕРВЫЙ ПЕРЕВОРОТ, ' + ed, np ? naEd(p[0]) : '—', ink);
+    C.readout(ctx, RX, RY[2], 'ПРОМЕЖУТОК, ' + ed, np > 1 ? naEd(p[np - 1] - p[np - 2]) : '—', ink);
+    C.readout(ctx, RX, RY[3], '|L| / |L₀|', num(len(s.L) / s.M0, 9), CVET_L);
+    C.readout(ctx, RX, RY[4], 'E / E₀', num(energiya(s.L, I) / s.E0, 6),
+              s.g > 0 ? 'rgb(' + tone.accent + ')' : ink);
+
+    /* время и темп */
+    var tst = 't = ' + num(s.t, 2) + ' с';
+    if (m.temp === 0.25) tst += ',  показ вчетверо медленнее';
+    else if (m.temp === 4) tst += ',  показ вчетверо быстрее';
+    C.label(ctx, 24, 428, tst, 17, mut, 'left');
+    C.label(ctx, 24, 403, 'сцену можно повернуть мышью', 17, 'rgba(' + tone.muted + ',.7)', 'left');
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  useEffect(function () { return D3.dragCamera(ref.current, m.cam); }, []);
+  if (!window.__demoState) pokazaniya();
+  window.__demoProgon = progon;
+
+  function vybratTelo(telo) { m.temp = TELA[telo].temp; m.eps = TELA[telo].eps; start(telo, m.s.os); }
+  function vybratOs(os) { start(m.s.telo, os); }
+  function rasseyanie() {
+    var s = m.s;
+    if (s.g > 0) s.g = 0;
+    else { s.g = GAMMA; s.bylaDissipaciya = true; }
+    obnovit();
+  }
+  function temp(x) { m.temp = x; obnovit(); }
+  function pauza() { m.idet = !m.idet; obnovit(); }
+  function sbros() { start(m.s.telo, m.s.os); }
+  /* ползунок даёт любое число; округляем до двух значащих, чтобы подпись
+     и показания говорили одно и то же */
+  function otklonenie(v) {
+    m.eps = C.clamp(Number(v.toPrecision(2)), EPS_MIN, EPS_MAX);
+    start(m.s.telo, m.s.os);
+  }
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var s = m.s, p = s.perevoroty, np = p.length;
+    var brusok = s.telo === 'brusok';
+    /* дробное число оборотов: «4,07 оборота», всегда родительный единственного */
+    var naEd = function (tt) { return brusok ? num(tt / s.Tob, 2) + ' оборота' : num(tt, 2) + ' с'; };
+    if (s.g > 0) {
+      var Er = energiya(s.L, s.I) / s.E0, Elim = len(s.L) * len(s.L) / (2 * s.I[2]) / s.E0;
+      /* «пришло» залипает: пока затухает покачивание, доля L₃ ещё
+         несколько оборотов ходит около 0,99, и строка бы мигала */
+      s.prishlo = s.prishlo || Math.abs(s.L[2]) / len(s.L) > 0.99;
+      var tam = s.prishlo;
+      return 'Рассеяние: тело чуть нежёсткое, энергия уходит в тепло, а внешнего момента по-прежнему нет, ' +
+        'и L не меняется ни по модулю, ни по направлению. Энергия ' + A(num(Er, 3)) + ' от начальной и идёт к ' +
+        A(num(Elim, 3)) + ': при том же |L| меньше не бывает, это вращение вокруг оси наибольшего момента' +
+        (tam ? ', и тело к нему пришло. ' : '. ') + 'Модель рассеяния условная, без механизма.';
+    }
+    if (s.bylaDissipaciya) {
+      return 'Рассеяние выключено, дальше тело вращается свободно, с той энергией, что осталась: ' +
+        A(num(energiya(s.L, s.I) / s.E0, 3)) + ' от начальной при том же L. «Сброс» начинает заново.';
+    }
+    var e = epsTekst(s.eps);
+    var pro = {
+      brusok: { mid: 'Брусок 1:2:3 раскручен вокруг средней оси с отклонением ' + e + '. ',
+                max: 'Брусок 1:2:3 раскручен вокруг наибольшей оси, вдоль короткой стороны, с отклонением ' + e + '. ',
+                min: 'Брусок 1:2:3 раскручен вокруг наименьшей оси, вдоль длинной стороны, с отклонением ' + e + '. ' },
+      telefon: { mid: 'Телефон 15 × 7 × 0,8 см брошен с 2 об/с вокруг средней оси, поперёк экрана, с отклонением ' + e + ' к длинной оси. ',
+                 max: 'Телефон брошен с 2 об/с вокруг наибольшей оси, по толщине, с отклонением ' + e + ' к средней оси. ',
+                 min: 'Телефон брошен с 2 об/с вокруг наименьшей оси, вдоль длины, с отклонением ' + e + ' к средней оси. ' }
+    }[s.telo][s.os];
+    if (s.os === 'mid') {
+      var chisla = np === 0 ? ''
+        : 'Первый переворот через ' + A(naEd(p[0])) + (brusok ? '' : ', ещё в полёте') +
+          (np > 1 ? ', дальше каждые ' + A(naEd(p[np - 1] - p[np - 2])) : '') + '.';
+      return pro + 'Момента сил нет, и L стоит; ω ходит вокруг него, а средняя ось переворачивается: ' +
+        'зелёная половина тела уходит от L вниз и возвращается. ' + chisla;
+    }
+    return pro + 'Ось ходит вокруг неподвижного L и отходит от него не дальше чем на ' + A(num(s.ugolOsiMax, 1) + '°') +
+      ': вращение вокруг крайней оси устойчиво, переворотов ' + (np ? A(String(np)) : 'нет') + '.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Тело:">
+          <${C.Btn} active=${ui.telo === 'brusok'} onClick=${function () { vybratTelo('brusok'); }}>брусок 1:2:3<//>
+          <${C.Btn} active=${ui.telo === 'telefon'} onClick=${function () { vybratTelo('telefon'); }}>телефон<//>
+        <//>
+        <${C.Group} label="Вокруг оси:">
+          <${C.Btn} active=${ui.os === 'max'} onClick=${function () { vybratOs('max'); }}>наибольшей<//>
+          <${C.Btn} active=${ui.os === 'mid'} onClick=${function () { vybratOs('mid'); }}>средней<//>
+          <${C.Btn} active=${ui.os === 'min'} onClick=${function () { vybratOs('min'); }}>наименьшей<//>
+        <//>
+        <${C.Slider} label="Отклонение:" min=${EPS_MIN} max=${EPS_MAX} log=${true} value=${ui.eps}
+                     onChange=${otklonenie} display=${epsTekst(ui.eps)} />
+        <${C.Group} label="Темп:">
+          <${C.Btn} active=${ui.temp === 0.25} onClick=${function () { temp(0.25); }}>¼<//>
+          <${C.Btn} active=${ui.temp === 1} onClick=${function () { temp(1); }}>1<//>
+          <${C.Btn} active=${ui.temp === 4} onClick=${function () { temp(4); }}>4<//>
+        <//>
+        <${C.Group}>
+          <${C.Btn} active=${ui.diss} onClick=${rasseyanie}>Рассеяние<//>
+          <${C.Btn} onClick=${pauza}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(SvobodnoeVrashchenie);
+</script>
+</body>
+</html>

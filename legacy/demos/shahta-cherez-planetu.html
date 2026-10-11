@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Шахта через планету</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-05/">&larr; Неделя 05</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=shahta-cherez-planetu"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Бриф briefs/demki_nedelya05.md, № 9. Опора в главе одна фраза блока
+   `zakon-tyagoteniya`: шар, плотность которого зависит только от
+   расстояния до центра, снаружи притягивает как точка, это следует из
+   теоремы Гаусса, и полностью о ней речь пойдёт в электростатике (решение
+   автора по развилке 9). Демка держится той же теоремы без вывода: на
+   глубине r тело притягивает только шар радиуса r под ним, а слой сверху в
+   сумме не тянет никуда. Поэтому ускорение в шахте
+       g(r) = G m(r) / r²,
+   где m(r) масса планеты внутри радиуса r. Через центр прорыта прямая
+   шахта, тело отпущено без скорости у её устья; трения, воздуха и
+   вращения Земли нет.
+
+   ЧИСЛА ГЛАВЫ. GM = 3,986·10¹⁴ м³/с², радиус 6371 км (блок
+   `kosmicheskie-skorosti`), G = 6,674·10⁻¹¹ Н·м²/кг² (`zakon-tyagoteniya`);
+   отсюда масса 5,972·10²⁴ кг и средняя плотность 5,51 г/см³, у главы
+   «около 5,5 плотности воды» по Кавендишу. Ускорение у поверхности
+   GM/R² = 9,820 м/с², первая космическая 7,91 км/с.
+
+   ТРИ ПЛАНЕТЫ С ОДНОЙ МАССОЙ. Полная масса у всех одна, и снаружи поле у
+   них одно, GM/r²: на графике три кривые над поверхностью сливаются в
+   одну, и спутник у самой поверхности летит у всех одинаково.
+
+   Однородная: m(r) = M r³/R³, g = GM r/R³ растёт от центра линейно.
+   Уравнение шахты ẍ = −(GM/R³) x есть уравнение грузика на пружине с
+   ω² = GM/R³, то есть тем же, что у спутника на орбите радиуса R. Период
+   2π√(R³/GM) = 2π√(R/g₀) = 84,35 мин (бриф пишет 84,4: это то же
+   выражение при g = 9,81), до другой стороны 42,17 мин, полвитка
+   низкого спутника. Больше того, тело всё время идёт точно под спутником:
+   x(t) = R cos ωt есть проекция его положения на ось шахты. В центре
+   скорость √(GM/R) = 7,91 км/с, первая космическая.
+
+   Земля по модели PREM: A. M. Dziewonski, D. L. Anderson, Preliminary
+   reference Earth model, Phys. Earth Planet. Inter. 25, 297–356 (1981),
+   таблица 1. Плотность в слоях задана многочленами от x = r/6371 км, в
+   г/см³; массу m(r) даёт точный интеграл многочленов, 4π∫ρ r² dr. Сверка
+   таблицы: масса PREM по этим многочленам 5,9732·10²⁴ кг (у PREM
+   5,974·10²⁴), безразмерный момент инерции I/(MR²) = 0,3308 (у PREM
+   0,3308), ускорение на границе ядра 10,69 м/с². Масса PREM на 0,013 %
+   больше массы из GM главы; плотность PREM всюду уменьшена на эти
+   0,013 %, чтобы все три планеты весили одинаково. Пролёт 38,18 мин, то есть 38 мин 11 с;
+   то же число дал A. R. Klotz, The gravity tunnel in a non-uniform Earth,
+   Am. J. Phys. 83, 231–237 (2015).
+
+   Ядро и мантия: две однородные части. Граница ядра на 3480 км, как в
+   PREM, и масса ядра та же, 32,47 % массы Земли; плотность ядра выходит
+   10,99 г/см³, мантии 4,45 г/см³. Пролёт 38,88 мин, на 3,29 мин быстрее
+   однородной планеты; PREM выигрывает 3,99 мин, так что двух плотностей
+   хватает на четыре пятых выигрыша настоящей Земли (82 %). В мантии ускорение
+   почти стоит: m(r) растёт с высотой почти так же, как r². Точнее, g
+   постоянно там, где местная плотность равна двум третям средней
+   плотности шара под телом; у границы ядра мантия легче этого, у
+   поверхности тяжелее, и g проходит неглубокий минимум.
+
+   СЧЁТ. Скоростной Верле, шаг H = 0,5 с модельного времени: полшага
+   скорости, шаг положения, полшаг скорости. Ускорение меняет знак
+   вместе с x, в центре оно ноль и непрерывно. Время до другой стороны
+   снимается с модели: момент, когда скорость, отрицательная всю дорогу,
+   впервые становится неотрицательной, уточнённый линейной интерполяцией
+   внутри шага. Скорость в центре так же снимается при смене знака x.
+   Спутник на круговой орбите радиуса R считается тем же Верле на
+   плоскости в поле GM/r².
+   Проверка (прогон __demoProgon, записан в отчёте): при шаге 2; 0,5 и
+   0,1 с время пролёта однородной планеты 42,17366; 42,17367 и 42,17367
+   мин, формула π√(R³/GM) даёт 42,17367; у PREM 38,18076 при всех трёх
+   шагах. Удельная энергия v²/2 + Φ(x) за десять колебаний при шаге
+   0,5 с отходит от начальной не больше чем на 5·10⁻⁷ своей величины
+   (однородная 5·10⁻⁸, PREM 1,4·10⁻⁷, ядро и мантия 4·10⁻⁷: у них излом g
+   на границе ядра). Потенциал Φ(r) взят таблицей через 1 км от
+   Φ(R) = −GM/R интегралом g по Симпсону и читается эрмитовой
+   интерполяцией с g как производной. Тело и проекция спутника в
+   однородной планете к приходу расходятся на 1,2 м. */
+
+var GM = 3.986e14;                 /* м³/с² */
+var R = 6.371e6;                   /* радиус Земли, м */
+var G = 6.674e-11;                 /* Н·м²/кг² */
+var R_YADRO = 3.48e6;              /* граница ядра и мантии в PREM, м */
+var H = 0.5;                       /* шаг счёта, с */
+var MASSA = GM / G;
+var OBJEM = 4 / 3 * Math.PI * R * R * R;
+var RHO_SR = MASSA / OBJEM;        /* 5514 кг/м³ */
+var TWO_PI = 2 * Math.PI;
+
+/* PREM, таблица 1: верхний радиус слоя в метрах и коэффициенты
+   c₀ + c₁x + c₂x² + c₃x³ в г/см³. Слои 3480–3630, 3630–5600 и 5600–5701 км
+   в PREM описаны одним многочленом и сведены в одну строку. */
+var PREM = [
+  [1221.5e3, 13.0885, 0, -8.8381, 0],          /* внутреннее ядро */
+  [3480e3, 12.5815, -1.2638, -3.6426, -5.5281], /* внешнее ядро */
+  [5701e3, 7.9565, -6.4761, 5.5283, -3.0807],   /* нижняя мантия */
+  [5771e3, 5.3197, -1.4836, 0, 0],              /* переходная зона */
+  [5971e3, 11.2494, -8.0298, 0, 0],
+  [6151e3, 7.1089, -3.8045, 0, 0],
+  [6346.6e3, 2.6910, 0.6924, 0, 0],             /* верхняя мантия */
+  [6356e3, 2.900, 0, 0, 0],                     /* кора */
+  [6368e3, 2.600, 0, 0, 0],
+  [6371e3, 1.020, 0, 0, 0]                      /* океан */
+];
+
+/* ∫ρ x² dx от нуля до x по одному многочлену */
+function pervoobr(c, x) {
+  return c[1] * x * x * x / 3 + c[2] * Math.pow(x, 4) / 4 + c[3] * Math.pow(x, 5) / 5 + c[4] * Math.pow(x, 6) / 6;
+}
+/* масса PREM внутри радиуса r, кг, как в таблице */
+function massaPremTabl(r) {
+  var x = Math.min(r, R) / R, m = 0, x0 = 0;
+  for (var i = 0; i < PREM.length && x0 < x; i++) {
+    var x1 = Math.min(PREM[i][0] / R, x);
+    if (x1 > x0) m += pervoobr(PREM[i], x1) - pervoobr(PREM[i], x0);
+    x0 = PREM[i][0] / R;
+  }
+  return 4 * Math.PI * R * R * R * m * 1000;
+}
+var MASSA_PREM = massaPremTabl(R);            /* 5,9732·10²⁴ кг */
+var K_PREM = MASSA / MASSA_PREM;              /* 0,99987 */
+var DOLYA_YADRA = massaPremTabl(R_YADRO) / MASSA_PREM;   /* 0,3247 */
+var RHO_YADRA = DOLYA_YADRA * MASSA / (4 / 3 * Math.PI * Math.pow(R_YADRO, 3));
+var RHO_MANTII = (1 - DOLYA_YADRA) * MASSA / (OBJEM - 4 / 3 * Math.PI * Math.pow(R_YADRO, 3));
+
+var MODELI = ['odnorodnaya', 'dvuhslojnaya', 'prem'];
+var IMYA = { odnorodnaya: 'однородная', dvuhslojnaya: 'ядро и мантия', prem: 'Земля (PREM)' };
+var CVET = { odnorodnaya: '77,182,198', dvuhslojnaya: '166,195,90', prem: '224,138,82' };
+
+/* Доля массы внутри радиуса r. */
+function dolya(model, r) {
+  if (r >= R) return 1;
+  var u = r / R;
+  if (model === 'odnorodnaya') return u * u * u;
+  if (model === 'dvuhslojnaya') {
+    if (r <= R_YADRO) return DOLYA_YADRA * Math.pow(r / R_YADRO, 3);
+    return DOLYA_YADRA + (1 - DOLYA_YADRA) * (r * r * r - Math.pow(R_YADRO, 3)) / (R * R * R - Math.pow(R_YADRO, 3));
+  }
+  return massaPremTabl(r) / MASSA_PREM;
+}
+
+/* Ускорение свободного падения на расстоянии r от центра, м/с². */
+function gOt(model, r) {
+  if (r <= 0) return 0;
+  return GM * dolya(model, r) / (r * r);
+}
+
+/* Плотность на радиусе r, кг/м³: только для рисунка и подписей. */
+function plotnost(model, r) {
+  if (model === 'odnorodnaya') return RHO_SR;
+  if (model === 'dvuhslojnaya') return r <= R_YADRO ? RHO_YADRA : RHO_MANTII;
+  var x = r / R;
+  for (var i = 0; i < PREM.length; i++) {
+    if (r <= PREM[i][0] + 1e-6) {
+      var c = PREM[i];
+      return K_PREM * 1000 * (c[1] + c[2] * x + c[3] * x * x + c[4] * x * x * x);
+    }
+  }
+  return 0;
+}
+
+/* Таблица потенциала через 1 км для проверки энергии: Φ(R) = −GM/R,
+   вглубь Φ(r) = Φ(r + Δ) − ∫g dr по Симпсону. */
+var N_PHI = 6371, D_PHI = R / N_PHI;
+var PHI = {};
+MODELI.forEach(function (m) {
+  var t = new Float64Array(N_PHI + 1);
+  t[N_PHI] = -GM / R;
+  for (var i = N_PHI - 1; i >= 0; i--) {
+    var a = i * D_PHI, b = a + D_PHI;
+    t[i] = t[i + 1] - D_PHI / 6 * (gOt(m, a) + 4 * gOt(m, a + D_PHI / 2) + gOt(m, b));
+  }
+  PHI[m] = t;
+});
+function potencial(model, r) {
+  if (r >= R) return -GM / r;
+  var k = Math.min(N_PHI - 1, Math.floor(r / D_PHI));
+  var a = k * D_PHI, u = (r - a) / D_PHI, u2 = u * u, u3 = u2 * u;
+  var t = PHI[model];
+  /* эрмитов кубик: значения в узлах и производная g в них */
+  return (2 * u3 - 3 * u2 + 1) * t[k] + (u3 - 2 * u2 + u) * D_PHI * gOt(model, a) +
+         (-2 * u3 + 3 * u2) * t[k + 1] + (u3 - u2) * D_PHI * gOt(model, a + D_PHI);
+}
+function energiya(s) { return s.v * s.v / 2 + potencial(s.model, Math.abs(s.x)); }
+
+function uskorenie(model, x) { return x > 0 ? -gOt(model, x) : x < 0 ? gOt(model, -x) : 0; }
+
+function nachalo(model) {
+  var s = {
+    model: model, t: 0,
+    x: R, v: 0, a: uskorenie(model, R),                         /* тело в шахте */
+    sx: R, sy: 0, svx: 0, svy: Math.sqrt(GM / R), sax: -GM / (R * R), say: 0,   /* спутник */
+    tHalf: null, period: null, vCenter: null, satHalf: null, satGapHalf: null
+  };
+  s.E0 = energiya(s);
+  return s;
+}
+
+/* Один шаг скоростного Верле для тела и для спутника. */
+function shag(s, h) {
+  var vPrev = s.v, xPrev = s.x, syPrev = s.sy;
+  s.v += s.a * h / 2;
+  s.x += s.v * h;
+  s.a = uskorenie(s.model, s.x);
+  s.v += s.a * h / 2;
+
+  s.svx += s.sax * h / 2; s.svy += s.say * h / 2;
+  s.sx += s.svx * h; s.sy += s.svy * h;
+  var rs = Math.hypot(s.sx, s.sy), k = -GM / (rs * rs * rs);
+  s.sax = k * s.sx; s.say = k * s.sy;
+  s.svx += s.sax * h / 2; s.svy += s.say * h / 2;
+  s.t += h;
+
+  /* центр: x сменил знак, скорость в этот момент по интерполяции */
+  if (s.vCenter == null && xPrev > 0 && s.x <= 0) {
+    var f = xPrev / (xPrev - s.x);
+    s.vCenter = Math.abs(vPrev + f * (s.v - vPrev));
+  }
+  /* другая сторона: скорость, отрицательная всю дорогу, дошла до нуля */
+  if (s.tHalf == null && vPrev < 0 && s.v >= 0) {
+    s.tHalf = s.t - h * s.v / (s.v - vPrev);
+    s.xHalf = s.x;
+  }
+  /* обратно к устью: полный период */
+  if (s.tHalf != null && s.period == null && vPrev > 0 && s.v <= 0) {
+    s.period = s.t - h * s.v / (s.v - vPrev);
+  }
+  /* спутник прошёл полвитка: его y сменил знак с плюса на минус */
+  if (s.satHalf == null && syPrev > 0 && s.sy <= 0) {
+    s.satHalf = s.t - h * s.sy / (s.sy - syPrev);
+  }
+}
+
+/* Прогон без анимации: до другой стороны, до возврата и ещё на десять
+   колебаний для проверки энергии. */
+function progon(model, h, kolebanij) {
+  h = h || H;
+  var s = nachalo(model), dEmax = 0;
+  var tMax = (kolebanij || 10) * 5200;
+  while (s.t < tMax) {
+    shag(s, h);
+    if (s.tHalf != null && s.satGapHalf == null) s.satGapHalf = s.x - s.sx;
+    var dE = Math.abs(energiya(s) - s.E0);
+    if (dE > dEmax) dEmax = dE;
+  }
+  return {
+    model: model, h: h, tHalf: s.tHalf, tHalfMin: s.tHalf / 60, period: s.period,
+    periodMin: s.period / 60, vCenter: s.vCenter, satHalf: s.satHalf,
+    energyDrift: dEmax / Math.abs(s.E0), satGapAtArrival: s.satGapHalf,
+    gCore: gOt(model, R_YADRO), gSurface: gOt(model, R)
+  };
+}
+
+/* Время пролёта у всех трёх планет: прогоном при загрузке, для легенды. */
+var PROLET = {}, PROGON = {};
+MODELI.forEach(function (m) { PROGON[m] = progon(m, H, 1); PROLET[m] = PROGON[m].tHalf; });
+/* Полвитка спутника у поверхности: у всех планет одно и то же, снаружи
+   поле одно. Тоже прогоном, а не формулой, как и скорость в центре
+   однородной планеты, с которой сравнивается Земля. */
+var POLVITKA = PROGON.odnorodnaya.satHalf;
+var V_CENTR_ODN = PROGON.odnorodnaya.vCenter;
+
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+
+function kx(tex) {
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+/* Число на оси для KaTeX: запятая в фигурных скобках, без пробела */
+function tik(v) { return String(v).replace('.', '{,}'); }
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева разрез планеты: яркость заливки по плотности, горизонтальная
+   шахта через центр, тело в шахте со стрелкой ускорения к центру. По краю
+   летит спутник у самой поверхности, пунктир опускает его на ось шахты.
+   Справа ускорение от расстояния до центра у всех трёх планет, выбранная
+   ярко, маркер на радиусе тела; в легенде время пролёта каждой. Под
+   графиком показания. Буквы величин и формулы набирает KaTeX слоем
+   поверх канвы (см. .stage-wrap в demo.css). */
+
+var W = 1000, HGT = 440;
+var CX = 215, CY = 205, PR = 170;             /* центр и радиус планеты на канве */
+var SC = PR / R;                              /* пикселей на метр */
+var SG = 7;                                   /* пикселей на 1 м/с² у стрелки */
+var P = { x0: 540, x1: 965, y0: 40, y1: 215 };  /* поле графика */
+var R_MAX = 8.3e6, G_MAX = 12;                /* пределы осей: 1,3 радиуса и 12 м/с²; дальше
+                                                 кривая снаружи легла бы на легенду */
+var MIN_S_MIN = 0.5, MIN_S_MAX = 5, MIN_S_NACH = 2;   /* модельных минут в секунду */
+
+function gx(r) { return P.x0 + r / R_MAX * (P.x1 - P.x0); }
+function gy(g) { return P.y1 - g / G_MAX * (P.y1 - P.y0); }
+
+function strelka(ctx, x0, y0, x1, y1, color, width) {
+  var dx = x1 - x0, dy = y1 - y0, Ln = Math.hypot(dx, dy);
+  if (Ln < 3) return;
+  var ux = dx / Ln, uy = dy / Ln;
+  var head = Math.min(12, Ln * 0.4);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * head - uy * head * 0.4, y1 - uy * head + ux * head * 0.4);
+  ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.lineTo(x1 - ux * head + uy * head * 0.4, y1 - uy * head - ux * head * 0.4);
+  ctx.closePath(); ctx.fill();
+}
+
+/* Кривые g(r) считаются один раз: 400 точек на модель. */
+var KRIVYE = {};
+MODELI.forEach(function (m) {
+  var pts = [];
+  for (var i = 0; i <= 400; i++) { var r = i / 400 * R_MAX; pts.push([r, gOt(m, r)]); }
+  KRIVYE[m] = pts;
+});
+
+function ShahtaCherezPlanetu() {
+  var st = useRef(null);
+  if (!st.current) st.current = { s: nachalo('odnorodnaya'), idet: true, minS: MIN_S_NACH, buf: 0 };
+  var S = st.current;
+  var pair = useState({ model: 'odnorodnaya', minS: MIN_S_NACH, idet: true, prishlo: false });
+  var ui = pair[0], setUi = pair[1];
+
+  function obnovit() {
+    setUi({ model: S.s.model, minS: S.minS, idet: S.idet, prishlo: S.s.tHalf != null });
+    pokazaniya();
+  }
+
+  function pokazaniya() {
+    var s = S.s;
+    window.__demoState = {
+      model: s.model, t: s.t, x: s.x, v: s.v, g: gOt(s.model, Math.abs(s.x)),
+      tHalf: s.tHalf, period: s.period, vCenter: s.vCenter,
+      satX: s.sx, satY: s.sy, satHalf: s.satHalf,
+      tHalfAll: { odnorodnaya: PROLET.odnorodnaya, dvuhslojnaya: PROLET.dvuhslojnaya, prem: PROLET.prem },
+      tHalfFormulaUniform: Math.PI * Math.sqrt(R * R * R / GM),
+      gCore: gOt(s.model, R_YADRO), gSurface: gOt(s.model, R),
+      energyError: (energiya(s) - s.E0) / Math.abs(s.E0),
+      minutesPerSecond: S.minS, running: S.idet
+    };
+  }
+
+  function nachat(model) {
+    S.s = nachalo(model || S.s.model); S.buf = 0; S.idet = true;
+    obnovit();
+  }
+
+  function step(dt) {
+    if (!S.idet) return;
+    var s = S.s, bylo = (s.tHalf != null) + (s.period != null);
+    S.buf += dt * S.minS * 60;
+    var n = 0;
+    while (S.buf >= H && n < 200000) { shag(s, H); S.buf -= H; n++; }
+    /* строка под сценой меняется на приходе и на возврате к устью */
+    if ((s.tHalf != null) + (s.period != null) !== bylo) obnovit();
+    else pokazaniya();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted, mut = 'rgb(' + muted + ')';
+    var s = S.s, m = s.model, col = CVET[m], i;
+
+    /* ── разрез планеты: кольца, яркость по плотности ── */
+    var NK = m === 'prem' ? 160 : m === 'dvuhslojnaya' ? 2 : 1;
+    var kraya = m === 'dvuhslojnaya' ? [0, R_YADRO, R] : null;
+    for (i = NK - 1; i >= 0; i--) {
+      var r0 = kraya ? kraya[i] : i / NK * R, r1 = kraya ? kraya[i + 1] : (i + 1) / NK * R;
+      var rho = plotnost(m, (r0 + r1) / 2);
+      ctx.fillStyle = 'rgba(' + ink + ',' + (0.04 + 0.30 * rho / 13100).toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(CX, CY, r1 * SC, 0, TWO_PI, false);
+      if (r0 > 0) ctx.arc(CX, CY, r0 * SC, 0, TWO_PI, true);
+      ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(' + muted + ',.7)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(CX, CY, PR, 0, TWO_PI); ctx.stroke();
+    /* подписи слоёв; их прямоугольники нужны ниже, чтобы пунктир от
+       спутника прерывался на них, а не шёл по буквам */
+    var sloi = [];
+    if (m !== 'odnorodnaya') {
+      ctx.save(); ctx.setLineDash([5, 6]);
+      ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(CX, CY, R_YADRO * SC, 0, TWO_PI); ctx.stroke();
+      ctx.restore();
+      [['ядро', CY - R_YADRO * SC + 26], ['мантия', CY - PR + 26]].forEach(function (p) {
+        C.label(ctx, CX, p[1], p[0], 17, mut);
+        var w = ctx.measureText(p[0]).width;
+        sloi.push([CX - w / 2 - 5, p[1] - 15, w + 10, 22]);
+      });
+    }
+
+    /* шахта: полоса вырезана из разреза, фон страницы виден насквозь */
+    ctx.clearRect(CX - PR - 3, CY - 6, 2 * PR + 6, 12);
+    ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(CX - PR, CY - 6); ctx.lineTo(CX + PR, CY - 6);
+    ctx.moveTo(CX - PR, CY + 6); ctx.lineTo(CX + PR, CY + 6);
+    ctx.stroke();
+
+    /* подпись плотности под разрезом */
+    var pod = m === 'odnorodnaya' ? 'плотность всюду ' + num(RHO_SR / 1000, 1) + ' г/см³'
+      : m === 'dvuhslojnaya' ? 'ядро ' + num(RHO_YADRA / 1000, 1) + ' г/см³, мантия ' + num(RHO_MANTII / 1000, 1) + ' г/см³'
+      : 'от ' + num(plotnost('prem', 0) / 1000, 1) + ' г/см³ в центре до ' + num(plotnost('prem', 6360e3) / 1000, 1) + ' в коре';
+    C.label(ctx, CX, HGT - 10, pod, 17, mut);
+
+    /* спутник и его проекция на ось шахты */
+    var sx = CX + s.sx * SC, sy = CY - s.sy * SC;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, HGT);
+    sloi.forEach(function (b) { ctx.rect(b[0], b[1], b[2], b[3]); });
+    ctx.clip('evenodd');
+    ctx.setLineDash([4, 5]);
+    ctx.strokeStyle = 'rgba(' + ink + ',.45)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx, CY); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(sx, sy, 5.5, 0, TWO_PI); ctx.fill();
+    var rs = Math.hypot(s.sx, s.sy) || 1;
+    /* подпись снаружи орбиты; слева от планеты до края канвы места нет,
+       там подпись встаёт над спутником или под ним */
+    if (s.sx > -0.35 * rs) {
+      C.label(ctx, CX + s.sx / rs * (PR + 30), CY - s.sy / rs * (PR + 22) + 6, 'спутник', 17, mut,
+        s.sx >= 0 ? 'left' : 'right');
+    } else {
+      C.label(ctx, Math.max(sx, 42), s.sy >= 0 ? sy - 30 : sy + 26, 'спутник', 17, mut);
+    }
+
+    /* тело и ускорение к центру */
+    var bx = CX + s.x * SC, g = gOt(m, Math.abs(s.x));
+    strelka(ctx, bx, CY - 18, bx - Math.sign(s.x) * g * SG, CY - 18, 'rgb(' + col + ')', 3);
+    C.glow(ctx, bx, CY, 16, col, 0.5);
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(bx, CY, 6.5, 0, TWO_PI); ctx.fill();
+
+    /* ── график g(r) ── */
+    ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(P.x0, P.y0 - 6); ctx.lineTo(P.x0, P.y1); ctx.lineTo(P.x1, P.y1);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(' + muted + ',.18)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    [5, 10].forEach(function (v) { ctx.moveTo(P.x0, gy(v)); ctx.lineTo(P.x1, gy(v)); });
+    ctx.stroke();
+    ctx.save(); ctx.setLineDash([4, 5]);
+    ctx.strokeStyle = 'rgba(' + muted + ',.55)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(gx(R), P.y0 - 6); ctx.lineTo(gx(R), P.y1); ctx.stroke();
+    if (m !== 'odnorodnaya') {
+      ctx.beginPath(); ctx.moveTo(gx(R_YADRO), P.y0 - 6); ctx.lineTo(gx(R_YADRO), P.y1); ctx.stroke();
+    }
+    ctx.restore();
+    if (m !== 'odnorodnaya') C.label(ctx, gx(R_YADRO) + 6, P.y0 + 2, 'ядро', 17, mut, 'left');
+
+    MODELI.concat([m]).forEach(function (mm, k) {
+      var yarko = k === MODELI.length;
+      if (!yarko && mm === m) return;
+      var pts = KRIVYE[mm];
+      ctx.strokeStyle = 'rgba(' + CVET[mm] + ',' + (yarko ? 1 : 0.55) + ')';
+      ctx.lineWidth = yarko ? 3 : 1.6; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (var j = 0; j < pts.length; j++) {
+        var px = gx(pts[j][0]), py = gy(pts[j][1]);
+        if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    });
+
+    /* маркер тела на графике */
+    var mx = gx(Math.abs(s.x)), my = gy(g);
+    ctx.save(); ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = 'rgba(' + col + ',.7)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(mx, P.y1); ctx.lineTo(mx, my); ctx.stroke();
+    ctx.restore();
+    C.glow(ctx, mx, my, 14, col, 0.55);
+    ctx.fillStyle = 'rgb(' + col + ')';
+    ctx.beginPath(); ctx.arc(mx, my, 5.5, 0, TWO_PI); ctx.fill();
+
+    /* легенда: время до другой стороны у каждой планеты. Под ней канва
+       расчищается, чтобы пунктиры радиуса и маркера не шли по тексту. */
+    ctx.clearRect(744, 145, 236, 64);
+    MODELI.forEach(function (mm, k) {
+      var ly2 = 162 + k * 22, yarko = mm === m;
+      ctx.strokeStyle = 'rgba(' + CVET[mm] + ',' + (yarko ? 1 : 0.6) + ')';
+      ctx.lineWidth = yarko ? 3 : 1.6;
+      ctx.beginPath(); ctx.moveTo(748, ly2 - 6); ctx.lineTo(772, ly2 - 6); ctx.stroke();
+      C.label(ctx, 780, ly2, IMYA[mm] + ', ' + num(PROLET[mm] / 60, 1) + ' мин', 17,
+        yarko ? 'rgb(' + ink + ')' : mut, 'left');
+    });
+
+    /* показания */
+    C.readout(ctx, 745, 298, 'ВРЕМЯ, мин', num(s.t / 60, 1), 'rgb(' + ink + ')');
+    C.readout(ctx, 965, 298, 'СКОРОСТЬ, км/с', num(Math.abs(s.v) / 1000, 2), 'rgb(' + ink + ')');
+    C.readout(ctx, 745, 376, 'УСКОРЕНИЕ, м/с²', num(g, 2), 'rgb(' + col + ')');
+    C.readout(ctx, 965, 376, 'ДО ДРУГОЙ СТОРОНЫ, мин', s.tHalf == null ? '—' : num(s.tHalf / 60, 1), 'rgb(' + col + ')');
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+
+  /* Слой подписей ложится ровно на кадр канвы. Обёртка держит пропорцию
+     только пока упирается в высоту; в колонке главы (iframe 560 px) и на
+     высоком экране она упирается в ширину, выходит выше кадра, канва
+     вписывает кадр по центру с полями сверху и снизу, и подписи в
+     процентах обёртки уезжали от осей на десятки пикселей (замер 29.09:
+     обёртка 700×393 при кадре 700×308). Поэтому слой меряет прямоугольник,
+     в который paint() из demo-core вписывает кадр, и встаёт в него. */
+  var wrapRef = useRef(null);
+  var boxPair = useState(null), box = boxPair[0], setBox = boxPair[1];
+  React.useEffect(function () {
+    var wrap = wrapRef.current, cv = ref.current;
+    if (!wrap || !cv) return;
+    function merit() {
+      var wr = wrap.getBoundingClientRect(), cr = cv.getBoundingClientRect();
+      if (!cr.width || !cr.height) return;
+      var k = Math.min(cr.width / W, cr.height / HGT);
+      var b = { left: cr.left - wr.left + (cr.width - W * k) / 2, top: cr.top - wr.top + (cr.height - HGT * k) / 2,
+                width: W * k, height: HGT * k };
+      setBox(function (old) {
+        if (old && Math.abs(old.left - b.left) < 0.5 && Math.abs(old.top - b.top) < 0.5 &&
+            Math.abs(old.width - b.width) < 0.5 && Math.abs(old.height - b.height) < 0.5) return old;
+        return b;
+      });
+    }
+    merit();
+    if (!window.ResizeObserver) return;
+    var ro = new ResizeObserver(merit);
+    ro.observe(cv);
+    return function () { ro.disconnect(); };
+  }, []);
+  var kadr = box ? { left: box.left + 'px', top: box.top + 'px', width: box.width + 'px', height: box.height + 'px' } : null;
+  window.__demoProgon = progon;
+  window.__demoG = gOt;               /* g(модель, r) для сверки кривых графика */
+
+  function vybrat(m) { nachat(m); }
+  function bystrota(v) { S.minS = C.clamp(v, MIN_S_MIN, MIN_S_MAX); obnovit(); }
+  function pauza() { S.idet = !S.idet; obnovit(); }
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var s = S.s, m = s.model;
+    var gc = gOt(m, R_YADRO);
+    var nazad = s.period == null ? '' :
+      ' Туда и обратно тело сходило за ' + A(num(s.period / 60, 1) + ' мин') + '.';
+    var punktir = ' Пунктир от спутника отмечает, где было бы тело в однородной планете.';
+    if (m === 'odnorodnaya') {
+      if (s.tHalf == null)
+        return 'Однородная планета. На глубине притяжение создаёт только шар под телом, а слой над ним ' +
+          'в сумме не тянет никуда (теорема Гаусса, подробно о ней в электростатике). Масса этого шара ' +
+          'пропорциональна кубу радиуса, и ускорение внутри растёт от центра линейно. Тело идёт точно ' +
+          'под спутником, который облетает планету у самой поверхности.';
+      return 'Тело на другой стороне через ' + A(num(s.tHalf / 60, 1) + ' мин') + ', вместе со спутником, ' +
+        'прошедшим полвитка: ускорение пропорционально расстоянию до центра, как у грузика на пружине, ' +
+        'и период колебаний тот же, что у спутника. Центр тело проскочило со скоростью ' +
+        A(num(s.vCenter / 1000, 2) + ' км/с') + ', первой космической.' + nazad;
+    }
+    if (m === 'dvuhslojnaya') {
+      if (s.tHalf == null)
+        return 'Ядро радиусом ' + num(R_YADRO / 1000, 0) + ' км с плотностью ' + num(RHO_YADRA / 1000, 1) +
+          ' г/см³ и мантия ' + num(RHO_MANTII / 1000, 1) + ' г/см³; в ядре треть массы, как у Земли. ' +
+          'К границе ядра ускорение растёт до ' + A(num(gc, 1) + ' м/с²') + ', а в мантии почти стоит: масса ' +
+          'под телом растёт с высотой почти так же, как квадрат расстояния до центра.' + punktir;
+      /* выигрыш у спутника (он же у однородной планеты): доля от выигрыша
+         PREM снимается с прогонов, при загрузке это 3,29 из 3,99 мин, 82 % */
+      return 'Тело на другой стороне через ' + A(num(s.tHalf / 60, 1) + ' мин') + ', на ' +
+        A(num((POLVITKA - s.tHalf) / 60, 1) + ' мин') + ' раньше спутника. Земля по PREM обгоняет его на ' +
+        num((POLVITKA - PROLET.prem) / 60, 1) + ' мин, и двух плотностей хватает на ' +
+        A(num(100 * (POLVITKA - s.tHalf) / (POLVITKA - PROLET.prem), 0) + '&nbsp;%') + ' её выигрыша.' + nazad;
+    }
+    if (s.tHalf == null)
+      return 'Земля по сейсмическим данным, модель PREM: плотность от ' + num(plotnost('prem', 0) / 1000, 1) +
+        ' г/см³ в центре до ' + num(plotnost('prem', 6360e3) / 1000, 1) + ' в коре, в ядре треть массы. ' +
+        'К границе ядра на глубине ' + num((R - R_YADRO) / 1000, 0) + ' км ускорение растёт до ' +
+        A(num(gc, 1) + ' м/с²') + ', в мантии держится около 10 м/с².' + punktir;
+    return 'Тело на другой стороне через ' + A(num(s.tHalf / 60, 1) + ' мин') + ', на ' +
+      A(num((POLVITKA - s.tHalf) / 60, 1) + ' мин') +
+      ' раньше спутника. Центр оно проскочило со скоростью ' + A(num(s.vCenter / 1000, 2) + ' км/с') +
+      ', в однородной планете было бы ' + num(V_CENTR_ODN / 1000, 2) + '.' + nazad;
+  }
+
+  /* Латех-слой: числа и имена осей графика, отметка радиуса планеты. */
+  var podpisi = [];
+  [0, 2, 4, 6, 8].forEach(function (v) { podpisi.push({ x: gx(v * 1e6), y: P.y1 + 20, tex: tik(v) }); });
+  [0, 5, 10].forEach(function (v) { podpisi.push({ x: P.x0 - 10, y: gy(v), tex: tik(v), cls: 'ax-right' }); });
+  podpisi.push({ x: P.x0 + 10, y: P.y0 - 20, tex: 'g,\\ \\text{м/с}^2', cls: 'ax-left' });
+  podpisi.push({ x: P.x1, y: P.y1 + 42, tex: 'r,\\ \\text{тыс. км}', cls: 'ax-right' });
+  podpisi.push({ x: gx(R) + 6, y: P.y0 - 20, tex: 'R', cls: 'ax-left' });
+  function spanAt(sp, i) {
+    return html`<span key=${i} class=${sp.cls || null}
+      style=${{ left: (sp.x / W * 100) + '%', top: (sp.y / HGT * 100) + '%' }}
+      dangerouslySetInnerHTML=${{ __html: kx(sp.tex) }}></span>`;
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Планета:">
+          ${MODELI.map(function (mm) {
+            return html`<${C.Btn} key=${mm} active=${ui.model === mm} onClick=${function () { vybrat(mm); }}>${IMYA[mm]}<//>`;
+          })}
+        <//>
+        ${/* Ползунок и кнопки в одной группе, разметка ползунка та же, что у
+              C.Slider. Ссылка «Неделя 05» лежит поверх рейки справа сверху;
+              так первый ряд рейки не заходит под неё в окне от 488 до 1130 px
+              и от 1212 px (замер 30.09, страница без iframe). В окне
+              1131–1211 px рейка встаёт в один ряд и «Пауза» оказывается под
+              ссылкой: это убирает только отступ рейки в demo.css, см. отчёт. */''}
+        <${C.Group} label="Быстрота:">
+          <input type="range" class="slider" min=${MIN_S_MIN} max=${MIN_S_MAX} step=${0.5} value=${ui.minS}
+                 onInput=${function (e) { bystrota(parseFloat(e.target.value)); }} />
+          <span class="control-value">${num(ui.minS, 1) + ' мин/с'}</span>
+          <${C.Btn} action=${true} onClick=${function () { nachat(); }}>Бросить заново<//>
+          <${C.Btn} onClick=${pauza}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+        <//>
+      </div>
+      ${/* Сцена держит пропорцию и влезает в колонку, как в podobie:
+            ведёт высота, ширина выводится из неё. Этот инлайн-стиль и кадр
+            слоя подписей в пикселях выходят за исключение контракта
+            (слой в процентах); в отчёте они записаны, и там же правило
+            .stage-wrap.fit, которое заменит инлайн, если его примут в demo.css. */''}
+      <div class="stage-wrap" ref=${wrapRef}
+           style=${{ aspectRatio: W + ' / ' + HGT, flex: '0 1 auto', minHeight: 0,
+                     height: '100%', width: 'auto', maxWidth: '100%',
+                     alignSelf: 'center' }}>
+        <canvas class="stage" ref=${ref}></canvas>
+        <div class="ax is-on" style=${kadr}>${podpisi.map(spanAt)}</div>
+      </div>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(ShahtaCherezPlanetu);
+</script>
+</body>
+</html>

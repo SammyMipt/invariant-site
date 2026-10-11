@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Шаг по орбите</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-03/">&larr; Неделя 03</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=shag-ejlera"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `chislennoe-integrirovanie`: схема Эйлера и цена шага. Точка
+   идёт по окружности под силой, направленной к центру, и глава называет
+   числа: при ста шагах на оборот явная схема растит радиус в
+   √(1 + (2π/N)²) раз за шаг, примерно на 22 процента за оборот; при
+   тысяче шагов на 2 процента; перестановка двух строк схемы замыкает
+   орбиту при тех же ста шагах. Эти три числа демка обязана выдать сама,
+   и они снимаются с положения точки, а не выписываются формулой.
+
+   СИЛА ЛИНЕЙНАЯ: F = −ω²·r при m = 1, ω = 1, радиус орбиты R = 1, скорость
+   на орбите v = ωR = 1. Множитель главы точен ровно для такой силы. В
+   комплексной записи z = x + iy, w = vₓ + i·v_y круговая орбита есть
+   w = iωz, и явный шаг умножает обе величины на одно и то же число:
+
+       z₁ = z + h·w = z·(1 + iωh),      w₁ = w − h·ω²·z = w·(1 + iωh).
+
+   Модуль растёт в √(1 + (ωh)²) раз, орбита остаётся окружностью и
+   раскручивается спиралью с постоянным темпом, а фаза за шаг набирает
+   arctg(ωh) вместо ωh: скорость поворачивается чуть меньше, чем нужно,
+   как и сказано в главе. Под тяготением 1/r² та же схема тоже уводит
+   точку наружу, но множитель шага меняется вместе с радиусом, и за
+   оборот при N = 100 выходит 72 процента вместо 22 (посчитано на
+   разведке тем же кодом с ускорением −r/r³). Число главы это число
+   линейной силы, и демка держится её.
+
+   ОБОРОТ равен N шагам, то есть ровно периоду T = 2π/ω точного движения:
+   так считает глава. Рост радиуса за оборот есть |r| на границе оборота,
+   делённое на |r| на предыдущей границе, минус единица. Формула держится
+   рядом только для сверки (rostFormula в показаниях).
+
+   Две схемы. Явная: положение по старой скорости, скорость по силе в
+   старом положении, обе строки читают состояние до шага; это формула
+   #shag главы. Полунеявная: сначала скорость, потом положение уже по
+   новой скорости. Для линейной силы полунеявный шаг есть линейное
+   отображение с определителем 1, и при ωh < 2 его собственные числа
+   лежат на единичной окружности: радиус колеблется внутри оборота, но
+   расти ему не с чего. При N = 100 он гуляет между 0,985 и 1,016 R и на
+   границе оборота возвращается с точностью 3·10⁻⁵. */
+
+var OMEGA = 1, W2 = OMEGA * OMEGA;
+var R0 = 1;                          /* радиус орбиты */
+var TAU = 2 * Math.PI;
+var T = TAU / OMEGA;                 /* период точного движения */
+
+/* Ускорение при m = 1: сила к центру, пропорциональная расстоянию. */
+function sila(x, y) { return [-W2 * x, -W2 * y]; }
+
+/* Один шаг явной схемы: обе строки читают состояние до шага. */
+function shagYavnyj(s, h) {
+  var a = sila(s.x, s.y);
+  return { x: s.x + h * s.vx, y: s.y + h * s.vy,
+           vx: s.vx + h * a[0], vy: s.vy + h * a[1] };
+}
+
+/* Один шаг полунеявной: скорость первой, положение по новой скорости. */
+function shagPoluneyavnyj(s, h) {
+  var a = sila(s.x, s.y);
+  var vx = s.vx + h * a[0], vy = s.vy + h * a[1];
+  return { x: s.x + h * vx, y: s.y + h * vy, vx: vx, vy: vy };
+}
+
+var SHEMY = {
+  yavnyj:       { imya: 'явный Эйлер', shag: shagYavnyj },
+  poluneyavnyj: { imya: 'полунеявный', shag: shagPoluneyavnyj }
+};
+
+function nachalo() { return { x: R0, y: 0, vx: 0, vy: OMEGA * R0 }; }
+function radius(s) { return Math.hypot(s.x, s.y); }
+
+/* Полная энергия на единицу массы. На точной орбите E₀ = ω²R², половина
+   кинетическая и половина потенциальная; показания печатают E/E₀. */
+function energiya(s) {
+  return (s.vx * s.vx + s.vy * s.vy + W2 * (s.x * s.x + s.y * s.y)) / 2;
+}
+var E0 = energiya(nachalo());
+
+/* Множитель главы, собранный за оборот: √(1 + (2π/N)²) в степени N.
+   В счёт не идёт, нужен для сверки с тем, что снято с точки. */
+function rostPoFormule(N) { return Math.pow(1 + Math.pow(TAU / N, 2), N / 2) - 1; }
+
+/* Прогон без анимации: столько-то оборотов от начальной окружности той же
+   арифметикой, что на экране. Автопроверка зовёт его как __demoProgon. */
+function progon(shema, N, oborotov) {
+  var shag = SHEMY[shema].shag, h = T / N, s = nachalo();
+  var rNach = R0, rMin = R0, rMax = R0, eMin = 1, eMax = 1, rost = null, ugol = 0;
+  for (var k = 0; k < (oborotov || 1); k++) {
+    rMin = rMax = radius(s);
+    eMin = eMax = energiya(s) / E0;
+    var ugolNach = ugol;
+    for (var i = 0; i < N; i++) {
+      var s0 = s;
+      s = shag(s, h);
+      var r = radius(s), e = energiya(s) / E0;
+      if (r < rMin) rMin = r;
+      if (r > rMax) rMax = r;
+      if (e < eMin) eMin = e;
+      if (e > eMax) eMax = e;
+      var d = Math.atan2(s.y, s.x) - Math.atan2(s0.y, s0.x);
+      if (d > Math.PI) d -= TAU; else if (d < -Math.PI) d += TAU;
+      ugol += d;
+    }
+    rost = radius(s) / rNach - 1;
+    rNach = radius(s);
+  }
+  return { shema: shema, N: N, r: radius(s) / R0, rost: rost,
+           rostFormula: rostPoFormule(N), E: energiya(s) / E0,
+           rMin: rMin / R0, rMax: rMax / R0, eMin: eMin, eMax: eMax,
+           ugolZaOborot: (ugol - ugolNach) * 180 / Math.PI };
+}
+
+/* Русская запятая и настоящий минус. Крохи в последних знаках печатаются
+   нулём, а не «−0,0». */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* Рост со знаком: плюс у роста, минус у убыли, у нуля ничего. */
+function znak(v, d) {
+  var s = num(v, d);
+  return (v > 0 && s !== num(0, d)) ? '+' + s : s;
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева окно орбиты: тонкая точная окружность, след счёта в цвете схемы,
+   точка, при ней стрелка скорости по касательной и стрелка силы в центр.
+   Справа график r/R от числа оборотов: у явной схемы экспонента, у
+   полунеявной полка с рябью; под графиком показания.
+
+   Темп: оборот, то есть N шагов, проходит за T_EKR секунд экранного
+   времени при любом N. При N = 20 это четыре шага в секунду, и точка
+   видимо прыгает по вершинам ломаной; при N = 1000 двести шагов в
+   секунду, и след гладкий. Дробный остаток шагов переносится на
+   следующий кадр, чтобы шаги не терялись на округлении. */
+
+var W = 1000, HGT = 440;
+var ORB = { x: 226, y: 220, r: 204 };   /* окно орбиты: центр и половина стороны */
+var S = 76;                              /* пикселей на R */
+var S_V = 40, S_A = 30;                  /* пикселей на единицу скорости и ускорения */
+var R_KADR = ORB.r / S;                  /* с этого радиуса точка вне окна, в R */
+var GR = { x0: 540, x1: 960, y0: 44, y1: 226 };   /* поле графика */
+var Y_MAX = 3;                           /* потолок графика, r/R */
+var ROW = [300, 372];                    /* строки показаний */
+var COL = [700, 960];                    /* правые края колонок показаний */
+var T_EKR = 5;                           /* секунд экрана на один оборот */
+var SLED_MAX = 4000;                     /* точек следа: четыре оборота при N = 1000 */
+var XMAX_MAX = 64;                       /* дальше график не растягивается и не пишется */
+
+/* Ползунок ходит по ряду, а не по числам подряд: на дорожке в 190 px
+   тысяча делений это пять чисел на пиксель, и сто не поймать. Опоры
+   главы, 100 и 1000, стоят на делениях; 20 у края, где ломаная видна. */
+var NS = [20, 25, 30, 40, 50, 60, 80, 100, 120, 150, 200, 250, 300, 400, 500, 600, 800, 1000];
+var I_NACH = 7;                          /* N = 100 */
+
+var CV = '#4db6c6';   /* скорость: бирюза векторов скорости в рисунках главы */
+var CA = '#e08a52';   /* сила: та же охра, что у ускорения в годографе */
+var CSH = { yavnyj: '#ff7a66', poluneyavnyj: '#5ce0a0' };   /* след, график, показания схемы */
+
+function strelka(ctx, x0, y0, x1, y1, color, width) {
+  var dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy);
+  if (L < 1) return;
+  var ux = dx / L, uy = dy / L;
+  var head = Math.min(12, L * 0.32);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.stroke();
+  /* Наконечник с выемкой сзади, тот же силуэт, что в рисунках главы. */
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * head - uy * head * 0.34, y1 - uy * head + ux * head * 0.34);
+  ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.lineTo(x1 - ux * head + uy * head * 0.34, y1 - uy * head - ux * head * 0.34);
+  ctx.closePath(); ctx.fill();
+}
+
+function ShagEjlera() {
+  var st = useRef({
+    shema: 'yavnyj', N: NS[I_NACH], h: T / NS[I_NACH], kazhdyj: 1,
+    s: nachalo(), shag: 0,
+    rezhim: 'stop',                 /* stop | oborot | pusk */
+    cel: 0,                         /* шаг, на котором режим «оборот» останавливается */
+    budget: 0,                      /* дробный остаток шагов между кадрами */
+    granica: false,                 /* в этом кадре пройдена граница оборота */
+    rNach: R0, rMin: R0, rMax: R0, eMin: 1, eMax: 1, ugol: 0, ugolNach: 0,
+    /* за последний завершённый оборот */
+    rost: null, ugolZaOborot: null, rMinOb: null, rMaxOb: null, eMinOb: null, eMaxOb: null,
+    sled: [[R0, 0]], graf: [[0, 1]], xmax: 4, ushla: false
+  }).current;
+  /* Пара из одного вызова useState: два отдельных дают два независимых
+     состояния, и рейка перестаёт отзываться на ползунок. */
+  var pair = useState({ shema: 'yavnyj', iN: I_NACH, rezhim: 'stop' });
+  var ui = pair[0], setUi = pair[1];
+
+  /* Рейка и показания обновляются вместе: режим, сменённый кнопкой, обязан
+     читаться из __demoState до первого кадра, а не после него. */
+  function obnovit() {
+    setUi({ shema: st.shema, iN: NS.indexOf(st.N), rezhim: st.rezhim });
+    pokazaniya();
+  }
+
+  /* Показания пишутся из шага, а не из отрисовки компонента: автопроверка
+     двигает модель через __demoTick, рендера при этом нет. */
+  function pokazaniya() {
+    var s = st.s;
+    window.__demoState = {
+      shema: st.shema, N: st.N, h: st.h, shag: st.shag, oborotov: st.shag / st.N,
+      rezhim: st.rezhim, x: s.x, y: s.y, vx: s.vx, vy: s.vy,
+      r: radius(s) / R0, E: energiya(s) / E0,
+      rost: st.rost, rostFormula: rostPoFormule(st.N),
+      ugolZaOborot: st.ugolZaOborot == null ? null : st.ugolZaOborot * 180 / Math.PI,
+      rMin: st.rMinOb, rMax: st.rMaxOb, eMin: st.eMinOb, eMax: st.eMaxOb,
+      ushla: st.ushla
+    };
+  }
+
+  /* Начало заново: точка на окружности, след и график пусты. Режим не
+     трогается: ползунок, сдвинутый на ходу, не должен останавливать показ. */
+  function nachat() {
+    st.s = nachalo(); st.shag = 0; st.budget = 0; st.granica = false;
+    st.rNach = st.rMin = st.rMax = R0; st.eMin = st.eMax = 1; st.ugol = st.ugolNach = 0;
+    st.rost = null; st.ugolZaOborot = null;
+    st.rMinOb = st.rMaxOb = st.eMinOb = st.eMaxOb = null;
+    st.sled = [[R0, 0]]; st.graf = [[0, 1]]; st.xmax = 4; st.ushla = false;
+    if (st.rezhim === 'oborot') st.cel = st.N;
+    pokazaniya();
+  }
+
+  function odinShag() {
+    var s0 = st.s;
+    var s = SHEMY[st.shema].shag(s0, st.h);
+    st.s = s; st.shag++;
+    var r = radius(s), e = energiya(s) / E0;
+    if (r < st.rMin) st.rMin = r;
+    if (r > st.rMax) st.rMax = r;
+    if (e < st.eMin) st.eMin = e;
+    if (e > st.eMax) st.eMax = e;
+    /* Угол копится приращениями atan2, чтобы обороты не терялись. */
+    var d = Math.atan2(s.y, s.x) - Math.atan2(s0.y, s0.x);
+    if (d > Math.PI) d -= TAU; else if (d < -Math.PI) d += TAU;
+    st.ugol += d;
+
+    st.sled.push([s.x, s.y]);
+    if (st.sled.length > SLED_MAX) st.sled.shift();
+    /* График берёт сто отсчётов на оборот при любом N. */
+    var ob = st.shag / st.N;
+    if (st.shag % st.kazhdyj === 0 && ob <= XMAX_MAX) st.graf.push([ob, r / R0]);
+    if (ob > st.xmax && st.xmax < XMAX_MAX) st.xmax *= 2;
+
+    /* Граница оборота: снимаем рост радиуса по положению точки. */
+    if (st.shag % st.N === 0) {
+      st.rost = r / st.rNach - 1; st.rNach = r;
+      st.ugolZaOborot = st.ugol - st.ugolNach; st.ugolNach = st.ugol;
+      st.rMinOb = st.rMin; st.rMaxOb = st.rMax; st.rMin = st.rMax = r;
+      st.eMinOb = st.eMin; st.eMaxOb = st.eMax; st.eMin = st.eMax = e;
+      st.granica = true;
+    }
+  }
+
+  function ostanovit() { st.rezhim = 'stop'; st.budget = 0; obnovit(); }
+
+  function step(dt) {
+    if (st.rezhim === 'stop') return;
+    st.budget += dt * st.N / T_EKR;
+    var n = Math.floor(st.budget);
+    if (st.rezhim === 'oborot') n = Math.min(n, st.cel - st.shag);
+    st.budget -= n;
+    for (var i = 0; i < n; i++) odinShag();
+    if (st.rezhim === 'oborot' && st.shag >= st.cel) ostanovit();
+    /* В непрерывном режиме точка, ушедшая из окна, останавливает счёт:
+       у явной схемы радиус растёт по экспоненте, и дальше смотреть не на
+       что. Режим «оборот» доводит до границы при любом радиусе, иначе при
+       N = 20 число за оборот не появилось бы никогда. */
+    else if (st.rezhim === 'pusk' && radius(st.s) > R_KADR * R0) { st.ushla = true; ostanovit(); }
+    else if (st.granica) obnovit();   /* строка показаний пересказывает свежий оборот */
+    st.granica = false;
+    pokazaniya();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    var ink = tone.ink, muted = tone.muted, mut = 'rgb(' + muted + ')';
+    var col = CSH[st.shema], s = st.s, i;
+
+    /* ── окно орбиты ── */
+    ctx.strokeStyle = 'rgba(' + muted + ',.28)'; ctx.lineWidth = 1.2;
+    C.roundRect(ctx, ORB.x - ORB.r, ORB.y - ORB.r, 2 * ORB.r, 2 * ORB.r, 10);
+    ctx.stroke();
+    ctx.save();
+    ctx.beginPath(); ctx.rect(ORB.x - ORB.r, ORB.y - ORB.r, 2 * ORB.r, 2 * ORB.r); ctx.clip();
+
+    /* Центр силы и точная орбита: тонкая окружность радиуса R. */
+    ctx.strokeStyle = 'rgba(' + ink + ',.55)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(ORB.x, ORB.y, R0 * S, 0, TAU); ctx.stroke();
+    ctx.fillStyle = 'rgba(' + ink + ',.8)';
+    ctx.beginPath(); ctx.arc(ORB.x, ORB.y, 4, 0, TAU); ctx.fill();
+    C.label(ctx, ORB.x - 10, ORB.y + 20, 'O', 18, mut, 'right');
+    C.label(ctx, ORB.x - R0 * S * 0.71 - 8, ORB.y - R0 * S * 0.71 - 8,
+            'точная орбита', 17, 'rgba(' + muted + ',.9)', 'right');
+
+    /* След счёта: ломаная через все посчитанные положения. При редких
+       шагах вершины помечены точками одним контуром: видно, что точка
+       прыгает, а не плывёт. */
+    var sl = st.sled;
+    if (sl.length > 1) {
+      ctx.strokeStyle = col; ctx.lineWidth = 2.2; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (i = 0; i < sl.length; i++) {
+        var px = ORB.x + sl[i][0] * S, py = ORB.y - sl[i][1] * S;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      if (st.N <= 100) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        for (i = 0; i < sl.length; i++) {
+          var qx = ORB.x + sl[i][0] * S, qy = ORB.y - sl[i][1] * S;
+          ctx.moveTo(qx + 2, qy); ctx.arc(qx, qy, 2, 0, TAU);
+        }
+        ctx.fill();
+      }
+    }
+
+    /* Точка, при ней скорость по касательной и сила в центр. Масштабы у
+       стрелок свои и от шага не зависят: они показывают направления,
+       а не приращения за шаг. */
+    var Px = ORB.x + s.x * S, Py = ORB.y - s.y * S;
+    var a = sila(s.x, s.y);
+    strelka(ctx, Px, Py, Px + a[0] * S_A, Py - a[1] * S_A, CA, 2.6);
+    strelka(ctx, Px, Py, Px + s.vx * S_V, Py - s.vy * S_V, CV, 2.6);
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(Px, Py, 5.5, 0, TAU); ctx.fill();
+
+    C.label(ctx, ORB.x - ORB.r + 12, ORB.y + ORB.r - 12,
+            'шагов ' + st.shag + ' · оборотов ' + num(st.shag / st.N, 2),
+            17, 'rgba(' + muted + ',.9)', 'left');
+    ctx.restore();
+
+    /* ── график r/R от оборотов ── */
+    var xmax = st.xmax;
+    function gx(o) { return GR.x0 + o / xmax * (GR.x1 - GR.x0); }
+    function gy(r) { return GR.y1 - r / Y_MAX * (GR.y1 - GR.y0); }
+    ctx.strokeStyle = 'rgba(' + muted + ',.5)'; ctx.lineWidth = 1.4; ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(GR.x0, GR.y0 - 6); ctx.lineTo(GR.x0, GR.y1); ctx.lineTo(GR.x1 + 6, GR.y1);
+    ctx.stroke();
+    var k;
+    for (k = 0; k <= Y_MAX; k++) {
+      ctx.beginPath(); ctx.moveTo(GR.x0 - 5, gy(k)); ctx.lineTo(GR.x0, gy(k)); ctx.stroke();
+      C.label(ctx, GR.x0 - 10, gy(k) + 6, String(k), 17, mut, 'right');
+    }
+    var dx = xmax / 4;
+    for (k = 0; k <= 4; k++) {
+      var xx = gx(k * dx);
+      ctx.beginPath(); ctx.moveTo(xx, GR.y1); ctx.lineTo(xx, GR.y1 + 5); ctx.stroke();
+      C.label(ctx, xx, GR.y1 + 22, String(k * dx), 17, mut);
+    }
+    C.label(ctx, GR.x0 - 10, GR.y0 - 16, 'r/R', 17, mut, 'right');
+    C.label(ctx, GR.x1, GR.y1 + 42, 'обороты', 17, mut, 'right');
+
+    /* Точная орбита на графике: r/R = 1 весь путь. */
+    ctx.save();
+    ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(' + ink + ',.35)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(GR.x0, gy(1)); ctx.lineTo(GR.x1, gy(1)); ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(GR.x0, GR.y0 - 2, GR.x1 - GR.x0, GR.y1 - GR.y0 + 3); ctx.clip();
+    ctx.strokeStyle = col; ctx.lineWidth = 2.2; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    var g = st.graf;
+    for (i = 0; i < g.length; i++) {
+      if (i === 0) ctx.moveTo(gx(g[i][0]), gy(g[i][1])); else ctx.lineTo(gx(g[i][0]), gy(g[i][1]));
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    /* ── показания ── */
+    var est = st.rost != null;
+    C.readout(ctx, COL[0], ROW[0], 'РАДИУС, r/R', num(radius(s) / R0, 3), col);
+    C.readout(ctx, COL[1], ROW[0], 'РОСТ ЗА ОБОРОТ, %',
+              est ? znak(st.rost * 100, 1) : '—', est ? col : mut);
+    C.readout(ctx, COL[0], ROW[1], 'ЭНЕРГИЯ, E/E₀', num(energiya(s) / E0, 3), col);
+    C.readout(ctx, COL[1], ROW[1], 'УГОЛ ЗА ОБОРОТ',
+              est ? num(st.ugolZaOborot * 180 / Math.PI, 1) + '°' : '—', est ? col : mut);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  if (!window.__demoState) pokazaniya();
+  window.__demoProgon = progon;
+
+  function vybrat(sh) { st.shema = sh; nachat(); obnovit(); }
+  function vesti(i) {
+    st.N = NS[C.clamp(Math.round(i), 0, NS.length - 1)];
+    st.h = T / st.N;
+    st.kazhdyj = Math.max(1, Math.round(st.N / 100));
+    nachat(); obnovit();
+  }
+  /* «Оборот» доводит до ближайшей границы оборота и встаёт; с границы это
+     ровно N шагов. Повторное нажатие на ходу останавливает. */
+  function oborot() {
+    if (st.rezhim === 'oborot') { ostanovit(); return; }
+    st.cel = (Math.floor(st.shag / st.N) + 1) * st.N;
+    st.rezhim = 'oborot'; st.budget = 0; st.ushla = false; obnovit();
+  }
+  function pusk() {
+    st.rezhim = st.rezhim === 'pusk' ? 'stop' : 'pusk';
+    st.budget = 0; st.ushla = false; obnovit();
+  }
+  function sbros() { st.rezhim = 'stop'; nachat(); obnovit(); }
+
+  /* Строка показаний пересказывает кадр словами; числа в ней те же, что на
+     сцене. Перерисовывается на границе оборота и по каждому действию. */
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var N = st.N;
+    if (st.ushla)
+      return 'Точка вышла из окна после ' + A(num(st.shag / N, 1)) + ' оборота: радиус вырос в ' +
+        A(num(radius(st.s) / R0, 2)) + ' раза, и дальше смотреть не на что. ' +
+        '«Сброс» возвращает её на окружность.';
+    if (st.shema === 'yavnyj') {
+      if (st.rost == null)
+        return 'Явный Эйлер: положение сдвигается по старой скорости, вдоль касательной, а ' +
+          'касательная уходит от окружности наружу. Стрелка по касательной показывает скорость, ' +
+          'стрелка к центру силу. «Оборот» делает ' + A(N) + ' шагов, ровно один период точного движения.';
+      return 'За ' + A(N) + ' шагов радиус вырос на ' + A(znak(st.rost * 100, 1) + ' %') +
+        ' по положению точки; формула главы обещает ' + A(znak(rostPoFormule(N) * 100, 1) + ' %') +
+        '. С начала счёта энергия выросла в ' + A(num(energiya(st.s) / E0, 2)) + ' раза, хотя сила всё ' +
+        'время смотрела в центр: на каждом шаге скорость поворачивается чуть меньше, чем нужно, и за ' +
+        'оборот набежало ' + A(num(st.ugolZaOborot * 180 / Math.PI, 1) + '°') + ' вместо 360°.';
+    }
+    if (st.rost == null)
+      return 'Полунеявная схема: сначала скорость по силе, потом положение уже по новой скорости. ' +
+        'Те же ' + A(N) + ' шагов, та же сила, другой порядок двух строк.';
+    return 'За ' + A(N) + ' шагов радиус вернулся к исходному: ' + A(znak(st.rost * 100, 3) + ' %') +
+      '. Внутри оборота он гулял от ' + A(num(st.rMinOb, 3)) + ' до ' + A(num(st.rMaxOb, 3)) +
+      ' R, энергия от ' + A(num(st.eMinOb, 3)) + ' до ' + A(num(st.eMaxOb, 3)) + ' E₀, и ни та, ни ' +
+      'другая не растёт. Порядок двух строк в схеме решает, живёт орбита или нет.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Схема:">
+          <${C.Btn} active=${ui.shema === 'yavnyj'}
+                    onClick=${function () { vybrat('yavnyj'); }}>явный Эйлер<//>
+          <${C.Btn} active=${ui.shema === 'poluneyavnyj'}
+                    onClick=${function () { vybrat('poluneyavnyj'); }}>полунеявный<//>
+        <//>
+        <${C.Slider} label="Шагов на оборот:" min=${0} max=${NS.length - 1} step=${1}
+                     value=${ui.iN} onChange=${vesti}
+                     display=${'N = ' + NS[ui.iN]} />
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${oborot}>${ui.rezhim === 'oborot' ? 'Стоп' : 'Оборот'}<//>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.rezhim === 'pusk' ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(ShagEjlera);
+</script>
+</body>
+</html>

@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Гироскоп от медленного к быстрому</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-06/">&larr; Неделя 06</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/demo-3d.js"></script>
+<script src="../shared/analytics.js?demo=giroskop"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html, D = window.Demo3D;
+var useState = React.useState, useRef = React.useRef, useEffect = React.useEffect;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `giroskop`, раздел «Проверим приближение» (бриф
+   briefs/demki_nedelya06.md, № 2; рамка lekciya06_ramka.md §6, демка 2, и
+   шаг «Момент тяжести» в §4; решение без автора № 12). Волчок на острие:
+   диск m = 0,1 кг радиуса R = 2 см, I∥ = mR²/2 = 2·10⁻⁵ кг·м², центр масс
+   на оси в a = 3 см от острия, I⊥ = mR²/4 + ma² = 10⁻⁴ кг·м² относительно
+   острия, g = 9,81 м/с², старт с наклоном θ = 60° от вертикали. Острие
+   неподвижно, в остальном волчок свободен: это случай Лагранжа, и демка
+   решает его точные уравнения, а не формулу быстрого волчка.
+
+   ЧТО СЧИТАЕТСЯ. Твёрдое тело с неподвижной точкой. Ориентация хранится
+   кватернионом q (из осей тела в мировые), движение задаёт момент импульса
+   L относительно острия в мировых осях. Ось волчка ê₃ = R·(0, 0, 1);
+   угловая скорость ω = L/I⊥ + L₃(1/I∥ − 1/I⊥)·ê₃, где L₃ = L·ê₃; момент
+   тяжести M = a ê₃ × (−mg ẑ) = mga (ẑ × ê₃), уравнение dL/dt = M.
+
+   СХЕМА. Расщепление Странга с шагом h = 10⁻⁴ с:
+       удар      L ← L + (h/2)·M(q)                    ориентация стоит;
+       дрейф     q ← Q(L̂, |L|h/I⊥) · q · Q(ê₃тела, λh),  λ = L₃(1/I∥ − 1/I⊥);
+       удар      L ← L + (h/2)·M(q).
+   Дрейф есть точное решение свободного симметричного волчка: ось обходит
+   неподвижный L с частотой |L|/I⊥, а тело ещё поворачивается вокруг своей
+   оси на λ. Собственное вращение (628 рад/с при 100 об/с) поэтому
+   считается без ошибки, и шаг ограничен только прецессией и нутацией.
+   Схема симплектическая и обратимая во времени. M горизонтален и
+   перпендикулярен ê₃, поэтому удар не меняет ни L_z, ни L₃ = L·ê₃, а дрейф
+   не меняет L вовсе и поворачивает ê₃ вокруг L: L_z держится точно, до
+   бита, L₃ до округления. Энергия у такой схемы не уходит, а колеблется на
+   величину порядка h².
+
+   ТОЧНОСТЬ. Python-копия схемы проверена против эталона (solve_ivp DOP853,
+   rtol 10⁻¹², уравнения Лагранжа в углах Эйлера и те же уравнения в
+   кватернионах), эта демка в браузере прогоном __demoProgon; числа
+   python и браузера совпали до последнего знака (отчёт
+   briefs/demki_nedelya06_giroskop_REPORT.md):
+     стационарная прецессия 2 с при 100 об/с: средняя Ω от корня −7,1·10⁻⁸
+       в долях, размах θ 2,5·10⁻⁵°, |ΔE| ≤ 2,8·10⁻¹³ Дж (10⁻¹¹ от mga),
+       L_z точно, L₃ до 2·10⁻¹⁶ кг·м²/с; за 20 с −1,2·10⁻⁷ и 3,6·10⁻¹³ Дж,
+       энергия не уходит; при 20 об/с −4,3·10⁻⁸, 3,6·10⁻⁵°, 1,4·10⁻¹⁴ Дж;
+       шаг вдвое меньше даёт ошибку Ω вчетверо меньше, второй порядок;
+     ниже порога (19,3, 19, 15, 10, 0 об/с, старт без прецессии):
+       |ΔE| ≤ 2,4·10⁻⁸ Дж (8·10⁻⁷ от mga), ось за 2 с отходит от эталона не
+       больше чем на 2·10⁻⁴°, нижнее положение оси совпадает с формулой до
+       10⁻⁴° (при 10 об/с 143,70597° против 143,70598°);
+     без тяжести дрейф точен: за 19 с при 20 об/с угол конуса стоит, а
+       частота обхода совпала с |L|/(2πI⊥) до 5·10⁻¹² в долях.
+
+   ЧИСЛА (python, g = 9,81; совпали с брифом и с главой):
+       ω∥, об/с    (I∥ω∥)²/(4I⊥mga cos θ)   Ω формулы   Ω точная   конус     частота
+         100              26,83               2,342       2,364     0,933°    20,00 Гц
+          20               1,073             11,710      18,571    32,62°     4,749 Гц
+   Порог стационарной прецессии при 60°: (I∥ω∥)² = 4I⊥mga cos θ,
+   ω∥ = 121,3 рад/с = 19,31 об/с. При 20 об/с формула отстаёт от точной
+   прецессии на 36,9 % (в долях точной).
+
+   СТАРТ. Ползунок задаёт ω∥, проекцию полной угловой скорости на ось
+   волчка, а не собственное вращение ψ̇. Выше порога волчок стартует с
+   θ̇ = 0 и φ̇ = Ω, медленным корнем I⊥ cos θ Ω² − I∥ω∥ Ω + mga = 0, то есть
+   из стационарной прецессии: ω = Ω ẑ + ψ̇ ê₃, ψ̇ = ω∥ − Ω cos θ, и
+   L = I⊥Ω(ẑ − cos θ ê₃) + I∥ω∥ ê₃. Только так числа главы верны: пуск при
+   20 об/с с φ̇, взятой по формуле, дал бы кивание оси от 60° до 79°.
+   Ниже порога корня нет, волчок стартует с φ̇ = 0, и ось опускается
+   (при 19 об/с до 112°, при 10 об/с до 144°, при 0 проходит под опорой) и
+   кивает. Подставка под острием поэтому высокая: ось уходит ниже
+   горизонтали, стол бы мешал.
+   Кнопка «Отпустить без толчка» (блок `giroskop`, абзац о нутации) пускает
+   так же, с θ = 60°, θ̇ = 0 и φ̇ = 0, и выше порога, при текущем ω∥. Ось
+   опускается и кивает, а в среднем прецессирует. Сверено с точной теорией
+   (период кивания эллиптическим интегралом, средняя прецессия квадратурой,
+   python): при 100 об/с ось опускается на 1,9011°, кивание 19,6402 Гц,
+   средняя прецессия 2,3629 рад/с; при 20 об/с 49,282°, 4,3482 Гц и
+   10,2011 рад/с. Модель даёт те же числа до 10⁻⁵ в долях.
+
+   ЧТО ПОКАЗАНО. «Ω по модели» снимается с движения оси: набегающий азимут
+   оси, делённый на время. В стационарной прецессии это просто φ̇. Если ось
+   заметно кивает (размах θ больше 10⁻³ рад), берётся средняя по всем
+   полным циклам кивания, от верхней точки до верхней; по тем же меткам
+   мерится частота кивания. «Выключить тяжесть»
+   убирает M: L встаёт, а ось обходит его. Угол конуса снимается как угол
+   между осью и L, частота как набег азимута оси вокруг L с момента
+   выключения, делённый на 2π и на время; рядом печатаются формулы рамки
+   arctg(I⊥Ω sin θ/(I∥ω∥)) и |L|/(2πI⊥). Лупа справа смотрит вдоль L:
+   крест L в центре, точки оси и ω отложены по углу от L, вверх к
+   вертикали. В ней видно, что поперечная часть L мала, но есть.
+   Собственное вращение диска при 100 об/с кадром не показать (стробоскоп),
+   поэтому спицы рисуются, только пока за кадр диск поворачивается меньше
+   чем на 20°; иначе диск гладкий, и вращение показывает дуга со стрелкой. */
+
+var TWO_PI = 2 * Math.PI, DEG = Math.PI / 180;
+var MASSA = 0.1, RADIUS = 0.02, A_CM = 0.03;
+var I_PAR = MASSA * RADIUS * RADIUS / 2;      /* 2·10⁻⁵ кг·м² */
+var I_PERP = 1e-4;                            /* относительно острия */
+var G = 9.81, MGA = MASSA * G * A_CM;         /* 0,02943 Н·м */
+var TETA0 = 60 * DEG;
+var H_STEP = 1e-4;                            /* шаг схемы, с */
+var OB_MAX = 100;
+/* порог стационарной прецессии при 60°: 19,306 об/с */
+var POROG = Math.sqrt(4 * I_PERP * MGA * Math.cos(TETA0)) / I_PAR / TWO_PI;
+var NUT_MIN = 1e-3;                           /* размах θ, с которого кивание считается настоящим */
+
+/* ── кватернионы и векторы ─────────────────────────────────
+   Свои короткие функции, а не Demo3D: физика проверялась python-копией
+   именно этих формул. Кватернион [w, x, y, z]. */
+function kvUmn(p, q) {
+  return [
+    p[0] * q[0] - p[1] * q[1] - p[2] * q[2] - p[3] * q[3],
+    p[0] * q[1] + p[1] * q[0] + p[2] * q[3] - p[3] * q[2],
+    p[0] * q[2] - p[1] * q[3] + p[2] * q[0] + p[3] * q[1],
+    p[0] * q[3] + p[1] * q[2] - p[2] * q[1] + p[3] * q[0]
+  ];
+}
+/* Поворот на угол ugol вокруг оси os (длина любая, нулевая даёт единицу). */
+function kvOs(os, ugol) {
+  var n = Math.sqrt(os[0] * os[0] + os[1] * os[1] + os[2] * os[2]);
+  if (n === 0 || ugol === 0) return [1, 0, 0, 0];
+  var s = Math.sin(ugol / 2) / n;
+  return [Math.cos(ugol / 2), os[0] * s, os[1] * s, os[2] * s];
+}
+function kvNorm(q) {
+  var n = Math.sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+  return [q[0] / n, q[1] / n, q[2] / n, q[3] / n];
+}
+/* Третий и первый столбцы матрицы поворота: ось волчка и метка на диске. */
+function osVolchka(q) {
+  var w = q[0], x = q[1], y = q[2], z = q[3];
+  return [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)];
+}
+function osXTela(q) {
+  var w = q[0], x = q[1], y = q[2], z = q[3];
+  return [1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)];
+}
+function skal(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function vekt(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+function dlina(a) { return Math.sqrt(skal(a, a)); }
+function ugolMezhdu(a, b) { return Math.atan2(dlina(vekt(a, b)), skal(a, b)); }
+
+/* ── модель ─────────────────────────────────────────────── */
+
+function korenMedlennyj(ob) {
+  var Lpar = I_PAR * TWO_PI * ob;
+  var D = Lpar * Lpar - 4 * I_PERP * MGA * Math.cos(TETA0);
+  if (ob <= 0 || D < 0) return null;
+  return (Lpar - Math.sqrt(D)) / (2 * I_PERP * Math.cos(TETA0));
+}
+
+/* Ось стартует вправо по экрану при исходной камере (азимут 25° + 90°). */
+var FI0 = 115 * DEG;
+
+/* bez = «Отпустить без толчка»: выше порога волчок пускается так же, как
+   ниже, с φ̇ = 0 и θ̇ = 0 при том же ω∥, и ось кивает. Ниже порога старт
+   и так такой, флаг ничего не меняет. */
+function nachalo(ob, bez) {
+  var Om = korenMedlennyj(ob), stac = Om !== null;
+  var q = kvUmn(kvOs([0, 0, 1], FI0), kvOs([0, 1, 0], TETA0));
+  var e = osVolchka(q), c = Math.cos(TETA0), Lpar = I_PAR * TWO_PI * ob, W = stac && !bez ? Om : 0;
+  var L = [I_PERP * W * (0 - c * e[0]) + Lpar * e[0],
+           I_PERP * W * (0 - c * e[1]) + Lpar * e[1],
+           I_PERP * W * (1 - c * e[2]) + Lpar * e[2]];
+  var s = { ob: ob, stac: stac, Om0: Om, q: q, L: L, t: 0, tyazh: true, vklyuchali: false,
+            bez: !!bez && stac, verh: W === 0 };
+  nachatOtrezok(s);
+  return s;
+}
+
+/* Нижнее положение оси при старте без прецессии (θ̇ = φ̇ = 0 при θ₀):
+   из энергии и двух интегралов, u = cos θ, α = (I∥ω∥)²/(2I⊥mga),
+   u² − αu + αu₀ − 1 = 0, меньший корень. Нужна только проверке. */
+function tetaMaxFormula(ob) {
+  var al = Math.pow(I_PAR * TWO_PI * ob, 2) / (2 * I_PERP * MGA), u0 = Math.cos(TETA0);
+  var u = (al - Math.sqrt(al * al - 4 * (al * u0 - 1))) / 2;
+  return Math.acos(C.clamp(u, -1, 1));
+}
+
+function energiya(s) {
+  var e = osVolchka(s.q), L3 = skal(s.L, e), L2 = skal(s.L, s.L);
+  return (L2 - L3 * L3) / (2 * I_PERP) + L3 * L3 / (2 * I_PAR) + (s.tyazh ? MGA * e[2] : 0);
+}
+
+function omegaMir(s) {
+  var e = osVolchka(s.q), L3 = skal(s.L, e), k = L3 * (1 / I_PAR - 1 / I_PERP);
+  return [s.L[0] / I_PERP + k * e[0], s.L[1] / I_PERP + k * e[1], s.L[2] / I_PERP + k * e[2]];
+}
+
+function udar(s, h) {
+  if (!s.tyazh) return;
+  var e = osVolchka(s.q);
+  s.L = [s.L[0] - h * MGA * e[1], s.L[1] + h * MGA * e[0], s.L[2]];   /* ẑ × ê₃ = (−e_y, e_x, 0) */
+}
+
+function drejf(s, h) {
+  var Lm = dlina(s.L), L3 = skal(s.L, osVolchka(s.q));
+  var lam = L3 * (1 / I_PAR - 1 / I_PERP);
+  s.q = kvNorm(kvUmn(kvOs(s.L, Lm * h / I_PERP), kvUmn(s.q, kvOs([0, 0, 1], lam * h))));
+}
+
+function shag(s, h) {
+  udar(s, h / 2);
+  drejf(s, h);
+  udar(s, h / 2);
+  s.t += h;
+  izmerit(s);
+}
+
+/* Отрезок измерения начинается со старта, с выключения и с включения
+   тяжести: всё, что считается «с начала», считается отсюда. */
+function nachatOtrezok(s) {
+  var e = osVolchka(s.q);
+  s.E0 = energiya(s); s.Lz0 = s.L[2]; s.L30 = skal(s.L, e);
+  s.dE = 0; s.dLz = 0; s.dL3 = 0;
+  s.t0 = s.t;
+  s.fiPrev = Math.atan2(e[1], e[0]); s.fiUn = 0;
+  /* Метки верхних точек кивания. Старт с φ̇ = 0 и θ̇ = 0 сам есть верхняя
+     точка (острие траектории оси), и он считается первой меткой. */
+  s.cikl = s.verh && s.t === 0 ? { t1: 0, f1: 0, n: 0 } : null;
+  s.OmCikl = null; s.nutPeriod = null;
+  s.thHi = Math.acos(C.clamp(e[2], -1, 1)); s.znakPrev = 0;
+  s.tPrev = s.t; s.fiUnPrev = 0;
+  s.thMin = s.thHi; s.thMax = s.thHi;
+  /* конус: базис поперёк L на момент выключения */
+  s.konus = null;
+  if (!s.tyazh && dlina(s.L) > 0) {
+    var Lh = D.unit(s.L), u1 = D.perp(Lh), u2 = vekt(Lh, u1);
+    s.konus = { Lh: Lh, u1: u1, u2: u2, prev: Math.atan2(skal(e, u2), skal(e, u1)), un: 0 };
+  }
+}
+
+function izmerit(s) {
+  var e = osVolchka(s.q);
+  /* азимут оси, с раскруткой */
+  var fi = Math.atan2(e[1], e[0]), d = fi - s.fiPrev;
+  d -= TWO_PI * Math.round(d / TWO_PI);
+  s.fiUn += d; s.fiPrev = fi;
+  var th = Math.acos(C.clamp(e[2], -1, 1));
+  if (th < s.thMin) s.thMin = th;
+  if (th > s.thMax) s.thMax = th;
+  if (th > s.thHi) s.thHi = th;
+  /* знак θ̇: ė₃ = (L × ê₃)/I⊥, θ̇ = −ė₃z / sin θ */
+  var znak = s.L[1] * e[0] - s.L[0] * e[1];
+  if (s.tyazh && s.znakPrev < 0 && znak >= 0) {
+    /* Верхняя точка кивания; цикл засчитывается, если кивание настоящее.
+       Момент, где θ̇ проходит через ноль, берётся линейной интерполяцией
+       внутри шага: без неё частота кивания ошибалась бы на h/T, 0,2 % при
+       100 об/с. Период и средняя прецессия считаются по всем полным циклам
+       с первой метки. */
+    if (s.thHi - th > NUT_MIN) {
+      var fr = s.znakPrev / (s.znakPrev - znak);
+      var tc = s.tPrev + fr * (s.t - s.tPrev), fc = s.fiUnPrev + fr * (s.fiUn - s.fiUnPrev);
+      if (!s.cikl) s.cikl = { t1: tc, f1: fc, n: 0 };
+      else {
+        s.cikl.n += 1;
+        s.nutPeriod = (tc - s.cikl.t1) / s.cikl.n;
+        s.OmCikl = (fc - s.cikl.f1) / (tc - s.cikl.t1);
+      }
+      s.thHi = th;
+    }
+  }
+  if (znak !== 0) s.znakPrev = znak;
+  s.tPrev = s.t; s.fiUnPrev = s.fiUn;
+  if (s.konus) {
+    var b = Math.atan2(skal(e, s.konus.u2), skal(e, s.konus.u1)), db = b - s.konus.prev;
+    db -= TWO_PI * Math.round(db / TWO_PI);
+    s.konus.un += db; s.konus.prev = b;
+  }
+  var dE = Math.abs(energiya(s) - s.E0); if (dE > s.dE) s.dE = dE;
+  var dz = Math.abs(s.L[2] - s.Lz0); if (dz > s.dLz) s.dLz = dz;
+  var d3 = Math.abs(skal(s.L, e) - s.L30); if (d3 > s.dL3) s.dL3 = d3;
+}
+
+/* Всё, что демка утверждает, одной функцией: из неё и показания, и
+   __demoState. */
+function velichiny(s) {
+  var e = osVolchka(s.q), w = omegaMir(s), Lm = dlina(s.L), L3 = skal(s.L, e);
+  var wpar = TWO_PI * s.ob;
+  var Lperp = Math.sqrt(Math.max(0, Lm * Lm - L3 * L3));
+  var tt = s.t - s.t0;
+  /* Без тяжести прецессии нет: азимут оси тогда меряет обход конуса (при
+     20 об/с конус в 33° захватывает вертикаль, и азимут бежит с частотой
+     конуса), и называть это Ω нельзя. */
+  var OmModel = null;
+  if (s.ob >= 0.5 && s.tyazh) {
+    if (s.OmCikl !== null) OmModel = s.OmCikl;
+    else if (tt > 0) OmModel = s.fiUn / tt;
+    else if (s.stac && s.tyazh) OmModel = s.Om0;
+  }
+  var konusFormula = s.stac && !s.bez ? Math.atan(I_PERP * s.Om0 * Math.sin(TETA0) / (I_PAR * wpar)) : null;
+  var konusChast = null;
+  if (s.konus && tt > 0) konusChast = s.konus.un / tt / TWO_PI;
+  return {
+    e: e, w: w, Lm: Lm, L3: L3, Lperp: Lperp,
+    theta: Math.acos(C.clamp(e[2], -1, 1)),
+    OmFormula: s.ob > 0 ? MGA / (I_PAR * wpar) : null,
+    OmModel: OmModel,
+    ratio: Math.pow(I_PAR * wpar, 2) / (4 * I_PERP * MGA * Math.cos(TETA0)),
+    ugolL: Lm > 0 ? ugolMezhdu(e, s.L) : 0,
+    ugolW: dlina(w) > 0 ? ugolMezhdu(e, w) : 0,
+    konusFormula: konusFormula,
+    konusChast: konusChast,
+    chastFormula: Lm / (TWO_PI * I_PERP),
+    nutAmp: s.thMax - s.thMin,
+    nutChast: s.nutPeriod ? 1 / s.nutPeriod : null,
+    E: energiya(s)
+  };
+}
+
+/* Прогон без анимации для автопроверки: та же схема на отдельном
+   состоянии. opt: ob, T (с), h (шаг, по умолчанию H_STEP), off (момент
+   выключения тяжести, с; без него тяжесть всё время), bez (старт без
+   толчка). */
+function progon(opt) {
+  var s = nachalo(opt.ob, opt.bez), h = opt.h || H_STEP;
+  var n = Math.round(opt.T / h), nOff = opt.off != null ? Math.round(opt.off / h) : -1;
+  for (var i = 0; i < n; i++) {
+    if (i === nOff) { s.tyazh = false; nachatOtrezok(s); }
+    shag(s, h);
+  }
+  var v = velichiny(s);
+  return {
+    ob: s.ob, t: s.t, Om0: s.Om0, OmFormula: v.OmFormula, OmModel: v.OmModel, ratio: v.ratio,
+    thetaMinDeg: s.thMin / DEG, thetaMaxDeg: s.thMax / DEG,
+    ugolLDeg: v.ugolL / DEG, ugolWDeg: v.ugolW / DEG,
+    konusFormulaDeg: v.konusFormula === null ? null : v.konusFormula / DEG,
+    konusChast: v.konusChast, chastFormula: v.chastFormula,
+    nutAmpDeg: v.nutAmp / DEG, nutChast: v.nutChast, nutCikly: s.cikl ? s.cikl.n : 0,
+    E: v.E, dE: s.dE, dLz: s.dLz, dL3: s.dL3, Lz: s.L[2], L3: v.L3
+  };
+}
+
+/* ── числа по-русски ── */
+function num(v, d) {
+  if (v === null || !isFinite(v)) return '—';
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* три значащие цифры, но не больше двух знаков после запятой */
+function num3(v) {
+  if (v === null || !isFinite(v)) return '—';
+  var a = Math.abs(v);
+  return num(v, a >= 100 ? 0 : a >= 10 ? 1 : 2);
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева волчок на высокой подставке и сфера радиусом 5 см вокруг острия:
+   конец оси оставляет на ней след, пунктиром широта 60°, по которой идёт
+   стационарная прецессия. Стрелки от острия: L (бирюзовая) и ω (оранжевая),
+   у обеих длина условная, важны направления; при тяжести ещё момент M
+   (оливковый) и вес mg в центре масс (красный). Справа показания и лупа,
+   внизу шкала ω∥ с порогом. Камеру можно повернуть мышью.
+
+   ЦВЕТА сведены с гантелью на моторе и рисунками главы: L бирюзовый
+   (Demo3D.palette.teal у gantel-na-motore, токен --fig-a рисунков), ω
+   оранжевый (palette.orange, --fig-b), момент силы оливковый, как силы и
+   моменты на рисунках области (palette.green, им же у гантели нарисованы
+   реакции). Вес mg красный: ни с одним из трёх не совпадает. */
+
+var W = 1000, HGT = 460;
+var RHO = 0.05;                       /* радиус сферы следа и длина оси, м */
+var CL = D.palette.teal, CW = D.palette.orange, CM = D.palette.green, CG = '#ff7a66', CSLED = '#f2b84b';
+var CDISK = '#7aa6ff';
+var LX = 858, LY = 330, LR = 88;      /* лупа */
+var SH_X0 = 74, SH_X1 = 470, SH_Y = 428;   /* шкала ω∥ */
+var SLED_MAX = 2400, LUPA_MAX = 900;
+var ZAMEDL = [1, 10, 100];
+
+function Giroskop() {
+  var st = useRef(null);
+  if (!st.current) {
+    st.current = {
+      s: nachalo(OB_MAX), idet: true, zam: 1, acc: 0, dtKadr: 1 / 60,
+      sled: [], lupa: [], lupaK: null,
+      cam: D.camera({ cx: 320, cy: 222, scale: 2300, az: 25, el: 18 }), tUi: 0
+    };
+    st.current.L = D.layer(st.current.cam);
+    sbrosSledov(st.current);
+  }
+  var m = st.current;
+
+  var pair = useState({ ob: OB_MAX, tyazh: true, zam: 1, idet: true, bez: false });
+  var ui = pair[0], setUi = pair[1];
+
+  function sbrosSledov(mm) {
+    mm.sled = []; mm.lupa = []; mm.lupaK = null;
+    zapisatSled(mm, true);
+  }
+
+  function obnovit() {
+    setUi({ ob: m.s.ob, tyazh: m.s.tyazh, zam: m.zam, idet: m.idet, bez: m.s.bez });
+    pokazaniya();
+  }
+
+  /* След конца оси на сфере: точка добавляется, когда ось ушла от
+     последней на 0,4°. В лупе своё правило: шаг в 2 % от радиуса кольца. */
+  function zapisatSled(mm, vsegda) {
+    var s = mm.s, e = osVolchka(s.q);
+    var last = mm.sled[mm.sled.length - 1];
+    if (vsegda || !last || skal(e, last) < Math.cos(0.4 * DEG)) {
+      mm.sled.push(e);
+      if (mm.sled.length > SLED_MAX) mm.sled.shift();
+    }
+    var p = lupaKoord(s, e);
+    if (p) {
+      var lp = mm.lupa[mm.lupa.length - 1];
+      var shag = Math.max(1e-4, 0.02 * Math.hypot(p[0], p[1]));
+      if (vsegda || !lp || Math.hypot(p[0] - lp[0], p[1] - lp[1]) > shag) {
+        mm.lupa.push(p);
+        if (mm.lupa.length > LUPA_MAX) mm.lupa.shift();
+      }
+    }
+  }
+
+  function step(dt) {
+    m.dtKadr = dt || m.dtKadr;
+    if (!m.idet) return;
+    m.acc += dt / m.zam;
+    var n = Math.min(5000, Math.floor(m.acc / H_STEP + 1e-9));
+    m.acc -= n * H_STEP;
+    if (m.acc < 0) m.acc = 0;
+    for (var i = 0; i < n; i++) {
+      shag(m.s, H_STEP);
+      zapisatSled(m, false);
+    }
+    pokazaniya();
+    /* строка под сценой берёт числа из модели: перерисовка раз в 0,3 с */
+    m.tUi += dt;
+    if (m.tUi > 0.3) {
+      m.tUi = 0;
+      setUi(function (p) { return Object.assign({}, p, { tick: (p.tick || 0) + 1 }); });
+    }
+  }
+
+  function pokazaniya() {
+    var s = m.s, v = velichiny(s);
+    window.__demoState = {
+      omegaPar: TWO_PI * s.ob, omegaParRev: s.ob, threshold: POROG,
+      theta: v.theta, theta0: TETA0, thetaMin: s.thMin, thetaMax: s.thMax,
+      steady: s.stac && !s.bez, release: s.bez, Omega_root: s.Om0,
+      thetaMaxFormula: s.stac && !s.bez ? null : tetaMaxFormula(s.ob),
+      nutAmplitudeDeg: v.nutAmp / DEG, nutFreq: v.nutChast, nutCycles: s.cikl ? s.cikl.n : 0,
+      Omega_formula: v.OmFormula, Omega_model: v.OmModel, ratio: v.ratio,
+      gravity: s.tyazh,
+      coneAngle: v.ugolL, coneAngleDeg: v.ugolL / DEG,
+      coneAngle_formula: v.konusFormula,
+      coneFreq: v.konusChast, coneFreq_formula: v.chastFormula,
+      omegaAxisAngleDeg: v.ugolW / DEG,
+      E: v.E, Lz: s.L[2], L3: v.L3, Lmod: v.Lm, Lperp: v.Lperp,
+      dE: s.dE, dLz: s.dLz, dL3: s.dL3, t: s.t, tSegment: s.t - s.t0,
+      slow: m.zam, running: m.idet
+    };
+  }
+
+  /* ── лупа: вид вдоль L ──
+     Направление d откладывается от центра по углу между d и L, в сторону
+     его проекции на плоскость поперёк L; вверх смотрит проекция вертикали.
+     Правая тройка: вправо × вверх = L, на зрителя. Координаты в градусах. */
+  function lupaBazis(s) {
+    var Lm = dlina(s.L);
+    if (Lm < 1e-12) return null;
+    var Lh = [s.L[0] / Lm, s.L[1] / Lm, s.L[2] / Lm];
+    var up = [-Lh[2] * Lh[0], -Lh[2] * Lh[1], 1 - Lh[2] * Lh[2]];
+    if (dlina(up) < 1e-9) up = [1, 0, 0];
+    up = D.unit(up);
+    return { Lh: Lh, up: up, right: vekt(up, Lh) };
+  }
+  function lupaKoord(s, d, baz) {
+    var b = baz || lupaBazis(s);
+    if (!b) return null;
+    var x = skal(d, b.right), y = skal(d, b.up), r = Math.hypot(x, y);
+    var psi = Math.atan2(r, skal(d, b.Lh)) / DEG;
+    if (r < 1e-15) return [0, 0];
+    return [psi * x / r, psi * y / r];
+  }
+
+  /* L и ω у быстрого волчка почти на одной прямой, и подписи легли бы
+     друг на друга: каждую сдвигаем поперёк своей стрелки на экране, в
+     сторону от соседки. */
+  function razvesti(cam, a, b) {
+    var res = { L: [0, 0], W: [0, 0] };
+    if (!a || !b) return res;
+    var o = cam.project([0, 0, 0]), pa = cam.project(a), pb = cam.project(b);
+    var ua = [pa[0] - o[0], pa[1] - o[1]], ub = [pb[0] - o[0], pb[1] - o[1]];
+    var la = Math.hypot(ua[0], ua[1]), lb = Math.hypot(ub[0], ub[1]);
+    if (la < 1 || lb < 1) return res;
+    ua = [ua[0] / la, ua[1] / la]; ub = [ub[0] / lb, ub[1] / lb];
+    var n = [-ua[1], ua[0]];
+    /* сторона: куда от L отходит ω; если почти совпадают, ω влево */
+    var kuda = n[0] * (ub[0] - ua[0]) + n[1] * (ub[1] - ua[1]);
+    var sg = Math.abs(kuda) < 0.05 ? 1 : (kuda > 0 ? 1 : -1);
+    res.W = [n[0] * 16 * sg, n[1] * 16 * sg];
+    res.L = [-n[0] * 14 * sg, -n[1] * 14 * sg];
+    return res;
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = 'rgb(' + tone.ink + ')', mut = 'rgb(' + tone.muted + ')';
+    var s = m.s, v = velichiny(s), cam = m.cam, Ly = m.L, e = v.e;
+    var O = [0, 0, 0];
+
+    /* фон: контур сферы, экватор, широта 60°, вертикаль */
+    var pc = cam.project(O);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.45)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(pc[0], pc[1], cam.px(RHO), 0, TWO_PI); ctx.stroke();
+    ctx.restore();
+    D.circle3(ctx, cam, O, [0, 0, 1], RHO, { color: 'rgba(' + tone.muted + ',.8)', width: 1.2, alpha: 0.55, dimBehind: O });
+    D.circle3(ctx, cam, [0, 0, RHO * Math.cos(TETA0)], [0, 0, 1], RHO * Math.sin(TETA0),
+              { color: 'rgba(' + tone.muted + ',.9)', width: 1.4, alpha: 0.7, dash: [5, 6], dimBehind: O });
+    D.segment(ctx, cam, O, [0, 0, RHO * 1.25], { color: 'rgba(' + tone.muted + ',.7)', width: 1.4, dash: [4, 6] });
+
+    /* след конца оси */
+    if (m.sled.length > 1) {
+      D.curve(ctx, cam, m.sled.map(function (p) { return D.mul(p, RHO); }),
+              { color: CSLED, width: 2, alpha: 0.9, dimBehind: O, backAlpha: 0.35 });
+    }
+    /* конус вокруг неподвижного L, пока тяжести нет */
+    if (!s.tyazh && v.Lm > 0 && v.ugolL > 0.2 * DEG) {
+      var Lh = D.unit(s.L);
+      D.circle3(ctx, cam, D.mul(Lh, RHO * Math.cos(v.ugolL)), Lh, RHO * Math.sin(v.ugolL),
+                { color: CL, width: 1.5, alpha: 0.75, dash: [3, 5], dimBehind: O });
+    }
+
+    /* подставка */
+    Ly.segment([0, 0, -0.004], [0, 0, -0.053], { color: '#8c93ac', width: 6, pieces: 4 });
+    Ly.disk([0, 0, -0.055], [0, 0, 1], 0.024, 0.004, { color: '#5a6178' });
+    Ly.ball(O, 0.0028, { color: '#c8cde0' });
+
+    /* волчок: ось кусками (до диска и после), диск со спицами */
+    var cDisk = D.mul(e, A_CM), konec = D.mul(e, RHO);
+    var rod = { color: 'rgba(' + tone.ink + ',.85)', width: 4 };
+    Ly.segment(D.mul(e, 0.003), D.mul(e, A_CM - 0.003), rod);
+    Ly.segment(D.mul(e, A_CM + 0.003), konec, rod);
+    var zaKadr = Math.abs(TWO_PI * s.ob) * m.dtKadr / m.zam;   /* поворот диска за кадр, рад */
+    var spicy = zaKadr < 20 * DEG;
+    /* диск полупрозрачный: стрелки от острия и ось за ним должны читаться */
+    Ly.disk(cDisk, e, RADIUS, 0.005, { color: CDISK, marks: spicy ? 4 : 0, ref: osXTela(s.q), alpha: 0.6 });
+    if (!spicy) {
+      /* дуга со стрелкой: в какую сторону крутится диск (против часовой с конца оси) */
+      var vv = [-e[2] * e[0], -e[2] * e[1], 1 - e[2] * e[2]];
+      var baseU = dlina(vv) > 1e-6 ? D.unit(vv) : D.perp(e), baseW = vekt(e, baseU);
+      var cA = D.mul(e, A_CM + 0.011), rA = 0.012, pts = [];
+      for (var k = 0; k <= 24; k++) {
+        var t = 1.5 * Math.PI * k / 24;
+        pts.push(D.add(cA, D.add(D.mul(baseU, rA * Math.cos(t)), D.mul(baseW, rA * Math.sin(t)))));
+      }
+      Ly.curve(pts, { color: CDISK, width: 2.2 });
+      var tEnd = 1.5 * Math.PI, tan = D.add(D.mul(baseU, -Math.sin(tEnd)), D.mul(baseW, Math.cos(tEnd)));
+      Ly.arrow(pts[pts.length - 1], D.add(pts[pts.length - 1], D.mul(tan, 0.006)), { color: CDISK, width: 2.2, head: 10 });
+    }
+    Ly.ball(konec, 0.0018, { color: CSLED });
+
+    /* векторы: длины условные, у L и ω важны направления */
+    var konL = v.Lm > 0 ? D.mul(D.unit(s.L), 0.061) : null;
+    var konW = dlina(v.w) > 0 ? D.mul(D.unit(v.w), 0.043) : null;
+    var sdvig = razvesti(cam, konL, konW);
+    if (konL) Ly.arrow(O, konL, { color: CL, width: 4, label: 'L', labelColor: CL, labelDx: sdvig.L[0], labelDy: sdvig.L[1] });
+    if (konW) Ly.arrow(O, konW, { color: CW, width: 3, label: 'ω', labelColor: CW, labelDx: sdvig.W[0], labelDy: sdvig.W[1] });
+    if (s.tyazh) {
+      var Mv = [-e[1], e[0], 0];
+      var konM = dlina(Mv) > 1e-6 ? D.mul(D.unit(Mv), 0.032) : null, konG = D.add(cDisk, [0, 0, -0.022]);
+      /* раз за оборот прецессии концы M и mg сходятся на экране, и подписи
+         легли бы одна на другую: тогда «mg» отодвигается вбок от «M» */
+      var dxG = 0;
+      if (konM) {
+        /* центры подписей так, как их ставит Demo3D.arrow: за концом вдоль
+           стрелки на зазор 8 плюс полуразмер текста (кегль 19) */
+        var centr = function (a, b, t) {
+          var pa = cam.project(a), pb = cam.project(b), dx = pb[0] - pa[0], dy = pb[1] - pa[1], l = Math.hypot(dx, dy) || 1;
+          var gap = 8 + Math.abs(dx / l) * t.length * 5.7 + Math.abs(dy / l) * 10.5;
+          return [pb[0] + dx / l * gap, pb[1] + dy / l * gap];
+        };
+        var cMp = centr(O, konM, 'M'), cGp = centr(cDisk, konG, 'mg');
+        if (Math.hypot(cMp[0] - cGp[0], cMp[1] - cGp[1]) < 40) dxG = (cGp[0] >= cMp[0] ? 1 : -1) * 40 - (cGp[0] - cMp[0]);
+        Ly.arrow(O, konM, { color: CM, width: 3, label: 'M', labelColor: CM });
+      }
+      Ly.arrow(cDisk, konG, { color: CG, width: 3, label: 'mg', labelColor: CG, labelDx: dxG });
+    }
+    Ly.flush(ctx);
+
+    pokazaniyaRisovat(ctx, tone, v);
+    lupaRisovat(ctx, tone, v);
+    shkala(ctx, tone);
+  }
+
+  function pokazaniyaRisovat(ctx, tone, v) {
+    var s = m.s, acc = 'rgb(' + tone.accent + ')', ink = 'rgb(' + tone.ink + ')';
+    var c1 = 795, c2 = 985, r1 = 34, r2 = 120;
+    if (s.tyazh && s.bez && !s.vklyuchali) {
+      /* без толчка: опускание оси от старта и частота кивания по циклам */
+      C.readout(ctx, c1, r1, 'Ω ФОРМУЛА, рад/с', num3(v.OmFormula), ink);
+      C.readout(ctx, c2, r1, 'Ω СРЕДНЯЯ, рад/с', num3(v.OmModel), acc);
+      C.readout(ctx, c1, r2, 'ОСЬ ОПУСТИЛАСЬ, °', num3(v.nutAmp / DEG), ink);
+      C.readout(ctx, c2, r2, 'КИВАНИЕ, Гц', v.nutChast === null ? '—' : num(v.nutChast, 1), CSLED);
+    } else if (s.tyazh) {
+      C.readout(ctx, c1, r1, 'Ω ФОРМУЛА, рад/с', num3(v.OmFormula), ink);
+      C.readout(ctx, c2, r1, (s.stac && !s.bez && !s.vklyuchali) || s.ob < 0.5 ? 'Ω МОДЕЛЬ, рад/с' : 'Ω СРЕДНЯЯ, рад/с', num3(v.OmModel), acc);
+      C.readout(ctx, c1, r2, 'ОТНОШЕНИЕ', num3(v.ratio), ink);
+      C.readout(ctx, c2, r2, 'L ОТ ОСИ, °', num3(v.ugolL / DEG), CL);
+    } else {
+      C.readout(ctx, c1, r1, 'КОНУС, °', num3(v.ugolL / DEG), acc);
+      C.readout(ctx, c2, r1, 'ЧАСТОТА, Гц', v.konusChast === null ? '—' : num(v.konusChast, 1), acc);
+      C.readout(ctx, c1, r2, 'ПО ФОРМУЛЕ, °', v.konusFormula === null || s.vklyuchali ? '—' : num3(v.konusFormula / DEG), ink);
+      C.readout(ctx, c2, r2, '|L|/2πI⊥, Гц', num(v.chastFormula, 1), ink);
+    }
+  }
+
+  function lupaRisovat(ctx, tone, v) {
+    var s = m.s, baz = lupaBazis(s);
+    var mutA = function (a) { return 'rgba(' + tone.muted + ',' + a + ')'; };
+    C.label(ctx, LX, LY - LR - 14, 'лупа: вид вдоль L', 17, 'rgb(' + tone.muted + ')', 'center');
+    ctx.save();
+    ctx.beginPath(); ctx.arc(LX, LY, LR, 0, TWO_PI);
+    ctx.fillStyle = 'rgba(' + tone.ink + ',.03)'; ctx.fill();
+    ctx.strokeStyle = mutA(0.55); ctx.lineWidth = 1.2; ctx.stroke();
+    ctx.clip();
+    ctx.strokeStyle = mutA(0.18); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(LX - LR, LY); ctx.lineTo(LX + LR, LY); ctx.moveTo(LX, LY - LR); ctx.lineTo(LX, LY + LR); ctx.stroke();
+    if (!baz) { ctx.restore(); return; }
+
+    var pO = lupaKoord(s, v.e, baz), pW = dlina(v.w) > 0 ? lupaKoord(s, D.unit(v.w), baz) : null;
+    /* масштаб: при старте точка оси на 55 % радиуса; дальше только
+       уменьшается, если что-то выходит за 90 % */
+    var maxDeg = Math.hypot(pO[0], pO[1]);
+    if (pW) maxDeg = Math.max(maxDeg, Math.hypot(pW[0], pW[1]));
+    m.lupa.forEach(function (p) { var r = Math.hypot(p[0], p[1]); if (r > maxDeg) maxDeg = r; });
+    if (m.lupaK === null) m.lupaK = 0.55 * LR / Math.max(maxDeg, 1e-3);
+    if (maxDeg * m.lupaK > 0.9 * LR) m.lupaK = 0.9 * LR / maxDeg;
+    var k = m.lupaK;
+    function X(p) { return LX + k * p[0]; }
+    function Y(p) { return LY - k * p[1]; }
+
+    /* кольцо: нынешний угол между осью и L; без тяжести по нему идёт ось */
+    var rk = k * v.ugolL / DEG;
+    if (rk > 2) {
+      ctx.setLineDash([4, 5]); ctx.strokeStyle = D.rgba(CL, 0.55); ctx.lineWidth = 1.3;
+      ctx.beginPath(); ctx.arc(LX, LY, rk, 0, TWO_PI); ctx.stroke(); ctx.setLineDash([]);
+    }
+    /* след оси относительно L */
+    if (m.lupa.length > 1) {
+      ctx.strokeStyle = 'rgba(242,184,75,.75)'; ctx.lineWidth = 1.6; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      m.lupa.forEach(function (p, i) { if (i) ctx.lineTo(X(p), Y(p)); else ctx.moveTo(X(p), Y(p)); });
+      ctx.stroke();
+    }
+    /* L — крест в центре, ω и ось — точки */
+    ctx.strokeStyle = CL; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(LX - 7, LY - 7); ctx.lineTo(LX + 7, LY + 7); ctx.moveTo(LX - 7, LY + 7); ctx.lineTo(LX + 7, LY - 7); ctx.stroke();
+    if (pW) { ctx.fillStyle = CW; ctx.beginPath(); ctx.arc(X(pW), Y(pW), 5, 0, TWO_PI); ctx.fill(); }
+    ctx.fillStyle = CSLED; ctx.beginPath(); ctx.arc(X(pO), Y(pO), 6, 0, TWO_PI); ctx.fill();
+    ctx.restore();
+
+    /* Подписи раскладываются от направления на ось: «ось» за точкой оси
+       наружу, ω и L по разные стороны поперёк этого направления (ω всегда
+       лежит на луче от L к оси: ω есть сумма L/I⊥ и части вдоль ê₃),
+       угол кольца на противоположной стороне. Экранное «вверх» у канвы
+       вниз по y, отсюда знаки. */
+    var ro = Math.hypot(pO[0], pO[1]);
+    var ux = ro > 1e-12 ? pO[0] / ro : 0, uy = ro > 1e-12 ? pO[1] / ro : -1;
+    var nx = -uy, ny = ux;                      /* поперёк, против часовой */
+    function podpis(x, y, t, cvet) {
+      ctx.save(); ctx.textBaseline = 'middle';
+      C.label(ctx, x, y, t, 17, cvet, 'center');
+      ctx.restore();
+    }
+    podpis(LX + 16 * nx, LY - 16 * ny, 'L', CL);
+    if (pW) podpis(X(pW) - 16 * nx, Y(pW) + 16 * ny, 'ω', CW);
+    podpis(X(pO) + 22 * ux, Y(pO) - 22 * uy, 'ось', CSLED);
+    if (rk > 2 && rk < LR - 18) {
+      podpis(LX - (rk + 24) * ux, LY + (rk + 24) * uy, num3(v.ugolL / DEG) + '°', CL);
+    }
+  }
+
+  /* Шкала ω∥: красная до порога (стационарной прецессии нет), зелёная
+     после; риска порога и бегунок нынешнего значения. */
+  function shkala(ctx, tone) {
+    var s = m.s, mut = 'rgb(' + tone.muted + ')';
+    function X(ob) { return SH_X0 + (SH_X1 - SH_X0) * ob / OB_MAX; }
+    ctx.save();
+    ctx.lineCap = 'butt'; ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(255,122,102,.7)';
+    ctx.beginPath(); ctx.moveTo(X(0), SH_Y); ctx.lineTo(X(POROG), SH_Y); ctx.stroke();
+    ctx.strokeStyle = 'rgba(166,195,90,.7)';
+    ctx.beginPath(); ctx.moveTo(X(POROG), SH_Y); ctx.lineTo(X(OB_MAX), SH_Y); ctx.stroke();
+    ctx.strokeStyle = 'rgb(' + tone.ink + ')'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(X(POROG), SH_Y - 9); ctx.lineTo(X(POROG), SH_Y + 9); ctx.stroke();
+    /* бегунок */
+    var xb = X(s.ob);
+    ctx.fillStyle = 'rgb(' + tone.accent + ')';
+    ctx.beginPath(); ctx.moveTo(xb, SH_Y - 5); ctx.lineTo(xb - 7, SH_Y - 17); ctx.lineTo(xb + 7, SH_Y - 17); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    C.label(ctx, SH_X0 - 12, SH_Y + 6, 'ω∥', 17, mut, 'right');
+    C.label(ctx, X(0), SH_Y + 26, '0', 17, mut, 'center');
+    C.label(ctx, X(POROG), SH_Y + 26, 'порог 19,3', 17, 'rgb(' + tone.ink + ')', 'center');
+    C.label(ctx, X(OB_MAX), SH_Y + 26, '100 об/с', 17, mut, 'right');
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+
+  /* мышью поворачивается камера */
+  useEffect(function () {
+    if (!ref.current) return undefined;
+    return D.dragCamera(ref.current, m.cam);
+  }, []);
+
+  /* ── управление ── */
+  function nachat(ob, bez) {
+    m.s = nachalo(C.clamp(Math.round(ob * 10) / 10, 0, OB_MAX), bez);
+    m.acc = 0; sbrosSledov(m); obnovit();
+  }
+  function tyazhest() {
+    var s = m.s;
+    s.tyazh = !s.tyazh;
+    if (s.tyazh) s.vklyuchali = true;
+    nachatOtrezok(s);
+    m.lupa = []; m.lupaK = null; zapisatSled(m, true);
+    obnovit();
+  }
+  function zamedlenie(k) { m.zam = k; m.acc = 0; obnovit(); }
+  function pauza() { m.idet = !m.idet; obnovit(); }
+  function sbros() { nachat(m.s.ob, m.s.bez); }
+  function otpustit() { nachat(m.s.ob, true); }
+
+  /* Для автопроверки: те же действия, что у кнопок. */
+  window.__demoControl = {
+    setOb: function (ob) { nachat(ob); return m.s.ob; },
+    gravity: function (on) { if (!!on !== m.s.tyazh) tyazhest(); return m.s.tyazh; },
+    slow: function (k) { zamedlenie(k); return m.zam; },
+    pause: function (p) { if (!!p === m.idet) pauza(); return !m.idet; },
+    reset: function () { sbros(); },
+    release: function () { otpustit(); return m.s.bez; },
+    camera: function (az, el) { m.cam.az = az; m.cam.el = el; }
+  };
+  window.__demoProgon = progon;
+
+  function slova() {
+    var s = m.s, v = velichiny(s);
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    if (!s.tyazh) {
+      if (v.Lm === 0) return 'Тяжесть выключена, волчок не вращается и стоит.';
+      return 'Тяжесть выключена. В приближении быстрого волчка прецессия прекратилась бы сразу. ' +
+        'В точном движении момент импульса стоит, а ось обходит его по конусу ' + A(num3(v.ugolL / DEG) + '°') +
+        ' с частотой ' + A((v.konusChast === null ? num(v.chastFormula, 1) : num(v.konusChast, 1)) + ' Гц') +
+        ', это |L|/(2πI⊥). Угол конуса и есть поперечная часть момента импульса.';
+    }
+    if (s.vklyuchali)
+      return 'Тяжесть снова включена, но волчок пущен уже не из стационарной прецессии, и ось кивает. ' +
+        '«Сброс» вернёт стационарную прецессию.';
+    if (s.ob === 0)
+      return 'Волчок не вращается, и это перевёрнутый маятник: ось падает и проходит под острием.';
+    if (s.bez) {
+      var opusk = A(num3(v.nutAmp / DEG) + '°');
+      if (v.nutChast === null)
+        return 'Волчок отпущен без толчка вбок, без прецессии. Ось опускается, пока на ' + opusk + ', и сейчас пойдёт обратно: она кивает.';
+      return 'Волчок отпущен без толчка вбок. Ось опускается на ' + opusk + ' и кивает с частотой ' +
+        A(num(v.nutChast, 1) + ' Гц') + ', а в среднем не падает и прецессирует с ' + A(num3(v.OmModel)) +
+        ' рад/с. Формула быстрого волчка даёт ' + A(num3(v.OmFormula)) +
+        '. Кнопки 100 и 20 об/с пускают волчок из стационарной прецессии.';
+    }
+    if (!s.stac)
+      return 'Ниже 19,3 об/с при наклоне 60° стационарной прецессии нет: у квадратного уравнения для Ω нет корней. ' +
+        'Волчок отпущен без прецессии, ось опускается до ' + A(num(s.thMax / DEG, 0) + '°') + ' и кивает.';
+    /* отставание формулы в долях точной прецессии, как в главе */
+    var otst = (v.OmModel - v.OmFormula) / v.OmModel * 100;
+    var ugol = num3(v.ugolL / DEG) + '°';
+    var nachalo = 'Отношение ' + A(num3(v.ratio)) +
+      (v.ratio >= 5 ? ', волчок быстрый. ' : v.ratio < 1.5 ? ', волчок у порога 19,3 об/с. ' : '. ');
+    var sravnenie = otst < 5
+      ? 'Формула mga/(I∥ω∥) даёт ' + A(num3(v.OmFormula)) + ' рад/с, точное движение ' + A(num3(v.OmModel)) + '. '
+      : 'Прецессия идёт с ' + A(num3(v.OmModel)) + ' рад/с, а формула даёт ' + A(num3(v.OmFormula)) +
+        ' и отстаёт на ' + A(num(otst, 0) + ' %') + '. ';
+    return nachalo + sravnenie + 'Момент импульса отходит от оси на ' + A(ugol) +
+      (v.ratio >= 5 ? ': поперечная часть мала, но есть. «Выключить тяжесть» покажет её конусом.' : '.');
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <div class="control-group">
+          <span class="control-label">Волчок:</span>
+          <input type="range" class="slider" min="0" max=${OB_MAX} step="0.1" value=${ui.ob} list="giroskop-porog"
+                 onInput=${function (ev) { nachat(parseFloat(ev.target.value)); }} />
+          <datalist id="giroskop-porog"><option value=${num(POROG, 1).replace(',', '.')}></option></datalist>
+          <span class="control-value">${'ω∥ = ' + num(ui.ob, 1) + ' об/с'}</span>
+        </div>
+        <${C.Group}>
+          <${C.Btn} active=${ui.ob === 100 && !ui.bez} onClick=${function () { nachat(100); }}>100 об/с<//>
+          <${C.Btn} active=${ui.ob === 20 && !ui.bez} onClick=${function () { nachat(20); }}>20 об/с<//>
+        <//>
+        <${C.Group}>
+          <${C.Btn} active=${ui.bez} onClick=${otpustit}>Отпустить без толчка<//>
+        <//>
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${tyazhest}>${ui.tyazh ? 'Выключить тяжесть' : 'Включить тяжесть'}<//>
+        <//>
+        <${C.Group} label="Замедление:">
+          <${C.Btn} active=${ui.zam === 1} onClick=${function () { zamedlenie(1); }}>нет<//>
+          <${C.Btn} active=${ui.zam === 10} onClick=${function () { zamedlenie(10); }}>×10<//>
+          <${C.Btn} active=${ui.zam === 100} onClick=${function () { zamedlenie(100); }}>×100<//>
+        <//>
+        <${C.Group}>
+          <${C.Btn} onClick=${pauza}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(Giroskop);
+</script>
+</body>
+</html>

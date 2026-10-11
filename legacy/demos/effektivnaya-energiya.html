@@ -1,0 +1,1154 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Эффективная энергия и переход с орбиты на орбиту</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-05/">&larr; Неделя 05</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=effektivnaya-energiya"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Бриф briefs/demki_nedelya05.md, № 3. Блоки главы effektivnyj-potencial,
+   zakony-sohraneniya-orbity, parametry-orbity (раздел о переходе с орбиты
+   на орбиту) и kosmicheskie-skorosti. Слева эффективная энергия
+       U_эфф(r) = l²/2r² − GM/r
+   и уровень удельной энергии 𝓔, справа та же орбита на плоскости. Имя
+   «эффективная энергия» по решению автора (развилка 8), буква 𝓔 для
+   удельной энергии, как в главе: e занята эксцентриситетом.
+
+   ЧТО СЧИТАЕТСЯ. Точка движется под силой −GM·r/r³ на единицу массы, и
+   движение интегрируется скоростным Верле: полшага скорости, шаг
+   положения, новое ускорение, ещё полшага скорости. Сила центральная,
+   поэтому ни полушаг скорости (добавка вдоль r), ни шаг положения
+   (добавка вдоль v) не меняют r × v: момент держится до ошибки
+   округления. Энергия в этой схеме не уплывает, а колеблется около своего
+   значения, и размах колебаний задаёт шаг.
+
+   ШАГ. h = √(r_min³/GM)/K, где r_min расстояние перицентра: самое быстрое
+   место орбиты задаёт шаг на всю орбиту. K = 400; у вытянутого эллипса
+   относительная ошибка энергии растёт как 1/(1 − e), и там
+   K = 400·0,3/√(1 − e). Проверка прогоном __demoProgon (наибольшее
+   отклонение энергии за прогон, делённое на |𝓔|; перепроверено 30.09):
+   на десяти оборотах окружность 1·10⁻¹¹, эллипс пресета 3·10⁻⁶,
+   переходный эллипс к геостационару 5·10⁻⁶, эллипс с e = 0,949
+   (𝓔 = −0,05, l = 1) 1,8·10⁻⁵; эллипс с e = 0,995 (𝓔 = −0,01, l = 0,7)
+   за один оборот 1,9·10⁻⁵. Момент стоит до 7·10⁻¹³: столько у e = 0,995,
+   у остальных не больше 3,3·10⁻¹³. Порог брифа 10⁻⁴.
+
+   ГРАФИК. На графике нет ничего, чего нет в модели. Кривая есть формула
+   U_эфф при текущем l, уровень есть 𝓔 = v²/2 − GM/r, снятое с состояния.
+   Маркер стоит на текущем r, а отрезок цвета скорости под ним, от кривой
+   до уровня, по уравнению энергии главы (#energiya) равен v_r²/2: в
+   показаниях это gap и vr2half. Точки поворота суть корни квадратного
+   уравнения главы (#kvadratnoe), r_min,max = (l²/GM)/(1 ± e) при
+   e = √(1 + 2𝓔l²/(GM)²); те же расстояния снимаются с посчитанной орбиты
+   (rMinMeasured, rMaxMeasured) по смене знака v_r. Дно кривой,
+   r_круг = l²/GM (#krug), сверяется с минимумом U_эфф, найденным без
+   формулы: сетка по r и золотое сечение (rCircNumeric).
+
+   РЕЖИМ «ОРБИТА». Единицы, в которых GM = 1. Ползунки задают 𝓔 и l, точка
+   стартует в перицентре на оси x и обходит центр против часовой стрелки;
+   если орбита выходит за край кадра, точка стартует с края кадра на
+   входящей ветви (та же схема с обращённой скоростью: Верле обратим).
+   Уровень ниже дна не опускается, ползунок упирается в U_min = −GM²/2l².
+   Если уровень лежал на дне, при смене l он остаётся на дне: окружность
+   остаётся окружностью другого радиуса. Пресеты подобраны так, чтобы
+   эллипс помещался в кадр радиуса 3:
+     окружность  𝓔 = −0,5; l = 1: r = 1, период 2π = 6,283;
+     эллипс      𝓔 = −0,3; l = 1: r_min = 0,613, r_max = 2,721,
+                 a = 1,667, e = 0,632, период 2π·a^{3/2} = 13,52;
+     парабола    𝓔 = 0;    l = 1: r_min = 0,5;
+     гипербола   𝓔 = +0,3; l = 1: r_min = 0,442, скорость на
+                 бесконечности √(2𝓔) = 0,775.
+
+   РЕЖИМ «ПЕРЕХОД». СИ, Земля: GM = 3,986·10¹⁴ м³/с², радиус 6371 км,
+   атмосферы нет. Старт на круговой орбите высотой 300 км, r₁ = 6671 км,
+   v = √(GM/r₁) = 7,73 км/с. Импульс двигателя мгновенный: к скорости
+   прибавляется Δv вдоль неё, положение прежнее. После импульса 𝓔 и l
+   снимаются с нового состояния, кривая и уровень перестраиваются, а
+   прежние остаются бледными. «На геостационар»: первый импульс рассчитан,
+   как в главе, из v²/2 − GM/r = −GM/2a с a = (r₁ + r₂)/2, r₂ = 42 164 км:
+   скорость в перицентре 10,16 км/с, импульс 2,43 км/с. Апоцентр модель
+   находит сама, по смене знака v_r, и уточняет делением шага пополам;
+   там второй импульс доводит скорость до круговой √(GM/r). Глава: в
+   апоцентре 1,61 км/с, круговая 3,07, второй импульс 1,47, всего 3,90
+   км/с; полпериода переходного эллипса 5 ч 16 мин. Орбита, задевшая
+   Землю, кончается ударом о поверхность.
+
+   ВРЕМЯ. Экранная секунда равна 2 единицам времени в режиме «орбита» и
+   4200 с в режиме «переход»: низкая орбита за 1,3 с, переходный эллипс за
+   9 с. Пока точка за краем кадра на замкнутой орбите, время идёт
+   быстрее, чтобы далёкий апоцентр не заставлял ждать минуту: на счёт это
+   не влияет, меняется только число шагов за кадр. Точка на гиперболе или
+   параболе, ушедшая за край, в режиме «орбита» начинает пролёт заново, в
+   режиме «переход» уходит насовсем. */
+
+var GM_Z = 3.986e14;               /* м³/с², глава */
+var R_Z = 6.371e6;                 /* радиус Земли, м */
+var R_NOO = 6.671e6;               /* низкая орбита: 300 км над поверхностью */
+var R_GEO = 4.2164e7;              /* геостационарная орбита */
+var K_OSN = 400;                   /* шагов на √(r_min³/GM) */
+var MAX_PROGNOZ = 4e6;             /* предохранитель прогноза орбиты */
+var MAX_ZA_KADR = 60000;           /* предохранитель шагов за кадр: около 10 мс счёта */
+var R_VYHOD = 1.25;                /* за этим расстоянием, в радиусах кадра, точка ушла */
+var DVA_PI = 2 * Math.PI;
+
+/* Две системы единиц. Rkadr — радиус кадра плоскости и правый край
+   графика; temp — единиц времени на экранную секунду; Rpov — поверхность,
+   о которую орбита разбивается; Ulo..Uhi — вертикаль графика. Низ взят с
+   запасом под самым глубоким дном (−1,02 при l = 0,7 и −29,9 МДж/кг у
+   низкой орбиты): под точкой дна должна поместиться подпись r_круг. */
+var SIS = {
+  orbita:  { GM: 1,    Rkadr: 3,     temp: 2,    Rpov: 0,   Ulo: -1.25, Uhi: 0.6 },
+  perehod: { GM: GM_Z, Rkadr: 4.5e7, temp: 4200, Rpov: R_Z, Ulo: -36e6, Uhi: 8e6 }
+};
+
+var PRESETY = {
+  krug:      { imya: 'окружность', eps: -0.5, l: 1 },
+  ellips:    { imya: 'эллипс',     eps: -0.3, l: 1 },
+  parabola:  { imya: 'парабола',   eps: 0,    l: 1 },
+  giperbola: { imya: 'гипербола',  eps: 0.3,  l: 1 }
+};
+var L_MIN = 0.7, L_MAX = 1.4;      /* дно от −1,02 до −0,26: влезает в вертикаль графика */
+var EPS_MIN = -1.05, EPS_MAX = 0.5;
+var DV_MAX = 3500;                 /* м/с: хватает и на уход с низкой орбиты, 3,20 км/с */
+var START_PEREHOD = (function () {
+  try { return new URLSearchParams(location.search).get('rezhim') === 'perehod'; } catch (e) { return false; }
+})();
+
+function sost(GM, x, y, vx, vy) {
+  var r2 = x * x + y * y, r = Math.sqrt(r2), k = -GM / (r2 * r);
+  return { x: x, y: y, vx: vx, vy: vy, ax: k * x, ay: k * y, t: 0 };
+}
+function kopiya(s) { return { x: s.x, y: s.y, vx: s.vx, vy: s.vy, ax: s.ax, ay: s.ay, t: s.t }; }
+function prisvoit(d, s) { d.x = s.x; d.y = s.y; d.vx = s.vx; d.vy = s.vy; d.ax = s.ax; d.ay = s.ay; d.t = s.t; }
+
+/* Один шаг скоростного Верле; ускорение в конце шага запоминается и
+   служит началом следующего. */
+function shag(GM, s, h) {
+  s.vx += 0.5 * h * s.ax; s.vy += 0.5 * h * s.ay;
+  s.x += h * s.vx; s.y += h * s.vy;
+  var r2 = s.x * s.x + s.y * s.y, r = Math.sqrt(r2), k = -GM / (r2 * r);
+  s.ax = k * s.x; s.ay = k * s.y;
+  s.vx += 0.5 * h * s.ax; s.vy += 0.5 * h * s.ay;
+  s.t += h;
+}
+
+/* Величины главы по состоянию: r, v_r, v_φ = l/r, удельный момент l и
+   удельная энергия 𝓔. */
+function velichiny(GM, s) {
+  var r = Math.hypot(s.x, s.y), v2 = s.vx * s.vx + s.vy * s.vy;
+  var l = s.x * s.vy - s.y * s.vx;
+  return { r: r, v: Math.sqrt(v2), l: l, vr: (s.x * s.vx + s.y * s.vy) / r, vphi: l / r, eps: v2 / 2 - GM / r };
+}
+
+function Ueff(GM, l, r) { return l * l / (2 * r * r) - GM / r; }
+
+/* Точки поворота, дно и полуось по 𝓔 и l. */
+function parametry(GM, eps, l) {
+  var e = Math.sqrt(Math.max(0, 1 + 2 * eps * l * l / (GM * GM)));
+  var p = l * l / GM;
+  var a = eps < 0 ? -GM / (2 * eps) : Infinity;
+  return {
+    e: e, rKrug: p, rMin: p / (1 + e), rMax: e < 1 ? p / (1 - e) : Infinity,
+    a: a, Umin: -GM * GM / (2 * l * l),
+    T: eps < 0 ? DVA_PI * Math.sqrt(a * a * a / GM) : null
+  };
+}
+
+function tip(par) {
+  if (par.e < 1e-3) return 'окружность';
+  if (Math.abs(par.e - 1) < 1e-9) return 'парабола';
+  return par.e < 1 ? 'эллипс' : 'гипербола';
+}
+
+/* Дно кривой без формулы r_круг: минимум U_эфф на логарифмической сетке,
+   потом золотое сечение вокруг него. */
+function dnoChislenno(GM, l, masshtab) {
+  var N = 600, iMin = 0, uMin = Infinity, i;
+  function rr(k) { return masshtab * Math.pow(10, -3 + 5 * k / N); }
+  for (i = 0; i <= N; i++) { var u = Ueff(GM, l, rr(i)); if (u < uMin) { uMin = u; iMin = i; } }
+  var a = rr(Math.max(0, iMin - 1)), b = rr(Math.min(N, iMin + 1)), g = (Math.sqrt(5) - 1) / 2;
+  var c = b - g * (b - a), d = a + g * (b - a);
+  for (i = 0; i < 200; i++) {
+    if (Ueff(GM, l, c) < Ueff(GM, l, d)) { b = d; } else { a = c; }
+    c = b - g * (b - a); d = a + g * (b - a);
+  }
+  return (a + b) / 2;
+}
+
+function shagDlya(GM, par, Rpov) {
+  var rH = Math.max(par.rMin, 0.9 * Rpov);
+  var K = K_OSN;
+  if (par.e < 1) K *= Math.min(20, Math.max(1, 0.3 / Math.sqrt(1 - par.e)));
+  return { h: Math.sqrt(rH * rH * rH / GM) / K, K: K };
+}
+
+/* Угол поворота радиус-вектора за шаг: один арктангенс от векторного и
+   скалярного произведений двух положений, со знаком, от −π до π. */
+function ugolShaga(x0, y0, x1, y1) {
+  return Math.atan2(x0 * y1 - y0 * x1, x0 * x1 + y0 * y1);
+}
+
+/* Прогноз орбиты той же схемой и тем же шагом, что у точки: до полного
+   оборота по углу, до выхода за край или до удара о поверхность. Точки
+   для рисования берутся через расстояние dmin. Апсиды уточняются по смене
+   знака v_r: вершина параболы r(t) между двумя шагами. */
+function prognoz(GM, s0, h, Rvyhod, Rpov, dmin) {
+  var s = kopiya(s0), pts = [[s.x, s.y]];
+  var r = Math.hypot(s.x, s.y), vr = (s.x * s.vx + s.y * s.vy) / r;
+  var rMin = r, rMax = r, ugol = 0, konec = 'predel', lx = s.x, ly = s.y;
+  for (var i = 0; i < MAX_PROGNOZ; i++) {
+    var x0 = s.x, y0 = s.y, r0 = r, vr0 = vr;
+    shag(GM, s, h);
+    r = Math.sqrt(s.x * s.x + s.y * s.y); vr = (s.x * s.vx + s.y * s.vy) / r;
+    if (vr0 * vr < 0) {
+      var ext = r0 + vr0 * (h * vr0 / (vr0 - vr)) / 2;
+      if (ext < rMin) rMin = ext;
+      if (ext > rMax) rMax = ext;
+    }
+    if (r < rMin) rMin = r;
+    if (r > rMax) rMax = r;
+    ugol += ugolShaga(x0, y0, s.x, s.y);
+    if (Math.hypot(s.x - lx, s.y - ly) > dmin) { pts.push([s.x, s.y]); lx = s.x; ly = s.y; }
+    if (Rpov && r < Rpov) { konec = 'udar'; break; }
+    if (r > Rvyhod) { konec = 'vyshel'; break; }
+    if (Math.abs(ugol) >= DVA_PI) { konec = 'oborot'; break; }
+  }
+  pts.push([s.x, s.y]);
+  return { pts: pts, rMin: rMin, rMax: rMax, konec: konec, s: s, t: s.t - s0.t };
+}
+
+/* Орбита по 𝓔 и l, режим «орбита». */
+function orbitaIzParametrov(eps, l) {
+  var S = SIS.orbita, GM = S.GM, par = parametry(GM, eps, l);
+  var sh = shagDlya(GM, par, 0), Rv = R_VYHOD * S.Rkadr, dmin = S.Rkadr / 400;
+  var sP = sost(GM, par.rMin, 0, 0, l / par.rMin);
+  var vp = prognoz(GM, sP, sh.h, Rv, 0, dmin);
+  var O = {
+    GM: GM, Rpov: 0, eps: eps, l: l, par: par, h: sh.h, K: sh.K, pts: vp.pts, start: sP,
+    om: ugolPericentra(GM, sP), rMinIzm: vp.rMin, rMaxIzm: vp.konec === 'oborot' ? vp.rMax : null,
+    dno: dnoChislenno(GM, l, S.Rkadr), vyhodit: vp.konec !== 'oborot'
+  };
+  if (O.vyhodit) {
+    var sN = kopiya(sP); sN.vx = -sN.vx; sN.vy = -sN.vy;
+    var np = prognoz(GM, sN, sh.h, Rv, 0, dmin);
+    O.pts = np.pts.slice().reverse().concat(vp.pts);
+    O.rMinIzm = Math.min(vp.rMin, np.rMin);
+    var st0 = kopiya(np.s); st0.vx = -st0.vx; st0.vy = -st0.vy; st0.t = 0;
+    O.start = st0;
+  }
+  return O;
+}
+
+/* Орбита из текущего состояния, режим «переход»: прогноз вперёд на оборот. */
+function orbitaIzSostoyaniya(s) {
+  var S = SIS.perehod, GM = S.GM, q = velichiny(GM, s), par = parametry(GM, q.eps, q.l);
+  var sh = shagDlya(GM, par, S.Rpov);
+  var pr = prognoz(GM, s, sh.h, R_VYHOD * S.Rkadr, S.Rpov, S.Rkadr / 400);
+  return {
+    GM: GM, Rpov: S.Rpov, eps: q.eps, l: q.l, par: par, h: sh.h, K: sh.K, pts: pr.pts, start: kopiya(s),
+    om: ugolPericentra(GM, s), rMinIzm: pr.rMin, rMaxIzm: pr.konec === 'oborot' ? pr.rMax : null,
+    dno: dnoChislenno(GM, q.l, S.Rkadr), vyhodit: pr.konec === 'vyshel', udarit: pr.konec === 'udar'
+  };
+}
+
+/* Направление из фокуса на перицентр, угол от оси x. Его показывает
+   вектор эксцентриситета (v²/GM − 1/r)·r − (r·v)·v/GM, снятый с любого
+   состояния орбиты: в перицентре второе слагаемое нулевое, и в режиме
+   «орбита» угол ровно 0. У окружности направление не определено, но
+   оно там и не нужно. */
+function ugolPericentra(GM, s) {
+  var r = Math.hypot(s.x, s.y), v2 = s.vx * s.vx + s.vy * s.vy, rv = s.x * s.vx + s.y * s.vy;
+  var k = v2 / GM - 1 / r;
+  return Math.atan2(k * s.y - rv * s.vy / GM, k * s.x - rv * s.vx / GM);
+}
+
+/* Асимптоты гиперболы по элементам орбиты: 𝓔 > 0, e > 1, полуось
+   a = GM/2𝓔. Центр гиперболы лежит на линии апсид за перицентром, на
+   расстоянии c = a·e от фокуса (перицентр на a(e − 1), ближе к фокусу).
+   Асимптоты идут через центр под углами ±arccos(−1/e) к направлению на
+   перицентр, как его видно из фокуса: к этим углам стремится направление
+   радиус-вектора, когда r = p/(1 + e cos φ) уходит в бесконечность. У
+   эллипса и параболы асимптот нет. */
+function asimptoty(O) {
+  var par = O.par;
+  if (!(O.eps > 0) || !(par.e > 1)) return null;
+  var a = O.GM / (2 * O.eps), c = a * par.e, fi = Math.acos(-1 / par.e);
+  var ux = Math.cos(O.om), uy = Math.sin(O.om);
+  return {
+    c: [c * ux, c * uy], a: a, cRast: c, fiBesk: fi,
+    d: [[Math.cos(O.om + fi), Math.sin(O.om + fi)], [Math.cos(O.om - fi), Math.sin(O.om - fi)]]
+  };
+}
+
+/* Низкая круговая орбита: точка справа от Земли, обход против часовой. */
+function sostNOO() { return sost(GM_Z, R_NOO, 0, 0, Math.sqrt(GM_Z / R_NOO)); }
+
+/* Первый импульс перехода по главе: скорость в перицентре эллипса с
+   a = (r₁ + r₂)/2 из v²/2 − GM/r = −GM/2a, минус круговая. */
+function dvNaPerehod(r1, r2) {
+  var a = (r1 + r2) / 2;
+  return Math.sqrt(GM_Z * (2 / r1 - 1 / a)) - Math.sqrt(GM_Z / r1);
+}
+
+/* ── модель на ходу ── */
+
+function novayaModel(O, s) {
+  var m = { s: kopiya(s), pred: kopiya(s), burns: [], dvSum: 0, istoriya: [],
+            zhdemApo: false, udar: false, ushel: false, vne: false, sobytie: null, proletov: 0 };
+  zavestiOrbitu(m, O);
+  return m;
+}
+
+function zavestiOrbitu(m, O) {
+  var q = velichiny(O.GM, m.s);
+  m.O = O; m.eps0 = q.eps; m.l0 = q.l; m.dEmax = 0; m.dLmax = 0;
+  m.ugol = 0; m.kOb = 0; m.tOb = [m.s.t]; m.period = null; m.budget = 0;
+}
+
+/* Мгновенный импульс вдоль скорости; положение прежнее, поэтому и
+   ускорение прежнее. Старая орбита уходит в историю бледной. */
+function impuls(m, dv, avto) {
+  var s = m.s, v = Math.hypot(s.vx, s.vy);
+  s.vx += dv * s.vx / v; s.vy += dv * s.vy / v;
+  m.burns.push({ n: m.burns.length + 1, t: s.t, r: Math.hypot(s.x, s.y), dv: dv,
+                 vBefore: v, vAfter: Math.hypot(s.vx, s.vy), auto: !!avto, pos: [s.x, s.y] });
+  m.dvSum += Math.abs(dv);
+  m.istoriya.push(m.O);
+  if (m.istoriya.length > 3) m.istoriya.shift();
+  zavestiOrbitu(m, orbitaIzSostoyaniya(s));
+}
+
+/* Один шаг точки. Обороты считаются по накопленному углу с линейной
+   подстановкой момента перехода; период есть разность соседних. */
+function odinShag(m) {
+  var O = m.O, GM = O.GM, s = m.s, p = m.pred;
+  prisvoit(p, s);
+  shag(GM, s, O.h);
+  var u0 = Math.abs(m.ugol);
+  m.ugol += ugolShaga(p.x, p.y, s.x, s.y);
+  var u1 = Math.abs(m.ugol);
+  if (u1 >= (m.kOb + 1) * DVA_PI) {
+    m.kOb++;
+    var tc = p.t + (s.t - p.t) * ((m.kOb * DVA_PI - u0) / (u1 - u0));
+    m.tOb.push(tc);
+    m.period = tc - m.tOb[m.tOb.length - 2];
+  }
+  var r = Math.sqrt(s.x * s.x + s.y * s.y);
+  if (m.zhdemApo) {
+    var r0 = Math.sqrt(p.x * p.x + p.y * p.y);
+    var vr0 = (p.x * p.vx + p.y * p.vy) / r0, vr1 = (s.x * s.vx + s.y * s.vy) / r;
+    if (vr0 > 0 && vr1 <= 0) {
+      /* апоцентр между шагами: доля шага, на которой v_r = 0, делением пополам */
+      var lo = 0, hi = 1, c = kopiya(p);
+      for (var i = 0; i < 50; i++) {
+        var mid = (lo + hi) / 2;
+        prisvoit(c, p); shag(GM, c, mid * O.h);
+        var rc = Math.hypot(c.x, c.y);
+        if ((c.x * c.vx + c.y * c.vy) / rc > 0) lo = mid; else hi = mid;
+      }
+      prisvoit(c, p); shag(GM, c, (lo + hi) / 2 * O.h);
+      prisvoit(s, c);
+      m.zhdemApo = false;
+      var rA = Math.hypot(s.x, s.y), vA = Math.hypot(s.vx, s.vy);
+      impuls(m, Math.sqrt(GM / rA) - vA, true);
+      m.sobytie = 'impuls';
+      return;
+    }
+  }
+  if (O.Rpov && r < O.Rpov) m.udar = true;
+}
+
+/* Прогон без анимации для автопроверки: N оборотов орбиты из перицентра
+   (режим «орбита», {eps, l}) или с низкой орбиты после импульса dv
+   (режим «переход», {dv}); наибольшие отклонения энергии и момента за
+   прогон, измеренный период и апсиды. */
+function progon(o) {
+  var O, s;
+  if (o.dv != null) {
+    s = sostNOO();
+    var v = Math.hypot(s.vx, s.vy);
+    s.vx += o.dv * s.vx / v; s.vy += o.dv * s.vy / v;
+    O = orbitaIzSostoyaniya(s);
+  } else {
+    O = orbitaIzParametrov(o.eps, o.l);
+    s = sost(O.GM, O.par.rMin, 0, 0, o.l / O.par.rMin);
+  }
+  var GM = O.GM, q0 = velichiny(GM, s), N = o.oborotov || 10;
+  var ugol = 0, dE = 0, dL = 0, n = 0, rMin = Infinity, rMax = 0, t0 = s.t, p = kopiya(s);
+  var norm = O.par.e < 1 ? Math.abs(q0.eps) : Math.abs(O.par.Umin);
+  while (Math.abs(ugol) < N * DVA_PI && n < 1e8) {
+    prisvoit(p, s); shag(GM, s, O.h); n++;
+    ugol += ugolShaga(p.x, p.y, s.x, s.y);
+    var q = velichiny(GM, s);
+    var de = Math.abs(q.eps - q0.eps) / norm, dl = Math.abs(q.l - q0.l) / Math.abs(q0.l);
+    if (de > dE) dE = de;
+    if (dl > dL) dL = dl;
+    if (q.r < rMin) rMin = q.r;
+    if (q.r > rMax) rMax = q.r;
+  }
+  return { h: O.h, K: O.K, steps: n, epsDriftMax: dE, lDriftMax: dL,
+           period: (s.t - t0) / N, periodTheory: O.par.T, rMinSampled: rMin, rMaxSampled: rMax,
+           rMin: O.par.rMin, rMax: O.par.rMax, rMinMeasured: O.rMinIzm, rMaxMeasured: O.rMaxIzm };
+}
+
+/* ── числа ── */
+
+/* Русская запятая и настоящий минус; крохи печатаются нулём. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function znak(v, d) { var s = num(v, d); return (v > 0 && s !== num(0, d)) ? '+' + s : s; }
+/* Целое с неразрывным пробелом между тысячами от пяти знаков: 6671, 42 164. */
+function celoe(v) {
+  var s = String(Math.round(Math.abs(v)));
+  if (s.length >= 5) s = s.replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0');
+  return (v < 0 ? '−' : '') + s;
+}
+function km(v) { return celoe(v / 1000); }
+function chasy(t) {
+  var h = Math.floor(t / 3600), mn = Math.round((t - 3600 * h) / 60);
+  if (mn === 60) { h++; mn = 0; }
+  return h ? h + ' ч ' + mn + ' мин' : mn + ' мин';
+}
+/* Число для KaTeX: запятая в фигурных скобках, минус как есть. */
+function tnum(v, d) { return num(v, d).replace('−', '-').replace(',', '{,}'); }
+function tcel(v) { return celoe(v).replace('−', '-').replace(/\u00a0/g, '\\,'); }
+function kx(tex) {
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева график: вертикальная ось U_эфф и 𝓔, горизонтальная r, тонкая
+   линия нуля. Кривая эффективной энергии чернилами, её слагаемые
+   (центробежная часть l²/2r² и −GM/r) пунктиром в режиме «орбита».
+   Уровень 𝓔 цветом акцента: сплошной там, где точка может быть, пунктиром
+   вне этого. Между кривой и уровнем заливка цвета скорости; у маркера
+   отрезок от кривой до уровня, v_r²/2. В режиме «переход» полоса r < 6371 км
+   помечена Землёй, прежние кривые и уровни бледные.
+
+   Справа плоскость: центр силы (или Земля), кольцо между r_min и r_max
+   цветом уровня, посчитанная орбита, у гиперболы её асимптоты штрихом,
+   прежние орбиты бледные, радиус-вектор, стрелка скорости, точки
+   импульсов с номерами. Внизу строка показаний.
+
+   Буквы и формулы канва не набирает: подписи осей, тики, U_эфф, 𝓔, r_min,
+   r_max, r_круг живут латех-слоем поверх канвы (.stage-wrap .ax в
+   demo.css), позиции в процентах логического кадра. */
+
+var W = 1000, HGT = 460;
+var GX0 = 80, GX1 = 480, GY0 = 40, GY1 = 330;          /* поле графика */
+var PX0 = 530, PY1 = 385;                                /* окно плоскости */
+var PCX = 765, PCY = 195, PR = 178;                      /* центр силы и радиус кадра, px */
+var RD_Y = 414, RD_X = [235, 485, 735, 985];             /* строка показаний */
+/* Скорость, отрезок v_r²/2 и заливка под уровнем бирюзовые, как скорость
+   в рисунках главы. В светлой теме витрины бирюзовый занят акцентом
+   (#0f7a8a): уровень, точки поворота и кольцо, и отрезок с ними сливался
+   бы. Там скорость охряная, как акцент тёмной темы: пара цветов та же,
+   только поменялась ролями. */
+var CV = '77,182,198', CV_SVETL = '199,119,0';
+var CB = '#ff7a66';                                      /* импульсы двигателя */
+var CG = '#a6c35a';                                      /* l²/2r² */
+var CP = '#7aa6ff';                                      /* −GM/r */
+var ZEMLYA = '77,128,196';
+
+/* r — риски оси, rPodp — подписанные из них, rX — где под осью стоит её
+   имя. Имя стоит строкой ниже чисел в промежутке между подписанными
+   рисками. У «перехода» оно длинное, «r, тыс. км», и под сплошным рядом
+   10, 20, 30 теснило бы числа: слой формул не мельчит кегль ниже 9 px,
+   а поле графика сжимается с экраном (замер 30.09: при 800 и 375 px
+   наезд на 20 и 30). Поэтому там подписаны 0, 20 и 40, а имя оси стоит
+   под риской 30. */
+var TIKI = {
+  orbita:  { r: [0, 1, 2, 3], rPodp: [0, 1, 2, 3], rX: 1.5, rMnozh: 1, U: [-1, -0.5, 0, 0.5], UMnozh: 1, Ud: 1 },
+  perehod: { r: [0, 10, 20, 30, 40], rPodp: [0, 20, 40], rX: 30, rMnozh: 1e6, U: [-30, -20, -10, 0], UMnozh: 1e6, Ud: 0 }
+};
+
+function strelka(ctx, x0, y0, x1, y1, color, width) {
+  var dx = x1 - x0, dy = y1 - y0, Ln = Math.hypot(dx, dy);
+  if (Ln < 1) return;
+  var ux = dx / Ln, uy = dy / Ln;
+  var head = Math.min(12, Ln * 0.32);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * head - uy * head * 0.34, y1 - uy * head + ux * head * 0.34);
+  ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.lineTo(x1 - ux * head + uy * head * 0.34, y1 - uy * head - ux * head * 0.34);
+  ctx.closePath(); ctx.fill();
+}
+
+function EffEnergiya() {
+  var st = useRef(null);
+  if (!st.current) st.current = {
+    rezhim: 'orbita', preset: 'ellips', eps: PRESETY.ellips.eps, l: PRESETY.ellips.l,
+    dv: 2430, idet: true, m: null
+  };
+  var s = st.current;
+  /* Второй кадр колоды зовёт демку с ?rezhim=perehod: она открывается
+     сразу в режиме перехода, на низкой орбите. */
+  if (!s.m && START_PEREHOD) {
+    var s0 = sostNOO();
+    s.rezhim = 'perehod'; s.preset = null; s.m = novayaModel(orbitaIzSostoyaniya(s0), s0);
+  }
+  if (!s.m) { var O0 = orbitaIzParametrov(s.eps, s.l); s.m = novayaModel(O0, O0.start); }
+  var pair = useState(0), setUi = pair[1];
+
+  function obnovit() { setUi(function (k) { return k + 1; }); pokazaniya(); }
+
+  function S() { return SIS[s.rezhim]; }
+  function gx(r) { return GX0 + r / S().Rkadr * (GX1 - GX0); }
+  function gy(U) { var q = S(); return GY0 + (q.Uhi - U) / (q.Uhi - q.Ulo) * (GY1 - GY0); }
+
+  function pokazaniya() {
+    var m = s.m, O = m.O, GM = O.GM, par = O.par, q = velichiny(GM, m.s);
+    var U = Ueff(GM, q.l, q.r);
+    var aIzm = O.rMaxIzm != null ? (O.rMinIzm + O.rMaxIzm) / 2 : null;
+    var as = asimptoty(O);
+    window.__demoState = {
+      mode: s.rezhim, units: s.rezhim === 'orbita' ? 'GM=1' : 'SI', preset: s.preset, GM: GM,
+      t: m.s.t, running: s.idet,
+      r: q.r, vr: q.vr, vphi: q.vphi, v: q.v, l: q.l, eps: q.eps, U: U,
+      gap: q.eps - U, vr2half: q.vr * q.vr / 2,
+      e: par.e, rMin: par.rMin, rMax: isFinite(par.rMax) ? par.rMax : null,
+      a: isFinite(par.a) ? par.a : null, Umin: par.Umin,
+      rCirc: par.rKrug, rCircNumeric: O.dno,
+      rMinMeasured: O.rMinIzm, rMaxMeasured: O.rMaxIzm, aMeasured: aIzm,
+      epsFromA: aIzm ? -GM / (2 * aIzm) : null,
+      period: m.period, periodTheory: par.T,
+      type: tip(par), periapsisAngle: O.om,
+      asymptotes: as ? { center: as.c.slice(), dirs: as.d.map(function (d) { return d.slice(); }), thetaInf: as.fiBesk } : null,
+      burns: m.burns.map(function (b) { return Object.assign({}, b); }),
+      dvTotal: m.dvSum,
+      h: O.h, K: O.K, epsDrift: m.dEmax, lDrift: m.dLmax,
+      hit: m.udar, escaped: m.ushel, outside: m.vne, waitingApocenter: m.zhdemApo
+    };
+  }
+
+  function step(dt) {
+    if (!s.idet) return;
+    var m = s.m, O = m.O, q0 = S(), Rv = R_VYHOD * q0.Rkadr;
+    var q = velichiny(O.GM, m.s), temp = q0.temp;
+    m.vne = q.r > Rv;
+    if (m.vne) {
+      if (O.par.e >= 1) {
+        if (s.rezhim === 'orbita') {
+          if (q.vr > 0) {
+            /* пролёт закончен: точка снова входит в кадр по той же ветви */
+            var t = m.s.t;
+            prisvoit(m.s, O.start); m.s.t = t; zavestiOrbitu(m, O); m.proletov++; m.vne = false;
+          }
+        } else { m.ushel = true; s.idet = false; obnovit(); return; }
+      } else temp = Math.max(temp, O.par.T / 2);
+    }
+    m.budget += dt * temp;
+    var n = 0, bylVne = m.vne && temp > q0.temp;
+    while (m.budget >= m.O.h && n < MAX_ZA_KADR) {
+      m.budget -= m.O.h; odinShag(m); n++;
+      if (m.udar) break;
+      /* ускоренное время кончается на краю кадра: остаток кадра не доигрывается */
+      if (bylVne && m.s.x * m.s.x + m.s.y * m.s.y < Rv * Rv) { m.budget = 0; break; }
+    }
+    if (n >= MAX_ZA_KADR) m.budget = 0;
+    var q1 = velichiny(m.O.GM, m.s);
+    var norm = m.O.par.e < 1 ? Math.abs(m.eps0) : Math.abs(m.O.par.Umin);
+    m.dEmax = Math.max(m.dEmax, Math.abs(q1.eps - m.eps0) / norm);
+    m.dLmax = Math.max(m.dLmax, Math.abs(q1.l - m.l0) / Math.abs(m.l0));
+    if (m.udar) { s.idet = false; obnovit(); return; }
+    if (m.sobytie) {
+      if (m.burns.length) s.dv = m.burns[m.burns.length - 1].dv;
+      m.sobytie = null; obnovit(); return;
+    }
+    pokazaniya();
+  }
+
+  /* ── рисование ── */
+
+  function kriva(ctx, f, color, width, dash) {
+    var q = S(), first = true;
+    ctx.save();
+    if (dash) ctx.setLineDash(dash);
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (var px = GX0 + 0.5; px <= GX1; px += 1.5) {
+      var r = (px - GX0) / (GX1 - GX0) * q.Rkadr;
+      var y = C.clamp(gy(f(r)), GY0 - 60, GY1 + 60);
+      if (first) { ctx.moveTo(px, y); first = false; } else ctx.lineTo(px, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* Уровень: сплошной между точками поворота (там точка бывает), пунктиром
+     вне их. */
+  function uroven(ctx, O, color, alpha, width) {
+    var par = O.par, y = gy(O.eps), rB = Math.min(par.rMax, S().Rkadr);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(' + color + ',' + (alpha * 0.45) + ')'; ctx.lineWidth = 1.2;
+    ctx.setLineDash([5, 6]);
+    ctx.beginPath(); ctx.moveTo(GX0, y); ctx.lineTo(GX1, y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(' + color + ',' + alpha + ')'; ctx.lineWidth = width;
+    ctx.beginPath(); ctx.moveTo(gx(par.rMin), y); ctx.lineTo(gx(rB), y); ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var mut = 'rgb(' + muted + ')';
+    var cv = document.documentElement.classList.contains('light') ? CV_SVETL : CV, CVC = 'rgb(' + cv + ')';
+    var m = s.m, O = m.O, q0 = S(), GM = O.GM, par = O.par, i, k;
+    var q = velichiny(GM, m.s);
+    var perehod = s.rezhim === 'perehod';
+
+    /* ── график ── */
+    ctx.strokeStyle = 'rgba(' + muted + ',.55)'; ctx.lineWidth = 1.3; ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(GX0, GY0 - 10); ctx.lineTo(GX0, GY1); ctx.lineTo(GX1 + 8, GY1);
+    ctx.stroke();
+    var T = TIKI[s.rezhim];
+    T.r.forEach(function (v) { var x = gx(v * T.rMnozh); ctx.beginPath(); ctx.moveTo(x, GY1); ctx.lineTo(x, GY1 + 5); ctx.stroke(); });
+    T.U.forEach(function (v) { var y = gy(v * T.UMnozh); ctx.beginPath(); ctx.moveTo(GX0 - 5, y); ctx.lineTo(GX0, y); ctx.stroke(); });
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(GX0 + 1, GY0 - 10, GX1 - GX0 + 8, GY1 - GY0 + 9); ctx.clip();
+
+    /* нуль энергии: предел U_эфф на бесконечности */
+    ctx.strokeStyle = 'rgba(' + ink + ',.28)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(GX0, gy(0)); ctx.lineTo(GX1, gy(0)); ctx.stroke();
+
+    if (perehod) {
+      ctx.fillStyle = 'rgba(' + ZEMLYA + ',.16)';
+      ctx.fillRect(GX0, GY0 - 10, gx(R_Z) - GX0, GY1 - GY0 + 10);
+      /* подпись полосы стоит вертикально у левого края, между −14 и −22 МДж/кг:
+         там не проходят ни уровни низкой, переходной и геостационарной
+         орбит, ни барьер, который у левого края уходит выше графика */
+      ctx.save();
+      ctx.translate(GX0 + 18, gy(-18e6)); ctx.rotate(-Math.PI / 2);
+      C.label(ctx, 0, 0, 'Земля', 17, 'rgba(' + ZEMLYA + ',.95)');
+      ctx.restore();
+      m.istoriya.forEach(function (Os) {
+        kriva(ctx, function (r) { return Ueff(GM, Os.l, r); }, 'rgba(' + ink + ',.2)', 1.5);
+        uroven(ctx, Os, acc, 0.35, 1.5);
+      });
+    } else {
+      kriva(ctx, function (r) { return O.l * O.l / (2 * r * r); }, CG, 1.4, [5, 5]);
+      kriva(ctx, function (r) { return -GM / r; }, CP, 1.4, [5, 5]);
+    }
+
+    /* где точка может быть: от кривой до уровня, v_r²/2 ≥ 0 */
+    var rA = par.rMin, rB = Math.min(par.rMax, q0.Rkadr);
+    if (rB - rA > q0.Rkadr * 1e-3) {
+      ctx.fillStyle = 'rgba(' + cv + ',.13)';
+      ctx.beginPath();
+      ctx.moveTo(gx(rA), gy(O.eps)); ctx.lineTo(gx(rB), gy(O.eps));
+      for (k = 0; k <= 160; k++) {
+        var rr = rB - (rB - rA) * k / 160;
+        ctx.lineTo(gx(rr), C.clamp(gy(Ueff(GM, O.l, rr)), GY0 - 60, GY1 + 60));
+      }
+      ctx.closePath(); ctx.fill();
+    }
+
+    kriva(ctx, function (r) { return Ueff(GM, O.l, r); }, 'rgba(' + ink + ',.92)', 2.4);
+    uroven(ctx, O, acc, 1, 2.2);
+
+    /* точки поворота и дно */
+    var yE = gy(O.eps), ACC = 'rgb(' + acc + ')';
+    ctx.save();
+    ctx.setLineDash([3, 5]); ctx.strokeStyle = 'rgba(' + acc + ',.5)'; ctx.lineWidth = 1.2;
+    [par.rMin, par.rMax].forEach(function (r) {
+      if (!isFinite(r) || r > q0.Rkadr) return;
+      ctx.beginPath(); ctx.moveTo(gx(r), yE); ctx.lineTo(gx(r), GY1); ctx.stroke();
+    });
+    ctx.restore();
+    ctx.fillStyle = 'rgba(' + ink + ',.7)';
+    ctx.beginPath(); ctx.arc(gx(par.rKrug), gy(par.Umin), 3.5, 0, DVA_PI); ctx.fill();
+    ctx.fillStyle = ACC;
+    [par.rMin, par.rMax].forEach(function (r) {
+      if (!isFinite(r) || r > q0.Rkadr) return;
+      ctx.beginPath(); ctx.arc(gx(r), yE, 5, 0, DVA_PI); ctx.fill();
+    });
+
+    /* маркер: где точка сейчас; под ним v_r²/2 */
+    if (q.r <= q0.Rkadr) {
+      var mx = gx(q.r), yU = C.clamp(gy(Ueff(GM, q.l, q.r)), GY0 - 60, GY1 + 60);
+      if (Math.abs(yU - yE) > 1) {
+        ctx.strokeStyle = CVC; ctx.lineWidth = 3; ctx.lineCap = 'butt';
+        ctx.beginPath(); ctx.moveTo(mx, yU); ctx.lineTo(mx, yE); ctx.stroke();
+      }
+      C.glow(ctx, mx, yE, 16, ink, 0.35);
+      ctx.fillStyle = 'rgb(' + ink + ')';
+      ctx.beginPath(); ctx.arc(mx, yE, 6, 0, DVA_PI); ctx.fill();
+    } else {
+      /* точка правее графика: стрелка у края на уровне */
+      ctx.fillStyle = 'rgb(' + ink + ')';
+      ctx.beginPath(); ctx.moveTo(GX1 + 6, yE); ctx.lineTo(GX1 - 8, yE - 7); ctx.lineTo(GX1 - 8, yE + 7); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+
+    /* ── плоскость ── */
+    var PS = PR / q0.Rkadr;
+    function X(x) { return PCX + x * PS; }
+    function Y(y) { return PCY - y * PS; }
+    function put(pts) {
+      ctx.beginPath();
+      for (var j = 0; j < pts.length; j++) {
+        if (j === 0) ctx.moveTo(X(pts[j][0]), Y(pts[j][1])); else ctx.lineTo(X(pts[j][0]), Y(pts[j][1]));
+      }
+      ctx.stroke();
+    }
+    ctx.save();
+    ctx.beginPath(); ctx.rect(PX0, 0, W - PX0, PY1); ctx.clip();
+
+    /* кольцо, где точка может быть: между окружностями r_min и r_max */
+    if (par.e >= 1e-3) {
+      /* заливка только когда внешняя окружность в кадре: иначе кольцо
+         закрасило бы всё окно, и от него остался бы прямоугольник */
+      if (par.rMax <= R_VYHOD * q0.Rkadr) {
+        ctx.fillStyle = 'rgba(' + acc + ',.07)';
+        ctx.beginPath();
+        ctx.arc(PCX, PCY, par.rMax * PS, 0, DVA_PI);
+        ctx.arc(PCX, PCY, par.rMin * PS, 0, DVA_PI, true);
+        ctx.fill();
+      }
+      ctx.save();
+      ctx.setLineDash([4, 6]); ctx.strokeStyle = 'rgba(' + acc + ',.55)'; ctx.lineWidth = 1.2;
+      [par.rMin, par.rMax].forEach(function (r) {
+        if (!isFinite(r)) return;
+        ctx.beginPath(); ctx.arc(PCX, PCY, r * PS, 0, DVA_PI); ctx.stroke();
+      });
+      ctx.restore();
+    }
+
+    /* асимптоты гиперболы штрихом, приглушённым цветом. Прямая режется
+       окружностью радиуса 2 кадра вокруг фокуса, которая накрывает всё
+       окно: так концы отрезка остаются в разумных пикселях и при 𝓔 чуть
+       выше нуля, когда центр гиперболы уходит далеко за кадр. */
+    var PODP_GEO = 'геостационарная орбита', podpVremya = 'время полёта ' + chasy(m.s.t);
+    var asm = asimptoty(O);
+    if (asm) {
+      var Rb = 2 * q0.Rkadr;
+      ctx.save();
+      /* В «переходе» штрих обходит подписи орбиты геостационара и времени
+         полёта: при импульсе в другой точке орбиты прямая шла бы сквозь
+         буквы. Из области рисования вырезаются их прямоугольники; кегль
+         и гарнитура те же, что у C.label. */
+      if (perehod) {
+        ctx.font = '17px "Golos Text", system-ui, sans-serif';
+        var wG = ctx.measureText(PODP_GEO).width, wV = ctx.measureText(podpVremya).width;
+        ctx.beginPath();
+        ctx.rect(PX0, 0, W - PX0, PY1);
+        ctx.rect(PCX - wG / 2 - 6, Y(R_GEO) - 8 - 17, wG + 12, 24);
+        ctx.rect(PX0, PY1 - 8 - 17, wV + 12, 24);
+        ctx.clip('evenodd');
+      }
+      ctx.setLineDash([8, 6]); ctx.strokeStyle = 'rgba(' + muted + ',.75)'; ctx.lineWidth = 1.3;
+      asm.d.forEach(function (d) {
+        /* |c + t·d| = Rb: t² + 2(c·d)t + |c|² − Rb² = 0 */
+        var cd = asm.c[0] * d[0] + asm.c[1] * d[1];
+        var D = cd * cd - (asm.c[0] * asm.c[0] + asm.c[1] * asm.c[1] - Rb * Rb);
+        if (D <= 0) return;
+        var t1 = -cd - Math.sqrt(D), t2 = -cd + Math.sqrt(D);
+        ctx.beginPath();
+        ctx.moveTo(X(asm.c[0] + t1 * d[0]), Y(asm.c[1] + t1 * d[1]));
+        ctx.lineTo(X(asm.c[0] + t2 * d[0]), Y(asm.c[1] + t2 * d[1]));
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+
+    if (perehod) {
+      /* цель: геостационарная орбита */
+      ctx.save();
+      ctx.setLineDash([2, 6]); ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(PCX, PCY, R_GEO * PS, 0, DVA_PI); ctx.stroke();
+      ctx.restore();
+      C.label(ctx, PCX, Y(R_GEO) - 8, PODP_GEO, 17, mut);
+      /* Земля в масштабе */
+      ctx.fillStyle = 'rgba(' + ZEMLYA + ',.55)'; ctx.strokeStyle = 'rgba(' + ZEMLYA + ',1)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(PCX, PCY, R_Z * PS, 0, DVA_PI); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = 'rgba(' + ink + ',.2)'; ctx.lineWidth = 1.4;
+      m.istoriya.forEach(function (Os) { put(Os.pts); });
+    } else {
+      ctx.fillStyle = 'rgba(' + ink + ',.85)';
+      ctx.beginPath(); ctx.arc(PCX, PCY, 4.5, 0, DVA_PI); ctx.fill();
+    }
+
+    /* посчитанная орбита */
+    ctx.strokeStyle = 'rgba(' + ink + ',.75)'; ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
+    put(O.pts);
+
+    /* импульсы */
+    m.burns.forEach(function (b) {
+      var p = b.pos;
+      ctx.fillStyle = CB;
+      ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), 5, 0, DVA_PI); ctx.fill();
+      var rr = Math.hypot(p[0], p[1]);
+      C.label(ctx, X(p[0]) + p[0] / rr * 16, Y(p[1]) - p[1] / rr * 16 + 6, String(b.n), 17, CB);
+    });
+
+    /* радиус-вектор, скорость, точка */
+    var bx = X(m.s.x), by = Y(m.s.y);
+    ctx.strokeStyle = 'rgba(' + ink + ',.45)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(PCX, PCY); ctx.lineTo(bx, by); ctx.stroke();
+    var SV = perehod ? 7e-3 : 45;
+    if (!m.udar) strelka(ctx, bx, by, bx + m.s.vx * SV, by - m.s.vy * SV, CVC, 2.6);
+    C.glow(ctx, bx, by, 16, ink, 0.35);
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(bx, by, 6, 0, DVA_PI); ctx.fill();
+    ctx.restore();
+
+    if (perehod) C.label(ctx, PX0 + 4, PY1 - 8, podpVremya, 17, mut, 'left');
+
+    /* ── показания ── */
+    var ci = 'rgb(' + ink + ')';
+    if (perehod) {
+      C.readout(ctx, RD_X[0], RD_Y, 'РАССТОЯНИЕ, км', km(q.r), ci);
+      C.readout(ctx, RD_X[1], RD_Y, 'СКОРОСТЬ, км/с', num(q.v / 1000, 2), CVC);
+      C.readout(ctx, RD_X[2], RD_Y, 'ЭНЕРГИЯ, МДж/кг', num(q.eps / 1e6, 2), ACC);
+      C.readout(ctx, RD_X[3], RD_Y, 'ИМПУЛЬСЫ ВСЕГО, км/с', num(m.dvSum / 1000, 2), CB);
+    } else {
+      C.readout(ctx, RD_X[0], RD_Y, 'РАССТОЯНИЕ', num(q.r, 3), ci);
+      C.readout(ctx, RD_X[1], RD_Y, 'РАДИАЛЬНАЯ СКОРОСТЬ', num(q.vr, 3), CVC);
+      C.readout(ctx, RD_X[2], RD_Y, 'АЗИМУТАЛЬНАЯ СКОРОСТЬ', num(q.vphi, 3), ci);
+      C.readout(ctx, RD_X[3], RD_Y, 'БОЛЬШАЯ ПОЛУОСЬ', isFinite(par.a) ? num(par.a, 3) : '—', ACC);
+    }
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+  window.__demoProgon = progon;
+
+  /* ── управление ── */
+
+  function perestroit() {
+    var O = orbitaIzParametrov(s.eps, s.l);
+    s.m = novayaModel(O, O.start); s.idet = true;
+    obnovit();
+  }
+  function preset(k) {
+    s.rezhim = 'orbita'; s.preset = k; s.eps = PRESETY[k].eps; s.l = PRESETY[k].l;
+    perestroit();
+  }
+  function naDne() { return Math.abs(s.eps - parametry(1, s.eps, s.l).Umin) < 1e-12; }
+  function energiya(v) {
+    s.eps = C.clamp(v, Math.max(EPS_MIN, parametry(1, 0, s.l).Umin), EPS_MAX);
+    s.preset = null; perestroit();
+  }
+  function moment(v) {
+    var dno = naDne();
+    s.l = C.clamp(v, L_MIN, L_MAX);
+    var Um = parametry(1, 0, s.l).Umin;
+    if (dno || s.eps < Um) s.eps = Um;
+    s.preset = null; perestroit();
+  }
+  function modelPerehod() {
+    var s0 = sostNOO();
+    s.m = novayaModel(orbitaIzSostoyaniya(s0), s0);
+  }
+  function rezhimOrbita() { if (s.rezhim === 'orbita') return; s.rezhim = 'orbita'; s.preset = null; perestroit(); }
+  function rezhimPerehod() {
+    if (s.rezhim === 'perehod') return;
+    s.rezhim = 'perehod'; s.preset = null; modelPerehod(); s.idet = true; obnovit();
+  }
+  function dvizhok() {
+    var m = s.m;
+    if (m.udar || m.ushel) return;
+    m.zhdemApo = false; s.preset = null;
+    impuls(m, s.dv); s.idet = true; obnovit();
+  }
+  function naGeo() {
+    s.rezhim = 'perehod'; modelPerehod();
+    var r1 = Math.hypot(s.m.s.x, s.m.s.y);
+    s.dv = dvNaPerehod(r1, R_GEO);
+    impuls(s.m, s.dv, true);
+    s.m.zhdemApo = true; s.preset = 'geo'; s.idet = true; obnovit();
+  }
+  function dvPolzunok(v) { s.dv = C.clamp(Math.round(v / 10) * 10, -DV_MAX, DV_MAX); obnovit(); }
+  function pauza() { s.idet = !s.idet; obnovit(); }
+  function sbros() {
+    if (s.rezhim === 'orbita') perestroit();
+    else { modelPerehod(); s.preset = null; s.idet = true; obnovit(); }
+  }
+
+  /* ── латех-слой ── */
+
+  function podpisi() {
+    var out = [], q0 = S(), T = TIKI[s.rezhim], O = s.m.O, par = O.par, GM = O.GM, perehod = s.rezhim === 'perehod';
+    T.rPodp.forEach(function (v) { out.push({ x: gx(v * T.rMnozh), y: GY1 + 20, tex: tnum(v, 0) }); });
+    T.U.forEach(function (v) { out.push({ x: GX0 - 10, y: gy(v * T.UMnozh), tex: tnum(v, v % 1 ? 1 : 0), cls: 'ax-right' }); });
+    out.push({ x: gx(T.rX * T.rMnozh), y: GY1 + 40,
+               tex: perehod ? 'r,\\ \\text{тыс. км}' : 'r' });
+    out.push({ x: GX0 - 6, y: GY0 - 26,
+               tex: 'U_{\\text{эфф}},\\ \\mathcal{E}' + (perehod ? ',\\ \\text{МДж/кг}' : ''), cls: 'ax-left' });
+
+    /* ── подписи на поле графика ──
+       Буквы на поле (U_эфф у барьера, r_min, r_max, r_круг и в режиме
+       «орбита» подписи слагаемых) ставятся так, чтобы их не перечёркивали
+       уровень, линия нуля, кривые и точки поворота и чтобы они не
+       наезжали друг на друга. У каждой подписи несколько мест возле того,
+       что она называет; берётся первое свободное, а если свободного нет,
+       то самое свободное. Размер бокса взят для худшего кегля: 2,15cqi
+       при кадре уже 790 px даёт 21,5 логического px, KaTeX крупнее в 1,21
+       раза, так что em = 26 и высота строки с индексом 0,95 em. Бокс
+       меряется по оценке ширины в em, а не по DOM: подписи строятся в
+       рендере, до раскладки. Маркер точки в препятствия не входит: он
+       бегает, а подписи перестраиваются только при смене орбиты. */
+    var EM = 26, HB = 0.95 * EM;
+    var yE = gy(O.eps), y0 = gy(0);
+    function rOf(x) { return (x - GX0) / (GX1 - GX0) * q0.Rkadr; }
+    var krivye = [function (r) { return Ueff(GM, O.l, r); }];
+    var urovni = [yE, y0];
+    if (perehod) {
+      s.m.istoriya.forEach(function (Os) {
+        krivye.push(function (r) { return Ueff(GM, Os.l, r); });
+        urovni.push(gy(Os.eps));
+      });
+    } else {
+      krivye.push(function (r) { return O.l * O.l / (2 * r * r); });
+      krivye.push(function (r) { return -GM / r; });
+    }
+    var tochki = [];
+    if (par.rKrug <= q0.Rkadr) tochki.push([gx(par.rKrug), gy(par.Umin)]);
+    [par.rMin, par.rMax].forEach(function (r) { if (isFinite(r) && r <= q0.Rkadr) tochki.push([gx(r), yE]); });
+    /* занятое заранее: вертикальная подпись «Земля» на канве */
+    var zanyato = perehod ? [{ x0: GX0 + 6, x1: GX0 + 30, y0: gy(-18e6) - 26, y1: gy(-18e6) + 26 }] : [];
+
+    function boks(x, y, cls, w) {
+      var x0 = /ax-right/.test(cls) ? x - w : /ax-left/.test(cls) ? x : x - w / 2;
+      return { x0: x0, x1: x0 + w, y0: y - HB / 2, y1: y + HB / 2 };
+    }
+    /* расстояние от числа до отрезка; внутри отрезка отрицательное */
+    function ot(v, a, b) { return v < a ? a - v : v > b ? v - b : -Math.min(v - a, b - v); }
+    function zazor(b) {
+      if (b.x0 < GX0 + 2 || b.x1 > GX1 + 4 || b.y0 < GY0 - 12 || b.y1 > GY1 - 2) return -Infinity;
+      var z = Infinity, j, x;
+      for (j = 0; j < urovni.length; j++) z = Math.min(z, ot(urovni[j], b.y0, b.y1));
+      for (j = 0; j < krivye.length; j++)
+        for (x = b.x0; x <= b.x1 + 0.1; x += 3) z = Math.min(z, ot(gy(krivye[j](rOf(x))), b.y0, b.y1));
+      for (j = 0; j < tochki.length; j++) {
+        var dx = Math.max(0, ot(tochki[j][0], b.x0, b.x1)), dy = Math.max(0, ot(tochki[j][1], b.y0, b.y1));
+        var inX = ot(tochki[j][0], b.x0, b.x1) < 0, inY = ot(tochki[j][1], b.y0, b.y1) < 0;
+        z = Math.min(z, inX && inY ? -5 : Math.hypot(dx, dy) - 5);
+      }
+      for (j = 0; j < zanyato.length; j++) {
+        var o = zanyato[j];
+        var gx_ = Math.max(o.x0 - b.x1, b.x0 - o.x1), gy_ = Math.max(o.y0 - b.y1, b.y0 - o.y1);
+        z = Math.min(z, Math.max(gx_, gy_));
+      }
+      return z;
+    }
+    /* varianty: [x, y, cls]; w: ширина подписи в em */
+    function postavit(tex, w, varianty, akcent) {
+      var luchshee = null, zapas = -Infinity;
+      for (var j = 0; j < varianty.length; j++) {
+        var v = varianty[j], b = boks(v[0], v[1], v[2], w * EM), z = zazor(b);
+        if (z > zapas) { zapas = z; luchshee = { v: v, b: b }; }
+        if (z >= 2) break;
+      }
+      if (!luchshee) return;
+      zanyato.push(luchshee.b);
+      out.push({ x: luchshee.v[0], y: luchshee.v[1], tex: tex,
+                 cls: (luchshee.v[2] + (akcent ? ' ax-accent' : '')).trim() || null });
+    }
+
+    /* Уровень ниже поля графика (торможение с низкой орбиты больше чем на
+       0,84 км/с, 𝓔 < −36 МДж/кг) обрезан вместе с полем, и буква ему не
+       нужна: без этой проверки она легла бы в строку показаний. */
+    if (yE < GY1) out.push({ x: GX1 + 10, y: yE, tex: '\\mathcal{E}', cls: 'ax-left ax-accent' });
+
+    /* точки поворота: под уровнем, над ним или по другую сторону точки */
+    var tipO = tip(par);
+    var xMin = gx(par.rMin), xMax = isFinite(par.rMax) ? gx(par.rMax) : Infinity;
+    if (tipO !== 'окружность' && xMax - xMin > 46) {
+      postavit('r_{\\text{min}}', 1.7, [[xMin - 7, yE + 16, 'ax-right'], [xMin - 7, yE - 16, 'ax-right'],
+                                         [xMin + 7, yE - 16, 'ax-left'], [xMin - 7, yE + 32, 'ax-right']], true);
+      if (par.rMax <= q0.Rkadr)
+        postavit('r_{\\text{max}}', 1.8, [[xMax + 7, yE + 16, 'ax-left'], [xMax + 7, yE - 16, 'ax-left'],
+                                           [xMax - 7, yE - 16, 'ax-right'], [xMax + 7, yE + 32, 'ax-left']], true);
+    }
+    /* дно: справа снизу, слева снизу, прямо под ним */
+    if (par.rKrug <= q0.Rkadr) {
+      var xK = gx(par.rKrug), yK = gy(par.Umin);
+      postavit('r_{\\text{круг}}', 1.85, [[xK + 11, yK + 17, 'ax-left'], [xK - 11, yK + 17, 'ax-right'],
+                                           [xK, yK + 22, ''], [xK + 11, yK + 32, 'ax-left'], [xK - 11, yK + 32, 'ax-right']]);
+    }
+    /* подпись кривой у стены барьера: на трёх высотах сверху вниз */
+    var vys = [0.08, 0.2, 0.32].map(function (d) {
+      var Uc = q0.Uhi - d * (q0.Uhi - q0.Ulo), lo = q0.Rkadr * 1e-4, hi = par.rKrug;
+      for (var i = 0; i < 60; i++) { var mid = (lo + hi) / 2; if (Ueff(GM, O.l, mid) > Uc) lo = mid; else hi = mid; }
+      return [gx(lo) + 12, gy(Uc) - 2, 'ax-left'];
+    });
+    postavit('U_{\\text{эфф}}', 1.95, vys);
+
+    /* слагаемые у своих пунктиров */
+    if (!perehod) {
+      var cf = function (r) { return O.l * O.l / (2 * r * r); }, gm = function (r) { return -GM / r; };
+      var R = q0.Rkadr;
+      postavit('l^2/2r^2', 2.6, [[0.8, -14], [0.62, -14], [0.5, 18], [0.8, 16], [0.62, -30], [0.95, -14], [0.4, 22]]
+        .map(function (v) { return [gx(v[0] * R), gy(cf(v[0] * R)) + v[1], '']; }));
+      postavit('-GM/r', 3.65, [[0.62, 16], [0.8, 18], [0.45, 16], [0.62, -16], [0.8, -18], [0.35, 16], [0.95, 18]]
+        .map(function (v) { return [gx(v[0] * R) + 8, gy(gm(v[0] * R)) + v[1], 'ax-left']; }));
+    }
+    return out;
+  }
+  function spanAt(sp, i) {
+    return html`<span key=${i} class=${sp.cls || null}
+      style=${{ left: (sp.x / W * 100) + '%', top: (sp.y / HGT * 100) + '%' }}
+      dangerouslySetInnerHTML=${{ __html: kx(sp.tex) }}></span>`;
+  }
+
+  /* ── строка показаний ── */
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var F = function (t) { return A(kx(t)); };
+    var m = s.m, O = m.O, par = O.par, t = tip(par), GM = O.GM;
+    /* Формулы с индексами и корнями стоят в начале строки показаний, а за
+       ними идёт текст длиннее строки самой широкой витрины. KaTeX свешивает
+       индекс и корень ниже строки, у витрины (?flat) под строкой нет
+       отступа, и формула в последней строке давала прокрутку на 2 px
+       (замеры 30.09: эллипс при ширине 1265–1400 px, окружность при
+       800–900 px, гипербола при 523–540 и 734–1032 px, парабола при
+       806–908 px). Проверка: ширина строки от 300 до 1400 px через 1 px
+       во всех состояниях обоих режимов, scrollHeight строки против её
+       высоты. */
+    if (s.rezhim === 'orbita') {
+      if (t === 'окружность')
+        return 'Дно кривой стоит на ' + F('r_{\\text{круг}} = l^2/GM = ' + tnum(par.rKrug, 2)) +
+          ', и уровень энергии лежит на нём: точки поворота слились, радиальной скорости нет, точка идёт по окружности. ' +
+          'Маркер на графике стоит на месте, пока точка справа обходит центр.';
+      if (t === 'эллипс') {
+        var dal = par.rMax > R_VYHOD * SIS.orbita.Rkadr
+          ? ' Апоцентр за краем кадра; пока точка там, время идёт быстрее.' : '';
+        return 'Уровень ' + F('\\mathcal{E} = ' + tnum(O.eps, 2)) + ' пересекает кривую в точках поворота ' +
+          F('r_{\\text{min}} = ' + tnum(par.rMin, 2)) + ' и ' + F('r_{\\text{max}} = ' + tnum(par.rMax, 2)) +
+          '; отрезок от маркера вниз до кривой равен ' + kx('v_r^2/2') + '. Маркер бегает по уровню от одной точки поворота ' +
+          'к другой, а точка справа ходит в кольце между двумя окружностями. Большая полуось ' + F('a = ' + tnum(par.a, 2)) +
+          ' задана одной энергией: при другом моменте кольцо станет другим, а полуось та же.' + dal;
+      }
+      if (t === 'парабола')
+        return 'Центробежный барьер разворачивает точку на ' + F('r_{\\text{min}} = ' + tnum(par.rMin, 2)) +
+          ', а дальней точки поворота нет: уровень лежит на нуле, и кривая справа только приближается к нему снизу. ' +
+          'Маркер приходит по уровню справа, доходит до точки поворота и уходит обратно. На плоскости точка приходит ' +
+          'из-за края кадра, огибает центр и уходит на бесконечность, где её скорость стремится к нулю. Орбита парабола.';
+      return 'На бесконечности у точки остаётся скорость ' + F('\\sqrt{2\\mathcal{E}} = ' + tnum(Math.sqrt(2 * O.eps), 2)) +
+        ', а разворачивается она у барьера на ' + F('r_{\\text{min}} = ' + tnum(par.rMin, 2)) +
+        '. Уровень выше нуля и пересекает кривую только у стены барьера: маркер приходит по уровню справа, доходит до точки ' +
+        'поворота и уходит обратно. На плоскости точка приходит из-за края кадра, огибает центр и снова уходит на бесконечность. ' +
+        'Орбита гипербола.';
+    }
+
+    var b = m.burns, bl = b[b.length - 1];
+    var vk = function (v) { return A(num(v / 1000, 2) + ' км/с'); };
+    if (m.udar)
+      return 'Спутник упал. Перицентр его орбиты, ' + A(km(par.rMin) + ' км') + ', лежал внутри Земли: уровень энергии пересекает кривую ' +
+        'в полосе Земли. «Сброс» возвращает спутник на низкую орбиту.';
+    if (O.udarit)
+      return 'Импульс ' + (bl.dv >= 0 ? 'разгона ' : 'торможения ') + vk(Math.abs(bl.dv)) + ' перевёл уровень энергии на ' +
+        A(num(O.eps / 1e6, 2) + ' МДж/кг') + '. Перицентр новой орбиты, ' + A(km(par.rMin) + ' км') +
+        ', лежит внутри Земли, и спутник упадёт, не дойдя до него.';
+    if (O.eps >= 0)
+      return 'Импульс поднял уровень энергии до ' + A(znak(O.eps / 1e6, 2) + ' МДж/кг') + ', выше нуля: дальней точки поворота нет, ' +
+        'и спутник ' + (m.ushel ? 'ушёл за край кадра' : 'уходит от Земли') + ' по гиперболе. «Сброс» возвращает его на низкую орбиту.';
+    if (!b.length)
+      return 'Спутник на круговой орбите высотой 300 км: радиус 6671 км, скорость ' + vk(Math.sqrt(GM_Z / R_NOO)) +
+        ', уровень энергии лежит на дне кривой. Импульс двигателя добавляет скорость вдоль движения в тот момент, когда нажата кнопка. ' +
+        '«На геостационар» даёт два импульса по расчёту главы.';
+    if (s.preset === 'geo' && m.zhdemApo)
+      return 'Первый импульс, ' + vk(bl.dv) + ', поднял скорость до ' + vk(bl.vAfter) + '. Уровень энергии поднялся до ' +
+        A(num(O.eps / 1e6, 2) + ' МДж/кг') + ', дно кривой ушло вправо, и спутник идёт по переходному эллипсу от 6671 до ' +
+        A(km(par.rMax) + ' км') + '. Второй импульс включится сам в апоцентре.';
+    if (s.preset === 'geo' && b.length === 2 && t === 'окружность')
+      return 'Второй импульс, ' + vk(bl.dv) + ' в апоцентре, где скорость была ' + vk(bl.vBefore) +
+        ', посадил уровень на дно новой кривой: орбита круговая, радиус ' + A(km(par.rKrug) + ' км') + ', скорость ' + vk(bl.vAfter) +
+        '. Всего на переход ушло ' + vk(m.dvSum) + ' и ' + A(chasy(bl.t - b[0].t)) + '.';
+    if (t === 'окружность')
+      return 'Уровень лежит на дне кривой: орбита круговая, радиус ' + A(km(par.rKrug) + ' км') + ', скорость ' +
+        vk(Math.sqrt(GM / par.rKrug)) + '.';
+    var dalOk = par.rMax > R_VYHOD * SIS.perehod.Rkadr ? ' Апоцентр за краем кадра; пока спутник там, время идёт быстрее.' : '';
+    return 'Импульс ' + (bl.dv >= 0 ? 'разгона ' : 'торможения ') + vk(Math.abs(bl.dv)) + ' перевёл уровень энергии на ' +
+      A(num(O.eps / 1e6, 2) + ' МДж/кг') + ', а новый момент дал кривой новую форму. Перицентр новой орбиты на ' +
+      A(km(par.rMin) + ' км') + ', апоцентр на ' + A(km(par.rMax) + ' км') + ', большая полуось ' + A(km(par.a) + ' км') +
+      ': её задала одна энергия.' + dalOk;
+  }
+
+  var labs = podpisi();
+  var orb = s.rezhim === 'orbita', m = s.m;
+  var dvTxt = (s.dv > 0 ? '+' : '') + num(s.dv / 1000, 2) + ' км/с';
+  var dno = naDne();
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Режим:">
+          <${C.Btn} active=${orb} onClick=${rezhimOrbita}>орбита<//>
+          <${C.Btn} active=${!orb} onClick=${rezhimPerehod}>переход<//>
+        <//>
+        ${orb ? html`
+          <${C.Group}>
+            ${Object.keys(PRESETY).map(function (k) {
+              return html`<${C.Btn} key=${k} active=${s.preset === k} onClick=${function () { preset(k); }}>${PRESETY[k].imya}<//>`;
+            })}
+          <//>
+          <${C.Slider} label="Энергия:" min=${EPS_MIN} max=${EPS_MAX} step=${0.01} value=${s.eps}
+                       onChange=${energiya} display=${num(s.eps, 2) + (dno ? ' дно' : '')} />
+          <${C.Slider} label="Момент:" min=${L_MIN} max=${L_MAX} step=${0.01} value=${s.l}
+                       onChange=${moment} display=${num(s.l, 2)} />` : html`
+          <${C.Slider} label="Импульс:" min=${-DV_MAX} max=${DV_MAX} step=${10} value=${s.dv}
+                       onChange=${dvPolzunok} display=${dvTxt} />
+          <${C.Group}>
+            <${C.Btn} action=${true} disabled=${m.udar || m.ushel} onClick=${dvizhok}>Импульс двигателя<//>
+            <${C.Btn} active=${s.preset === 'geo'} onClick=${naGeo}>На геостационар<//>
+          <//>`}
+        <${C.Group}>
+          <${C.Btn} onClick=${pauza}>${s.idet ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      ${/* Сцена держит пропорцию, ведёт высота. Потолок высоты по ширине
+            экрана как в obratnyj-kvadrat: без него на телефоне и в широком
+            кадре колоды обёртка вытягивается выше кадра, канва рисует кадр
+            посередине, а слой формул в процентах от обёртки съезжает с него
+            (замер 30.09: при 375 px обёртка 270 px вместо 173). */''}
+      <div class="stage-wrap"
+           style=${{ aspectRatio: W + ' / ' + HGT, flex: '0 1 auto', minHeight: 0,
+                     height: '100%', width: 'auto', maxWidth: '100%', alignSelf: 'center',
+                     maxHeight: 'calc(100vw * ' + HGT + ' / ' + W + ')' }}>
+        <canvas class="stage" ref=${ref}></canvas>
+        <div class="ax is-on">${labs.map(spanAt)}</div>
+      </div>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(EffEnergiya);
+</script>
+</body>
+</html>

@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пара сил и запаздывание</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-03/">&larr; Неделя 03</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=zapazdyvanie"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блоки главы `tretij-zakon` (равенство сил взято в один и тот же момент)
+   и `granicy-primenimosti` (взаимодействие переносит третья сторона, поле,
+   и у переноса конечная скорость; импульс, который тело отдало, не пропал,
+   он ушёл в поле). Восемь минут от Солнца до Земли — тот же счёт, только с
+   другими числами, и здесь он сведён к тому, что видно за секунды.
+
+   ЧТО ЗА МОДЕЛЬ. Два тела на прямой, массы m₁ = 5 кг и m₂ = 1 кг. Они
+   обмениваются импульсом порциями по q = 0,5 кг·м/с, и порцию переносит
+   посылка — кусок поля, летящий со скоростью c. Правило одно на оба
+   события и на оба тела:
+
+       испускание:  p_тела −= q,   посылка уносит q;
+       поглощение:  p_тела += q,   посылка исчезает.
+
+   Отсюда сумма p₁ + p₂ + q_в_пути не меняется вовсе, и не «с точностью
+   до», а в точности: одно и то же число вычитается у тела и прибавляется
+   посылке. Это и есть сохранение импульса, которое в главе стоит раньше
+   третьего закона и переживает его.
+
+   ДВА РЕЖИМА. В режиме «мгновенно» испускание и поглощение — одно
+   событие: p₁ и p₂ меняются в один и тот же момент на равные и
+   противоположные величины. Сумма импульсов двух тел постоянна всегда,
+   посылки в пути не бывает, третий закон выполняется в своей обычной
+   форме. В режиме «с задержкой» те же два события разнесены временем
+   полёта: пока посылка идёт, отдачу получило одно тело, второе о ней ещё
+   не знает, пары равных и противоположных изменений нет, и сумма
+   импульсов ДВУХ ТЕЛ не постоянна. Полная сумма постоянна в обоих
+   режимах.
+
+   ПОЧЕМУ ОБМЕН ИДЁТ ТУДА И ОБРАТНО. Посылку испускает то одно тело, то
+   другое: тело 1 отдаёт порцию, тело 2 её ловит, держит время d, отдаёт
+   обратно, тело 1 ловит. После полного круга импульсы обоих тел
+   возвращаются к прежним, и знак порции меняется на противоположный.
+   Круг разводит тела, следующий сводит обратно, поэтому пара связана и
+   опыт можно смотреть сколько угодно: тела не разъезжаются по краям
+   дорожки, а числа не убегают за поля.
+
+   ВРЕМЯ ПОЛЁТА СЧИТАЕТСЯ, А НЕ НАЗНАЧАЕТСЯ. Между событиями каждое тело
+   идёт равномерно (сил, кроме порций, нет), поэтому встреча посылки с
+   принимающим телом решается точно, из линейного уравнения:
+
+       x_исп + dir·c·Δ = x_прм + v_прм·Δ,   Δ = (x_прм − x_исп)/(dir·c − v_прм).
+
+   Когда принимающее тело покоится, Δ = L/c ровно, и именно столько длится
+   провал суммы. Когда тело уходит от сигнала, полёт растягивается до
+   L/(c − v): при c = 3 м/с и v = q/m₁ = 0,1 м/с это лишние 3,4 %, при
+   c = 2 м/с на краю ползунка 5,3 %; во втором круге первое тело идёт
+   навстречу посылке, и полёт на столько же короче. Числа мелкие, но они
+   из той же физики, что и вся демка, поэтому подгонять полёт под L/c было
+   бы враньём.
+
+   В растяжение входит только скорость первого тела. Второе ловит посылку,
+   держит паузу и отдаёт её обратно, и импульс у него не ноль только на
+   время этой паузы; к нему посылка всегда летит, когда оно стоит. Поэтому
+   второе тело можно сделать лёгким и быстрым, не трогая истории про
+   запаздывание, а скорость первого приходится держать малой против c:
+   на сколько процентов от c оно идёт, на столько растягивается полёт.
+
+   СЧЁТ БЕЗ ШАГА. Модель кусочно-линейна: между событиями скорости
+   постоянны, и положение на конце куска равно положению на начале плюс
+   v·h. Поэтому время идёт не шагами схемы, а от события к событию, и
+   ошибки метода нет вовсе — остаётся только округление в последних
+   знаках, порядок 10⁻¹⁷. Проверки поэтому спрашивают с сумм 10⁻¹².
+
+   ЧИСЛА. Дорожка 9 м, тела на старте в 1,5 м и 7,5 м, зазор L = 6 м, оба
+   покоятся, полная сумма импульсов 0,00 кг·м/с. Порция q = 0,5 кг·м/с
+   меняет скорость первого тела на u₁ = q/m₁ = 0,1 м/с, второго на
+   u₂ = q/m₂ = 0,5 м/с. Скорость переноса c от 2 до 30 м/с, по умолчанию
+   3 м/с: τ = L/c = 2,00 с. Пауза перед ответом d от 0,2 до 1,5 с, по
+   умолчанию 1 с.
+
+   ПОЧЕМУ ВТОРОЕ ТЕЛО В ПЯТЬ РАЗ ЛЕГЧЕ. Первое тело держит отдачу весь
+   круг, от своего испускания до возврата посылки, τ₁ + d + τ₂; второе
+   только паузу d. При сравнимых массах второе почти стояло бы, и колебание
+   читалось бы как движение одного тела (первая редакция, 2 и 3 кг, давала
+   сносы 0,23 и 0,02 м). При 5 и 1 кг и умолчаниях размахи сходятся: за
+   круг первое уходит от отметки на u₁(τ₁ + d + τ₂) = 0,53 м, второе на
+   u₂d = 0,50 м, и за следующий круг оба возвращаются.
+
+   Зазор дышит от 6,00 до 7,03 м, и провалы идут попеременно по 2,00 и
+   2,34 с: второй полёт начинается при разведённых телах. При c = 30 м/с
+   провалы по 0,200 и 0,205–0,231 с, смотря по паузе. На краю ползунков,
+   c = 2 м/с и d = 1,5 с, размахи 0,83 и 0,75 м, зазор до 7,58 м, и до
+   концов дорожки от края кузова остаётся 0,37 м слева и 0,50 м справа.
+   Столкнуться тела не могут вовсе: круг с одним знаком порции разводит их
+   от отметок наружу, следующий возвращает к отметкам, и зазор меньше
+   начальных 6 м не бывает. Всё это при неизменных c и d, почему ползунки
+   и возвращают опыт на старт (см. vestiC).
+
+   За пару кругов состояние возвращается точно, и это не совпадение
+   подобранных чисел. Пусть u = q/m₁, зазор на старте L₀. Первый полёт идёт
+   к покоящемуся телу, τ₁ = L₀/c; за паузу и за оба полёта зазор набирает
+   u(τ₁ + d) + (q/m₂)d, обратный полёт растягивается до L₁/(c − u) и
+   добавляет ещё uτ₂. Во втором круге знак порции обратный, и те же куски
+   вычитаются; остаётся L₃ = L₀ + uτ₁ = L₀(1 + u/c), откуда последний полёт
+   длится L₃/(c + u) = L₀/c = τ₁. Сумма времён, а с ней и снос, сходятся
+   в ноль. Счётом: остаток после пары кругов не больше 7·10⁻¹³ м, то есть
+   это округление, а не физика. */
+
+var M1 = 5, M2 = 1;                  /* кг */
+var Q = 0.5;                         /* кг·м/с, порция импульса */
+var DLINA = 9;                       /* м, длина дорожки */
+var X1_0 = 1.5, X2_0 = 7.5;          /* м, места тел на старте */
+/* Длины кузовов, м. Модели они не нужны (тела точечные), но по ним
+   проверяется, что кузов не выходит за конец дорожки, и по ним же кузова
+   рисуются: иначе проверка и картинка разошлись бы. */
+var DL1 = 0.6, DL2 = 0.5;
+var L0 = X2_0 - X1_0;                /* м, зазор на старте */
+var C_MIN = 2, C_MAX = 30, C_NACH = 3;        /* м/с, скорость переноса */
+var D_MIN = 0.2, D_MAX = 1.5, D_NACH = 1;     /* с, пауза перед ответом */
+var OKNO = 16;                       /* с, окно дорожки времени */
+
+function vPuti(st) { return st.letit ? st.letit.q : 0; }
+function summaTel(st) { return st.p1 + st.p2; }
+function polnaya(st) { return st.p1 + st.p2 + vPuti(st); }
+
+/* Засечка для дорожки времени. Значения между событиями постоянны, так что
+   ломаной хватает двух точек на событие: до изменения и после. Хвост
+   старше окна выбрасывается, иначе запись растёт весь сеанс. */
+function zasech(st) {
+  st.zapis.push({ t: st.t, b: summaTel(st), f: vPuti(st) });
+  var i = 0;
+  while (i < st.zapis.length && st.zapis[i].t < st.t - OKNO - 0.5) i++;
+  if (i) st.zapis.splice(0, i);
+}
+
+/* Начальное состояние. Порция ждёт у первого тела паузу d, потом уходит.
+   boost — общая скорость обоих тел; в самой демке ноль, нужен проверке:
+   с ним полная сумма не ноль, и постоянство её значит больше. */
+function sozdat(mgnovenno, c, d, boost) {
+  var v0 = boost || 0;
+  var st = {
+    t: 0,
+    x1: X1_0, x2: X2_0,
+    p1: M1 * v0, p2: M2 * v0,
+    q: Q,                  /* порция текущего круга, со знаком */
+    mgnovenno: !!mgnovenno,
+    c: c, d: d,
+    derzhit: 1,            /* у кого сейчас порция: 1 или 2 */
+    faza: 'pauza',         /* 'pauza' — ждём испускания, 'polet' — посылка идёт */
+    letit: null,           /* {x0, t0, dir, q, t1, zazor} */
+    tSob: d,               /* время ближайшего события */
+    tVspyshki: -99,        /* когда был мгновенный обмен, только для рисунка */
+    imp1Vspyshki: -1,      /* куда толкнуло первое тело, тоже для рисунка */
+    nPoslano: 0, nPrinyato: 0,
+    zapis: []
+  };
+  zasech(st);
+  return st;
+}
+
+/* Точное время полёта: посылка идёт со скоростью c, принимающее тело — со
+   своей постоянной скоростью, встреча решается из линейного уравнения.
+   Знаменатель обращается в ноль только при |v| = c, до чего в этой модели
+   далеко (второе тело во время полёта стоит, первое идёт с 0,1 м/с при c
+   от 2 м/с), но сторож стоит. */
+function vremyaPoleta(xIsp, xPrm, vPrm, dir, c) {
+  var zn = dir * c - vPrm;
+  if (dir * zn <= 0) return null;
+  return (xPrm - xIsp) / zn;
+}
+
+/* Одно событие: испускание или поглощение. Вся физика демки здесь. */
+function sobytie(st) {
+  var ot, k, xIsp, xPrm, vPrm, dir, dt;
+  if (st.faza === 'pauza') {
+    ot = st.derzhit;
+    /* испускание: тело отдаёт порцию полю и получает отдачу */
+    if (ot === 1) st.p1 -= st.q; else st.p2 -= st.q;
+    st.nPoslano++;
+    if (st.mgnovenno) {
+      /* второе тело получает порцию в тот же момент: пара изменений
+         импульса равна и противоположна, сумма импульсов тел не дрогнула */
+      if (ot === 1) st.p2 += st.q; else st.p1 += st.q;
+      st.nPrinyato++;
+      /* Куда толкнуло первое тело: знак нужен вспышке, и берётся он до
+         смены знака порции, иначе стрелки показывали бы следующий обмен. */
+      st.imp1Vspyshki = (ot === 1 ? -1 : 1) * (st.q < 0 ? -1 : 1);
+      st.tVspyshki = st.t;
+      st.derzhit = ot === 1 ? 2 : 1;
+      if (st.derzhit === 1) st.q = -st.q;
+      st.tSob = st.t + st.d;
+    } else {
+      xIsp = ot === 1 ? st.x1 : st.x2;
+      xPrm = ot === 1 ? st.x2 : st.x1;
+      vPrm = ot === 1 ? st.p2 / M2 : st.p1 / M1;
+      dir = ot === 1 ? 1 : -1;
+      dt = vremyaPoleta(xIsp, xPrm, vPrm, dir, st.c);
+      st.letit = { x0: xIsp, t0: st.t, dir: dir, q: st.q,
+                   t1: st.t + dt, zazor: Math.abs(xPrm - xIsp) };
+      st.faza = 'polet';
+      st.tSob = st.letit.t1;
+    }
+  } else {
+    /* поглощение: порция уходит из поля в тело */
+    k = st.derzhit === 1 ? 2 : 1;
+    if (k === 1) st.p1 += st.letit.q; else st.p2 += st.letit.q;
+    st.nPrinyato++;
+    st.derzhit = k;
+    st.letit = null;
+    st.faza = 'pauza';
+    /* круг замкнулся, порция возвращается к первому телу — меняем знак,
+       иначе тела разъезжались бы по краям дорожки */
+    if (k === 1) st.q = -st.q;
+    st.tSob = st.t + st.d;
+  }
+}
+
+/* Равномерный кусок между событиями. */
+function dvinut(st, h) {
+  if (h <= 0) return;
+  st.x1 += st.p1 / M1 * h;
+  st.x2 += st.p2 / M2 * h;
+  st.t += h;
+}
+
+/* Продвинуть модель на dt. Время режется событиями; на самом событии
+   st.t ставится равным его времени, а не набегает сложением, иначе длина
+   провала выходила бы верной только до последних знаков. */
+function prognat(st, dt) {
+  var ost = dt, storozh = 0;
+  while (ost > 0 && storozh++ < 20000) {
+    var doSob = st.tSob - st.t;
+    if (doSob > ost) { dvinut(st, ost); return; }
+    dvinut(st, doSob);
+    st.t = st.tSob;
+    zasech(st);
+    sobytie(st);
+    zasech(st);
+    ost -= doSob;
+  }
+}
+
+/* Где сейчас посылка, в метрах вдоль дорожки. */
+function gdePosylka(st) {
+  if (!st.letit) return null;
+  return st.letit.x0 + st.letit.dir * st.c * (st.t - st.letit.t0);
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Сверху дорожка с двумя телами; стрелки над ними показывают импульс, по
+   длине и по знаку. Между телами летит посылка со своей стрелкой: она
+   несёт импульс, и его направление не обязано совпадать с направлением
+   полёта. Посылка, идущая вправо и несущая импульс влево, это притяжение.
+
+   Под дорожкой размерная линия зазора и время переноса: зазор считается по
+   текущим положениям тел, а не по начальным, поэтому видно, как перенос
+   дышит вместе с зазором. Пока посылка в пути, там стоит время этого
+   полёта, посчитанное точно; между посылками — справочное τ = зазор/c.
+
+   Ниже пять показаний: импульсы двух тел, их сумма, импульс посылки в
+   пути и полная сумма. Между последними тремя стоят «+» и «=»: связь
+   читается прямо со строки.
+
+   Внизу дорожка времени, окно 16 с, «сейчас» у правого края. Три линии:
+   полная сумма (чернила темы, толстая), сумма двух тел (акцент) и импульс
+   в пути (лайм). Окно неподвижно, поэтому при росте c провалы сужаются
+   прямо на глазах: ширина провала и есть время полёта. */
+
+var W = 1000, HGT = 460;
+/* Дорожка в 9 м на 873 px: 97 px на метр. Первая редакция клала 12 м на
+   ту же ширину (73 px на метр), и три метра по краям стояли пустыми; на
+   сносах в полметра лишняя треть масштаба и есть разница между «видно» и
+   «надо присматриваться». */
+var TX0 = 62, SC = 97;               /* px на метр вдоль дорожки */
+var Y_SHK = 36;                      /* риска масштаба стрелок */
+var Y_STR = 70;                      /* стрелки импульсов тел */
+var Y_NIZ = 128;                     /* низ кузовов */
+var RAIL = 132;                      /* рельс */
+var Y_POS = 108;                     /* линия, по которой летит посылка */
+var Y_LIN = 158;                     /* подписи линейки */
+var Y_ZAZ = 188;                     /* размерная линия зазора */
+/* Подпись зазора идёт ПОД размерной линией: над ней она садится на подписи
+   линейки, потому что середина между телами приходится на середину дорожки. */
+var Y_ZAZ_P = 210;
+var Y_CAP = 234, Y_VAL = 272;        /* показания: подписи и числа */
+var GX0 = 92, GX1 = 962;             /* дорожка времени по горизонтали */
+var GY_T = 312, GY_0 = 364, GY_B = 416;
+var PMAX = 1.35 * Q;                 /* кг·м/с на краю шкалы графика */
+var ARR = 120;                       /* px на кг·м/с: порция даёт стрелку в 60 px */
+var TAU = 6.2832;
+
+/* Цвета данных от темы не зависят. Бирюза и охра — тела, как в сцепке
+   тележек; лайм достался посылке: она здесь третья сторона, и путать её с
+   телами нельзя. */
+var TELA = [
+  { rgb: '77,182,198',  w: DL1 * SC, h: 38, imya: '5 кг', capt: 'ИМПУЛЬС ТЕЛА 1' },
+  { rgb: '224,138,82',  w: DL2 * SC, h: 28, imya: '1 кг', capt: 'ИМПУЛЬС ТЕЛА 2' }
+];
+var CPOS = '134,171,46';             /* посылка */
+
+/* Русская запятая и настоящий минус; остатки счёта в последних знаках
+   печатались бы как «−0,00», а ноль есть ноль. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function znak(v, d) {
+  var s = num(v, d);
+  return (v > 0 && s !== num(0, d)) ? '+' + s : s;
+}
+
+function Zapazdyvanie() {
+  /* До «Пуска» опыт стоит: тела на местах, порция ещё у первого,
+     запись пуста. Так же ведут себя остальные демки недели. */
+  var ref0 = useRef(null);
+  if (!ref0.current) {
+    ref0.current = { m: sozdat(false, C_NACH, D_NACH, 0),
+                     run: false, mgnovenno: false, c: C_NACH, d: D_NACH };
+  }
+  var S = ref0.current;
+  /* Пара берётся из одного вызова useState: два отдельных дают два
+     независимых состояния, и рейка перестаёт отзываться на ползунок. */
+  var pair = useState({ run: false, mgnovenno: false, c: C_NACH, d: D_NACH, t: 0 });
+  var ui = pair[0], setUi = pair[1];
+
+  /* Показания пишутся из шага, а не из отрисовки компонента: автопроверка
+     двигает модель через __demoTick, рендера при этом нет. Объект живёт
+     весь сеанс и правится на месте. */
+  function pokazaniya() {
+    var m = S.m;
+    S.t = m.t;
+    S.p1 = m.p1; S.p2 = m.p2;
+    S.summaTel = summaTel(m);
+    S.vPuti = vPuti(m);
+    S.polnaya = polnaya(m);
+    S.rezhim = m.mgnovenno ? 'мгновенно' : 'с задержкой';
+    S.cPerenosa = m.c;
+    S.pauza = m.d;
+    S.zazor = m.x2 - m.x1;
+    S.tau = S.zazor / m.c;
+    S.x1 = m.x1; S.x2 = m.x2;
+    S.vPoleteS = m.letit ? m.t - m.letit.t0 : 0;
+    S.poletVsego = m.letit ? m.letit.t1 - m.letit.t0 : 0;
+    S.obmenov = m.nPrinyato;
+  }
+  if (!window.__demoState) { pokazaniya(); window.__demoState = S; }
+
+  /* Строка показаний перерисовывается по событиям обмена, а не покадрово:
+     меняется она ровно тогда, когда посылка ушла или пришла. Без этого
+     строка застывала бы на том, что было при последнем нажатии, а кадровый
+     setState на 60 Гц ради текста, который меняется раз в секунду, стоил бы
+     перерисовки всей рейки на каждом кадре. */
+  function step(dt) {
+    if (!S.run) return;
+    prognat(S.m, dt);
+    pokazaniya();
+    var podpis = S.m.nPoslano + ':' + S.m.nPrinyato + ':' + S.m.faza;
+    if (podpis !== S.podpis) {
+      S.podpis = podpis;
+      setUi({ run: S.run, mgnovenno: S.mgnovenno, c: S.c, d: S.d, t: S.m.t });
+    }
+  }
+
+  /* ── примитивы ── */
+
+  function ekr(x) { return TX0 + x * SC; }
+
+  /* Остриё ужимается вместе со стрелкой: короткая стрелка с полным остриём
+     превращается в один треугольник, и малый импульс выглядел бы как
+     большой. Круглый торец остаётся внутри save/restore, иначе lineCap
+     утекает на риски линейки и врёт их длиной. */
+  function strelka(ctx, x0, x1, y, kraska, w) {
+    var dl = Math.abs(x1 - x0), dir = x1 >= x0 ? 1 : -1;
+    var gol = Math.min(12, Math.max(4, dl * 0.55));
+    ctx.save();
+    ctx.strokeStyle = kraska; ctx.fillStyle = kraska;
+    ctx.lineWidth = w; ctx.lineCap = 'round';
+    if (dl > gol) {
+      ctx.beginPath();
+      ctx.moveTo(x0, y); ctx.lineTo(x1 - dir * (gol - 1), y); ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(x1, y);
+    ctx.lineTo(x1 - dir * gol, y - gol * 0.5);
+    ctx.lineTo(x1 - dir * gol, y + gol * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function telo(ctx, x, T) {
+    ctx.fillStyle = 'rgba(' + T.rgb + ',.7)';
+    [-1, 1].forEach(function (s) {
+      ctx.beginPath(); ctx.arc(x + s * (T.w / 2 - 9), RAIL - 5, 5, 0, TAU); ctx.fill();
+    });
+    C.roundRect(ctx, x - T.w / 2, Y_NIZ - T.h, T.w, T.h, 5);
+    ctx.fillStyle = 'rgba(' + T.rgb + ',.92)'; ctx.fill();
+    /* Масса написана на кузове: над кузовом её место занято стрелкой
+       импульса, а без массы числа показаний не с чем связать. */
+    C.label(ctx, x, Y_NIZ - T.h / 2 + 6, T.imya, 17, 'rgba(8,12,20,.75)');
+  }
+
+  /* Посылка: кусок поля, несущий порцию импульса. Стрелка внутри показывает
+     импульс, а не направление полёта, поэтому она бывает встречной. */
+  function posylka(ctx, x, q) {
+    C.glow(ctx, x, Y_POS, 30, CPOS, .5);
+    C.roundRect(ctx, x - 17, Y_POS - 11, 34, 22, 8);
+    ctx.fillStyle = 'rgba(' + CPOS + ',.9)'; ctx.fill();
+    var dir = q > 0 ? 1 : -1;
+    strelka(ctx, x - dir * 8, x + dir * 9, Y_POS, 'rgba(8,12,20,.8)', 2.6);
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    var ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var mut = 'rgba(' + muted + ',.95)';
+    var m = S.m, i, x, t;
+
+    /* ── риска масштаба стрелок ── */
+    strelka(ctx, TX0, TX0 + Q * ARR, Y_SHK, 'rgb(' + muted + ')', 2.4);
+    C.label(ctx, TX0 + Q * ARR + 12, Y_SHK + 6, num(Q, 2) + ' кг·м/с', 17, mut, 'left');
+
+    /* ── дорожка ── */
+    ctx.strokeStyle = 'rgba(' + ink + ',.5)'; ctx.lineWidth = 4; ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(ekr(0), RAIL); ctx.lineTo(ekr(DLINA), RAIL);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(' + muted + ',.7)'; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    /* Риски через полметра, подписи через метр: при 97 px на метр подпись
+       на каждой риске слиплась бы в сплошную строку. */
+    for (x = 0; x <= DLINA + 1e-9; x += 0.5) {
+      var cel = Math.abs(x - Math.round(x)) < 1e-9;
+      ctx.moveTo(ekr(x), RAIL + 2); ctx.lineTo(ekr(x), RAIL + (cel ? 10 : 6));
+    }
+    ctx.stroke();
+    for (i = 0; i <= DLINA; i += 1) {
+      C.label(ctx, ekr(i), Y_LIN, i ? i + ' м' : '0', 17, mut);
+    }
+
+    /* Отметки старта: тела уходят от них на полметра и через круг
+       возвращаются, и по неподвижной риске видно, что возвращаются точно. */
+    ctx.save();
+    ctx.setLineDash([3, 5]);
+    ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    [X1_0, X2_0].forEach(function (x0) {
+      ctx.moveTo(ekr(x0), Y_NIZ - 44); ctx.lineTo(ekr(x0), RAIL);
+    });
+    ctx.stroke();
+    ctx.restore();
+
+    /* ── тела и их импульсы ── */
+    var xs = [ekr(m.x1), ekr(m.x2)], ps = [m.p1, m.p2];
+    telo(ctx, xs[0], TELA[0]);
+    telo(ctx, xs[1], TELA[1]);
+    for (i = 0; i < 2; i++) {
+      var p = ps[i], col = 'rgb(' + TELA[i].rgb + ')';
+      if (Math.abs(p) < 1e-12) {
+        /* покой: пустой кружок вместо стрелки, чтобы место не выглядело
+           обрезанным кадром */
+        ctx.strokeStyle = 'rgba(' + TELA[i].rgb + ',.75)'; ctx.lineWidth = 1.8;
+        ctx.beginPath(); ctx.arc(xs[i], Y_STR, 4.5, 0, TAU); ctx.stroke();
+      } else {
+        var dir = p > 0 ? 1 : -1;
+        strelka(ctx, xs[i], xs[i] + dir * Math.abs(p) * ARR, Y_STR, col, 3.4);
+      }
+    }
+
+    /* ── посылка или вспышка мгновенного обмена ── */
+    var xp = gdePosylka(m);
+    if (xp !== null) {
+      posylka(ctx, ekr(xp), m.letit.q);
+      /* Путь, который посылке осталось пройти: пунктир до принимающего тела. */
+      ctx.save();
+      ctx.setLineDash([4, 6]);
+      ctx.strokeStyle = 'rgba(' + CPOS + ',.45)'; ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(ekr(xp) + m.letit.dir * 20, Y_POS);
+      ctx.lineTo(m.letit.dir > 0 ? xs[1] - TELA[1].w / 2 : xs[0] + TELA[0].w / 2, Y_POS);
+      ctx.stroke();
+      ctx.restore();
+    } else if (m.mgnovenno) {
+      /* Мгновенный обмен: пара изменений импульса в один и тот же момент.
+         Вспышка держится 0,35 с и гаснет — иначе событие длиной в ноль
+         секунд на сцене не увидеть вовсе. */
+      var vozr = m.t - m.tVspyshki, ZHIT = 0.35;
+      if (vozr >= 0 && vozr < ZHIT) {
+        ctx.save();
+        ctx.globalAlpha = 1 - vozr / ZHIT;
+        var xa = xs[0] + TELA[0].w / 2 + 6, xb = xs[1] - TELA[1].w / 2 - 6;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = 'rgba(' + CPOS + ',.8)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(xa, Y_POS); ctx.lineTo(xb, Y_POS); ctx.stroke();
+        ctx.setLineDash([]);
+        /* Пара стрелок показывает, куда толкнуло каждое тело: равные и
+           противоположные, приложенные в один и тот же момент. Врозь или
+           навстречу — по знаку порции, а не всегда врозь. */
+        var sr = (xa + xb) / 2, vroz = m.imp1Vspyshki < 0;
+        strelka(ctx, sr - (vroz ? 6 : 34), sr - (vroz ? 34 : 6), Y_POS,
+                'rgb(' + CPOS + ')', 3);
+        strelka(ctx, sr + (vroz ? 6 : 34), sr + (vroz ? 34 : 6), Y_POS,
+                'rgb(' + CPOS + ')', 3);
+        ctx.restore();
+      }
+    }
+
+    /* ── размерная линия зазора ── */
+    var za = m.x2 - m.x1;
+    ctx.strokeStyle = 'rgba(' + muted + ',.75)'; ctx.lineWidth = 1.6; ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(xs[0], Y_ZAZ); ctx.lineTo(xs[1], Y_ZAZ);
+    ctx.moveTo(xs[0], Y_ZAZ - 6); ctx.lineTo(xs[0], Y_ZAZ + 6);
+    ctx.moveTo(xs[1], Y_ZAZ - 6); ctx.lineTo(xs[1], Y_ZAZ + 6);
+    ctx.stroke();
+    /* Пока посылка в пути, под линией стоит время ИМЕННО ЭТОГО полёта — то же
+       число, что в строке показаний: два разных числа под одним словом «полёт»
+       на экране лекции читаются как ошибка. Когда посылки нет, число
+       справочное, зазор/c, и по нему видно, как перенос дышит вместе с
+       зазором. Эти два числа расходятся на проценты, когда приёмник уходит
+       от сигнала, и расходятся законно. */
+    C.label(ctx, (xs[0] + xs[1]) / 2, Y_ZAZ_P,
+            m.mgnovenno
+              ? 'зазор ' + num(za, 2) + ' м, перенос мгновенный'
+              : m.letit
+                  ? 'зазор ' + num(za, 2) + ' м, посылка идёт ' +
+                    num(m.letit.t1 - m.letit.t0, 2) + ' с'
+                  : 'зазор ' + num(za, 2) + ' м, перенос займёт ' +
+                    num(za / m.c, 2) + ' с',
+            17, mut);
+
+    /* ── показания ── */
+    C.label(ctx, TX0, Y_ZAZ_P, 'импульс вдоль дорожки, кг·м/с', 17, mut, 'left');
+    C.readout(ctx, 210, Y_CAP, TELA[0].capt, znak(m.p1, 2), 'rgb(' + TELA[0].rgb + ')');
+    C.readout(ctx, 420, Y_CAP, TELA[1].capt, znak(m.p2, 2), 'rgb(' + TELA[1].rgb + ')');
+    C.readout(ctx, 640, Y_CAP, 'СУММА ДВУХ ТЕЛ', znak(summaTel(m), 2), 'rgb(' + acc + ')');
+    C.readout(ctx, 800, Y_CAP, 'В ПУТИ', znak(vPuti(m), 2), 'rgb(' + CPOS + ')');
+    C.readout(ctx, 962, Y_CAP, 'ПОЛНАЯ СУММА', znak(polnaya(m), 2), 'rgb(' + ink + ')');
+    /* Знаки связи стоят в просветах между числами: показание в 32 px
+       моноширинного шрифта занимает по 19 px на знак, «+0,50» — 96 px влево
+       от своего края, и «+» ближе 670 лёг бы прямо на него. */
+    C.label(ctx, 670, Y_VAL - 8, '+', 26, mut);
+    C.label(ctx, 843, Y_VAL - 8, '=', 26, mut);
+
+    /* ── дорожка времени ── */
+    function gx(tt) { return GX1 - (m.t - tt) / OKNO * (GX1 - GX0); }
+    function gy(v) { return GY_0 - C.clamp(v, -PMAX, PMAX) / PMAX * (GY_0 - GY_T); }
+
+    C.label(ctx, GX0, 300, 'сумма импульсов во времени', 17, mut, 'left');
+    /* легенда */
+    var leg = [['полная сумма', 'rgb(' + ink + ')'],
+               ['сумма двух тел', 'rgb(' + acc + ')'],
+               ['в пути', 'rgb(' + CPOS + ')']];
+    var lx = 470;
+    leg.forEach(function (o) {
+      ctx.strokeStyle = o[1]; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(lx, 295); ctx.lineTo(lx + 22, 295); ctx.stroke();
+      C.label(ctx, lx + 29, 300, o[0], 17, mut, 'left');
+      lx += 29 + ctx.measureText(o[0]).width + 24;
+    });
+
+    ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(GX0, GY_T); ctx.lineTo(GX0, GY_B); ctx.stroke();
+    [-Q, 0, Q].forEach(function (v) {
+      var y = gy(v);
+      ctx.strokeStyle = 'rgba(' + muted + ',.6)';
+      ctx.beginPath(); ctx.moveTo(GX0 - 6, y); ctx.lineTo(GX0, y); ctx.stroke();
+      ctx.strokeStyle = 'rgba(' + ink + (v ? ',.07)' : ',.16)');
+      ctx.beginPath(); ctx.moveTo(GX0, y); ctx.lineTo(GX1, y); ctx.stroke();
+      C.label(ctx, GX0 - 11, y + 6, znak(v, 1), 17, mut, 'right');
+    });
+    /* Деление на самом краю окна не ставится: оно легло бы на ось. */
+    for (t = 4; t < OKNO - 1e-9; t += 4) {
+      x = GX1 - t / OKNO * (GX1 - GX0);
+      ctx.strokeStyle = 'rgba(' + muted + ',.45)';
+      ctx.beginPath(); ctx.moveTo(x, GY_B); ctx.lineTo(x, GY_B + 6); ctx.stroke();
+      C.label(ctx, x, GY_B + 24, '−' + t + ' с', 17, mut);
+    }
+    C.label(ctx, GX1, GY_B + 24, 'сейчас', 17, mut, 'right');
+
+    /* Ломаные. Значения между событиями постоянны, поэтому к записи
+       добавляется только текущая точка: между засечками линия горизонтальна
+       и лишние точки на ней ничего не уточнили бы. */
+    var tochki = m.zapis.concat([{ t: m.t, b: summaTel(m), f: vPuti(m) }]);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(GX0, GY_T - 4, GX1 - GX0 + 4, GY_B - GY_T + 8); ctx.clip();
+    function sled(pole, col, w) {
+      ctx.strokeStyle = col; ctx.lineWidth = w;
+      ctx.lineJoin = 'round'; ctx.lineCap = 'butt';
+      ctx.beginPath();
+      for (var j = 0; j < tochki.length; j++) {
+        var px = gx(tochki[j].t), py = gy(pole(tochki[j]));
+        if (j) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+      }
+      ctx.stroke();
+    }
+    sled(function (o) { return o.f; }, 'rgb(' + CPOS + ')', 2);
+    sled(function (o) { return o.b + o.f; }, 'rgb(' + ink + ')', 3.6);
+    sled(function (o) { return o.b; }, 'rgb(' + acc + ')', 2.4);
+    ctx.restore();
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Чистые функции модели наружу: по ним автопроверка гоняет обмен без
+     кадров и сверяет то же, что печатает сцена. */
+  window.__demoModel = { sozdat: sozdat, prognat: prognat, sobytie: sobytie,
+                         vremyaPoleta: vremyaPoleta, summaTel: summaTel,
+                         vPuti: vPuti, polnaya: polnaya, gdePosylka: gdePosylka,
+                         M1: M1, M2: M2, Q: Q, L0: L0, DLINA: DLINA,
+                         X1_0: X1_0, X2_0: X2_0, DL1: DL1, DL2: DL2 };
+
+  function sbros(mgn, c, d) {
+    S.mgnovenno = mgn; S.c = c; S.d = d;
+    S.m = sozdat(mgn, c, d, 0);
+    S.podpis = null;
+    pokazaniya();
+  }
+  function pusk() {
+    S.run = !S.run;
+    setUi({ run: S.run, mgnovenno: S.mgnovenno, c: S.c, d: S.d, t: S.m.t });
+  }
+  function naStart() {
+    sbros(S.mgnovenno, S.c, S.d);
+    S.run = false;
+    setUi({ run: false, mgnovenno: S.mgnovenno, c: S.c, d: S.d, t: 0 });
+  }
+  /* Смена режима возвращает на старт: иначе посылка, застигнутая в пути,
+     потеряла бы свой импульс, и полная сумма перестала бы сходиться. Сравнивать
+     режимы честно всё равно можно только с одних и тех же начальных условий. */
+  function rezhim(mgn) {
+    if (mgn === S.mgnovenno) return;
+    sbros(mgn, S.c, S.d);
+    setUi({ run: S.run, mgnovenno: mgn, c: S.c, d: S.d, t: 0 });
+  }
+  /* Ползунок, как и смена режима, возвращает опыт на старт; идущий опыт
+     идёт дальше уже с новым значением. Первая редакция вводила значение со
+     следующего события, не трогая тел, и так ломала точный возврат: пара
+     кругов приводит тела к отметкам только при одних и тех же c и d. Круг
+     при c = 2 м/с и паузе 1,5 с, закрытый кругом при 30 м/с и 0,2 с,
+     оставлял первое тело на 0,76 м левее отметки, и два таких качания
+     ползунков увозили его за конец дорожки; в обратном порядке пара кругов
+     сводила тела на 0,8–1,3 м, и на двенадцатом круге кузова сходились.
+     Счётом проверено. */
+  function vestiC(v) {
+    var c = Math.round(v * 10) / 10;
+    if (c === S.c) return;
+    sbros(S.mgnovenno, c, S.d);
+    setUi({ run: S.run, mgnovenno: S.mgnovenno, c: c, d: S.d, t: 0 });
+  }
+  function vestiD(v) {
+    var d = Math.round(v * 20) / 20;
+    if (d === S.d) return;
+    sbros(S.mgnovenno, S.c, d);
+    setUi({ run: S.run, mgnovenno: S.mgnovenno, c: S.c, d: d, t: 0 });
+  }
+
+  function slova() {
+    var m = S.m;
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var tauS = num((m.x2 - m.x1) / m.c, 2) + ' с';
+    /* Пока не ушла первая посылка, показывать нечего, и держать это на «паузе»
+       нельзя: после «Пуска» до первого испускания проходит целая пауза обмена,
+       и всё это время строка рассказывала бы про посылку, которой ещё нет. */
+    if (m.nPoslano === 0) {
+      var hvost = ui.run
+        ? 'Первая уйдёт через ' + A(num(Math.max(0, m.tSob - m.t), 2) + ' с') + '.'
+        : '«Пуск» запускает обмен.';
+      return (m.mgnovenno
+        ? 'Два тела на дорожке обмениваются импульсом порциями по ' + A(num(Q, 2)) +
+          ' кг·м/с. Перенос мгновенный: порция уходит у одного тела и приходит ' +
+          'к другому в один и тот же момент. '
+        : 'Два тела обмениваются импульсом порциями по ' + A(num(Q, 2)) + ' кг·м/с, и ' +
+          'порцию несёт посылка, кусок поля со скоростью переноса ' +
+          A(num(m.c, 1) + ' м/с') + '. Зазор ' + A(num(L0, 2) + ' м') + ' она пройдёт за ' +
+          A(tauS) + '. ') + hvost;
+    }
+    if (m.mgnovenno) {
+      return 'Изменения импульсов приходятся на один и тот же момент и равны по ' +
+        'величине: сколько отдало одно тело, столько получило другое. Сумма ' +
+        'импульсов двух тел держится на ' + A(znak(summaTel(m), 2)) + ' кг·м/с всё ' +
+        'время, посылок в пути не бывает, и на дорожке времени обе линии слились в ' +
+        'одну прямую. Третий закон в такой форме и записан.';
+    }
+    if (m.letit) {
+      return 'Посылка в пути, и весь полёт займёт ' +
+        A(num(m.letit.t1 - m.letit.t0, 2) + ' с') + '. Отдачу получило одно тело, ' +
+        'второе о ней ещё не знает, и сумма импульсов двух тел равна ' +
+        A(znak(summaTel(m), 2)) + ' вместо ' + A(znak(polnaya(m), 2)) + ': пары равных ' +
+        'и противоположных сил сейчас нет. Недостача лежит в посылке, и полная сумма ' +
+        'остаётся ' + A(znak(polnaya(m), 2)) + ' кг·м/с.';
+    }
+    return 'Посылка дошла, импульс передан, сумма импульсов тел вернулась к ' +
+      A(znak(summaTel(m), 2)) + ' кг·м/с. Следующая уйдёт через ' +
+      A(num(Math.max(0, m.tSob - m.t), 2) + ' с') + ', и провал повторится: он длится ' +
+      'ровно столько, сколько посылка идёт через зазор, ' + A(tauS) + '.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${naStart}>Сброс<//>
+        <//>
+        <${C.Group} label="Перенос:">
+          <${C.Btn} active=${ui.mgnovenno}
+                    onClick=${function () { rezhim(true); }}>мгновенно<//>
+          <${C.Btn} active=${!ui.mgnovenno}
+                    onClick=${function () { rezhim(false); }}>с задержкой<//>
+        <//>
+        <${C.Slider} label="Скорость переноса:" min=${C_MIN} max=${C_MAX} step=${0.1}
+                     value=${ui.c} onChange=${vestiC}
+                     display=${num(ui.c, 1) + ' м/с'} />
+        <${C.Slider} label="Темп обмена:" min=${D_MIN} max=${D_MAX} step=${0.05}
+                     value=${ui.d} onChange=${vestiD}
+                     display=${num(ui.d, 2) + ' с пауза'} />
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(Zapazdyvanie);
+</script>
+</body>
+</html>

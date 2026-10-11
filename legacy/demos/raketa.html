@@ -1,0 +1,945 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ракета и переменная масса</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+<style>
+/* Местные стили, как у «ускорения в повороте»: demo.css общий, и пока
+   параллельно собираются демки недели, править его из одной нельзя.
+   Подписи осей меняются вместе с ползунком, а не перетекают из записи в
+   запись: общий фейд .ax в 0,8 с оставлял бы старые числа на осях, когда
+   кривая уже новая. Слой режет всё, что вылезло за кадр: подпись у самого
+   края в узком iframe давала документу лишние пиксели и полосу прокрутки. */
+.stage-wrap .ax { transition: opacity .15s; overflow: hidden; }
+/* Подпись тонкой линии красится в чернила, как сама линия; подпись
+   потерь — в охру разрыва между кривыми, ту же, что у силы на сцене. */
+.stage-wrap .ax > span.lab-formula { color: var(--ink); opacity: .8; }
+.stage-wrap .ax > span.lab-gt { color: #e08a52; }
+/* Формулы KaTeX в строке показаний свешивают свои обёртки нулевой высоты
+   ниже последней строки. В витрине у строки нет нижнего поля, и эти два
+   пикселя становились вертикальной прокруткой всего iframe (замер 11.09:
+   scrollHeight 422 при высоте 420). Строка режет вылет, а поле в витрине
+   возвращается, чтобы резать было нечего. */
+.status { overflow: hidden; }
+.flat .status { padding-bottom: 4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-03/">&larr; Неделя 03</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=raketa"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блоки главы uravnenie-meshcherskogo и formula-ciolkovskogo. Уравнение
+   Мещерского в проекции на ось движения:
+
+       m dv/dt = F + v_отн · dm/dt.
+
+   Единицы взяты так, чтобы сила выходила в меганьютонах без пересчёта:
+   масса в тоннах, скорость в км/с, время в секундах. Тонна на километр
+   в секунду за секунду есть 10³ кг · 10³ м/с² = 10⁶ Н, а g = 9,81·10⁻³
+   км/с².
+
+   Ракета. Ось вверх, dm/dt = −μ, газ уходит назад со скоростью u
+   относительно ракеты, то есть v_отн = −u, и произведение даёт
+   реактивную силу +uμ вперёд. При u = 2 км/с и μ = 1 т/с это 2 МН против
+   веса стартовой ракеты 100 т · g = 0,98 МН. Когда топливо сгорело, обмен
+   массой прекращается, второго слагаемого нет, и ракета летит дальше:
+   без тяжести с набранной скоростью, с тяжестью теряя g в секунду, через
+   вершину и вниз, пока не вернётся на землю. Прогон после выгорания идёт
+   столько же, сколько горело; посадка раньше срока его останавливает.
+
+   Налипание. Ось вдоль рельсов, dm/dt = +μ: вагон под дождём из текста
+   главы. Капли покоятся относительно земли, поэтому относительно вагона
+   идут со скоростью −v, и та же формула даёт силу −μv: тормозит. Тяжесть
+   перпендикулярна рельсам и в уравнение вдоль них не входит, её держат
+   рельсы; вдоль них внешних сил нет, d(mv)/dt = 0, импульс сохраняется.
+   Когда дождь кончился, масса и скорость держатся.
+
+   Внешняя сила ракеты: F = −mg при включённой тяжести, иначе ноль. Пока
+   ракета стоит на опоре, к −mg добавляется реакция опоры N = mg − uμ;
+   опора держит ракету ровно до тех пор, пока uμ < mg. Момент отрыва t₁
+   берётся из m(t₁) = uμ/g точно, без перебора, и шаг интегрирования,
+   внутри которого наступает отрыв или выгорание, режется в этой точке:
+   правая часть там рвётся, и проба Рунге–Кутты не должна попадать по
+   обе стороны разрыва.
+
+   ПРОВЕРКА. Полёт интегрируется Рунге–Куттой четвёртого порядка по паре
+   (v, h) с шагом не больше 0,02 с, а рядом считается точное решение: для
+   ракеты v = u ln(m(t₁)/m) − g(t − t₁) после отрыва (масса после
+   выгорания постоянна, и та же формула даёт участок по инерции), для
+   вагона v = m₀v₀/m. Точное решение и расхождение с ним лежат в
+   __demoState, и расхождение обязано быть нулём в пределах счёта. Высота
+   к концу горения без тяжести имеет закрытую форму
+   (u/μ)[m₀ − m − m ln(m₀/m)], по ней проверяется h.
+
+   ЧИСЛА. Из главы: u = 2 км/с, топливо 98 %, для ровно восьми км/с нужно
+   m₀/m = e⁴, расход 1 т/с. Из брифа демок: стартовая масса 100 т. Отсюда
+   без тяжести v = 2 ln 50 ≈ 7,82 км/с, а 8 требует 98,2 % топлива.
+   Двигатель работает 98 с, и с тяжестью потери gt ≈ 0,96 км/с. При
+   μ = 0,5 т/с и u = 1 км/с сила 0,5 МН меньше веса: ракета стоит, пока
+   масса не упадёт до uμ/g ≈ 51 т, то есть 49 с из 196. */
+
+var G = 9.81e-3;      /* ускорение свободного падения, км/с² */
+var M0 = 100;         /* стартовая масса, т: число брифа */
+var H = 0.02;         /* верхняя граница шага интегрирования, с */
+
+/* Раскладка прогона по параметрам p = { rezhim, tyazhest, u, mu, f }:
+   сколько горит, сколько идёт весь прогон, когда отрыв, с какой скорости
+   старт. */
+function ustroit(p) {
+  var raketa = p.rezhim === 'raketa';
+  var g = raketa && p.tyazhest ? G : 0;   /* у вагона тяжесть держат рельсы */
+  var mt = p.f * M0;                  /* порция массы: сгорает или налипает, т */
+  var T = mt / p.mu;                  /* горение или дождь, с */
+  var Tk = 2 * T;                     /* конец прогона: столько же по инерции */
+  var t1 = 0;                         /* момент отрыва; ноль — отрывается сразу */
+  if (raketa && g > 0 && p.u * p.mu <= M0 * g) {
+    t1 = (M0 - p.u * p.mu / g) / p.mu;
+    if (t1 >= T) t1 = Infinity;       /* топливо кончится раньше, чем оторвётся */
+  }
+  return { raketa: raketa, g: g, u: p.u, mu: p.mu, f: p.f, mt: mt, T: T, Tk: Tk, t1: t1,
+           v0: raketa ? 0 : p.u };    /* у вагона ползунок скорости задаёт v₀ */
+}
+
+/* Масса меняется, пока идёт обмен, и держится после него */
+function massa(M, t) {
+  var dm = M.mu * Math.min(t, M.T);
+  return M.raketa ? M0 - dm : M0 + dm;
+}
+
+/* Второе слагаемое уравнения, v_отн · dm/dt, в МН */
+function silaReak(M, v) { return M.raketa ? M.u * M.mu : -M.mu * v; }
+
+/* Ускорение. Флаг on говорит, идёт ли ещё обмен массой: на границе T
+   правая часть рвётся, и кусок до T считается с включённым обменом, кусок
+   после — с выключенным, куда бы ни попала проба. */
+function uskorenie(M, t, v, on) { return (on ? silaReak(M, v) : 0) / massa(M, t) - M.g; }
+
+function nachalo(M) { return { t: 0, v: M.v0, h: 0, hMax: 0, opora: M.t1 > 0, zemlya: false }; }
+
+function konecLi(M, s) { return s.zemlya || s.t >= M.Tk; }
+
+/* Рунге–Кутта четвёртого порядка по паре (v, h) от s.t до tEnd. Правая
+   часть зависит от t через массу и от v при налипании, поэтому все четыре
+   пробы берутся честно. Посадка ловится по высоте ниже нуля при движении
+   вниз и останавливает счёт: дальше ракета стоит. */
+function kusok(M, s, tEnd, on) {
+  if (tEnd <= s.t) return;
+  var n = Math.ceil((tEnd - s.t) / H), h = (tEnd - s.t) / n;
+  for (var i = 0; i < n; i++) {
+    var t = s.t, v = s.v, x = s.h;
+    var k1 = uskorenie(M, t, v, on),                 l1 = v;
+    var k2 = uskorenie(M, t + h / 2, v + h / 2 * k1, on), l2 = v + h / 2 * k1;
+    var k3 = uskorenie(M, t + h / 2, v + h / 2 * k2, on), l3 = v + h / 2 * k2;
+    var k4 = uskorenie(M, t + h, v + h * k3, on),         l4 = v + h * k3;
+    s.v = v + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4);
+    s.h = x + h / 6 * (l1 + 2 * l2 + 2 * l3 + l4);
+    s.t = t + h;
+    if (s.h > s.hMax) s.hMax = s.h;
+    if (M.raketa && M.g > 0 && s.v < 0 && s.h <= 0) { s.h = 0; s.v = 0; s.zemlya = true; return; }
+  }
+  s.t = tEnd;                         /* снимает крошку, набежавшую в сложении */
+}
+
+/* Продвигает состояние s на dt секунд модельного времени. На опоре
+   скорость ноль и меняется только масса; отрыв и выгорание режут шаг. */
+function shag(M, s, dt) {
+  if (konecLi(M, s)) return;
+  var t2 = Math.min(s.t + dt, M.Tk);
+  if (s.opora) {
+    if (t2 < M.t1) { s.t = t2; return; }
+    s.t = M.t1; s.opora = false;
+  }
+  if (s.t < M.T) kusok(M, s, Math.min(t2, M.T), true);
+  if (!s.zemlya && t2 > M.T) kusok(M, s, t2, false);
+}
+
+/* Точное решение той же модели: то, к чему обязан сойтись счёт. После
+   выгорания масса постоянна, и формула сама даёт участок по инерции. */
+function tochno(M, t) {
+  var m = massa(M, t);
+  if (M.raketa) {
+    if (t <= M.t1) return 0;
+    return M.u * Math.log(massa(M, M.t1) / m) - M.g * (t - M.t1);
+  }
+  return M0 * M.v0 / m;
+}
+
+/* Тонкая линия графика: формула Циолковского без внешних сил или, у
+   вагона, сохранение импульса m₀v₀/m. С тяжестью счёт обязан уйти ниже
+   неё, и разрыв есть гравитационные потери. */
+function formula(M, t) {
+  var m = massa(M, t);
+  return M.raketa ? M.u * Math.log(M0 / m) : M0 * M.v0 / m;
+}
+
+/* Высота ракеты к концу горения, закрытая форма: ∫u ln(m₁/m) dt от отрыва
+   до выгорания при m = m₁ − μ(t − t₁) равен (u/μ)[m₁ − m − m ln(m₁/m)],
+   минус баллистическая добавка тяжести за время полёта с двигателем. */
+function vysotaGoreniya(M) {
+  if (M.t1 >= M.T) return 0;
+  var m1 = massa(M, M.t1), m = massa(M, M.T);
+  return M.u / M.mu * (m1 - m - m * Math.log(m1 / m)) - M.g * Math.pow(M.T - M.t1, 2) / 2;
+}
+
+/* Момент возвращения на землю: после выгорания полёт баллистический,
+   h(T) + v(T)τ − gτ²/2 = 0. Без тяжести и без отрыва посадки нет. */
+function posadka(M) {
+  if (!M.raketa || M.g === 0 || M.t1 >= M.T) return null;
+  var vT = tochno(M, M.T), hT = vysotaGoreniya(M);
+  return M.T + (vT + Math.sqrt(vT * vT + 2 * M.g * hT)) / M.g;
+}
+
+/* Показания демки: всё, что она утверждает, одним объектом. */
+function pokazaniya(M, s) {
+  var m = massa(M, s.t);
+  var gorit = s.t < M.T;              /* идёт ли ещё обмен массой */
+  var Fr = gorit ? silaReak(M, s.v) : 0, ves = m * M.g;
+  var vf = formula(M, s.t);
+  /* После посадки ракета стоит, и решение свободного полёта уже не про неё */
+  var vt = s.zemlya ? 0 : tochno(M, s.t);
+  var faza;
+  if (M.raketa) {
+    if (s.t === 0) faza = 'start';
+    else if (s.opora) faza = gorit ? 'opora' : 'zemlya';
+    else if (s.zemlya) faza = 'zemlya';
+    else if (gorit) faza = 'gorenie';
+    else faza = s.v >= 0 ? 'inerciya' : 'padenie';
+  } else faza = s.t === 0 ? 'start' : gorit ? 'dozhd' : 'posle';
+  /* Вершина полёта с тяжестью: скорость после выгорания убывает на g в
+     секунду, и через v(T)/g она обращается в ноль */
+  var vershina = M.raketa && M.g > 0 && M.t1 < M.T ? M.T + tochno(M, M.T) / M.g : null;
+  return {
+    rezhim: M.raketa ? 'raketa' : 'nalipanie', tyazhest: M.g > 0,
+    u: M.u, mu: M.mu, f: M.f, m0: M0, T: M.T, Tk: M.Tk, t1: M.t1,
+    t: s.t, m: m, v: s.v, h: s.h, hMax: s.hMax,
+    opora: s.opora, zemlya: s.zemlya, gorit: gorit, faza: faza,
+    konec: konecLi(M, s), vershina: vershina, posadka: posadka(M),
+    F_reak: Fr,                       /* реактивная сила, МН */
+    ves: ves,                         /* вес, МН; без тяжести ноль */
+    N: s.opora ? ves - Fr : 0,        /* реакция опоры, МН */
+    ln: Math.log(M0 / m),             /* число Циолковского ln(m₀/m) */
+    impuls: m * s.v,                  /* т·км/с */
+    v_formula: vf, v_tochno: vt,
+    poteri: vf - s.v,                 /* чего не хватает до тонкой линии */
+    rashozhdenie: Math.abs(s.v - vt)  /* счёт против точного решения */
+  };
+}
+
+/* Прогон без экрана: до конца или до момента doT. Для автопроверки и node. */
+function progon(p, dt, doT) {
+  var M = ustroit(p), s = nachalo(M);
+  dt = dt || 0.5;
+  if (doT == null) doT = Infinity;
+  while (!konecLi(M, s) && s.t < doT) shag(M, s, Math.min(dt, doT - s.t));
+  return pokazaniya(M, s);
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева ракета на стенде с диаграммой сил (или вагон под дождём), справа
+   график v(t), внизу строка показаний. Тонкая линия формулы рисуется вся
+   и сразу, как обещание; толстая линия счёта догоняет её за восемь
+   секунд экрана и ещё восемь идёт по инерции. Без тяжести они совпадают,
+   с тяжестью между ними открывается разрыв, и это видно раньше, чем
+   прочитано число потерь. */
+
+var W = 1000, HGT = 440;
+var P = { x0: 400, x1: 920, y0: 44, y1: 300 };    /* поле графика */
+var L = { cx: 150, zemlya: 300, fx: 272, fy: 186 }; /* ракета, земля, начало диаграммы сил */
+var ROWY = 362;                                   /* строка показаний */
+var PLAY = 8;                                     /* секунд экрана на горение; столько же на инерцию */
+var KP = 26;                                      /* px за секунду на 1 км/с: полосы за ракетой */
+var KPX = 100;                                    /* то же для рельсов и капель вдоль пути вагона */
+var RAIN = 200;                                   /* капли падают, px за секунду экрана */
+
+/* Цвета данных, от темы не зависят. Бирюза и охра — из рисунков главы:
+   скорость и сила; синий веса — тот же, что у --minus в demo.css; лайм —
+   масса, которая уходит или прибывает. */
+var CV = '#4db6c6';
+var CF = '#e08a52';
+var CW = '#7aa6ff';
+var CM = '134,171,46';
+
+/* Русская запятая и настоящий минус; остатки счёта в последних знаках
+   печатались бы как «−0,00», а ноль есть ноль. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function blizko(a, b) { return Math.abs(a - b) < 1e-9; }
+/* Высота: знаков после запятой столько, чтобы читались и метры на старте,
+   и сотни километров в конце */
+function vys(h) { return num(h, h < 10 ? 2 : h < 100 ? 1 : 0) + ' км'; }
+
+function kx(tex) {
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+/* Число на оси для KaTeX: запятая в фигурных скобках, чтобы не было пробела */
+function tik(v) { return String(+v.toFixed(3)).replace('.', '{,}'); }
+
+/* Ближайший круглый шаг оси: 1, 2, 5 на степень десяти */
+function krasivo(x) {
+  var p = Math.pow(10, Math.floor(Math.log10(x))), r = x / p;
+  return (r < 1.5 ? 1 : r < 3.5 ? 2 : r < 7.5 ? 5 : 10) * p;
+}
+
+/* Рамка графика: время до конца прогона, скорость от нуля (или ниже,
+   когда ракета падает) до верха тонкой линии. Ниже точки посадки решение
+   свободного полёта не рисуется, и рамка до него не тянется. */
+function shkala(M) {
+  var lo = 0, hi = 0, n = 120;
+  var tz = posadka(M), Tm = tz != null ? Math.min(tz, M.Tk) : M.Tk;
+  for (var i = 0; i <= n; i++) {
+    var t = Tm * i / n, a = formula(M, t), b = tochno(M, t);
+    lo = Math.min(lo, a, b); hi = Math.max(hi, a, b);
+  }
+  var dV = krasivo(Math.max(hi - lo, 1e-6) / 4);
+  hi = Math.ceil(hi / dV - 1e-9) * dV;
+  lo = Math.floor(lo / dV + 1e-9) * dV;
+  return { T: M.T, Tk: M.Tk, vLo: lo, vHi: hi, dV: dV, dT: krasivo(M.Tk / 5) };
+}
+function xt(sh, t) { return P.x0 + t / sh.Tk * (P.x1 - P.x0); }
+function yv(sh, v) { return P.y1 - (v - sh.vLo) / (sh.vHi - sh.vLo) * (P.y1 - P.y0); }
+
+/* Риски времени: круглые, плюс конец горения и конец прогона, чтобы оба
+   стояли на оси числом. Круглая риска, налезающая на них, пропускается. */
+function tikiT(sh) {
+  var out = [], osob = [sh.T, sh.Tk];
+  for (var k = 1; k * sh.dT < sh.Tk; k++) {
+    var t = k * sh.dT, ryadom = osob.some(function (o) { return Math.abs(o - t) < 0.3 * sh.dT; });
+    if (!ryadom) out.push(+t.toFixed(6));
+  }
+  osob.forEach(function (o) { out.push(+o.toFixed(1)); });
+  return out.sort(function (a, b) { return a - b; });
+}
+function tikiV(sh) {
+  var out = [];
+  for (var k = Math.ceil(sh.vLo / sh.dV - 1e-9); k * sh.dV <= sh.vHi + 1e-9; k++)
+    if (k !== 0) out.push(+(k * sh.dV).toFixed(6));
+  return out;
+}
+
+/* Стрелка с клином, тот же силуэт, что в рисунках главы */
+function strelka(ctx, x0, y0, x1, y1, color, width) {
+  var dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy);
+  if (len < 1) return;
+  var ux = dx / len, uy = dy / len, head = Math.min(13, len * 0.4);
+  ctx.save();
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * head - uy * head * 0.34, y1 - uy * head + ux * head * 0.34);
+  ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.lineTo(x1 - ux * head + uy * head * 0.34, y1 - uy * head - ux * head * 0.34);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+/* Строка показаний: подпись, число, цвет и правый край. Раскладка своя на
+   каждый режим: без тяжести веса нет, и печатать «0,00 МН» значило бы
+   утверждать, что ракета в пустоте что-то весит. Подпись логарифма
+   набирается KaTeX слоем поверх (см. podpisi), здесь у неё пустое место.
+   Правые края расставлены так, чтобы «РЕАКТИВНАЯ СИЛА, МН» (171 px в
+   моноширинном кегле подписи) не налезала на соседей. */
+function raskladka(pk) {
+  var v = num(pk.v, 2), m = num(pk.m, 1), Fr = num(pk.F_reak, 2);
+  if (pk.rezhim === 'raketa') {
+    if (!pk.tyazhest) return [
+      [220, 'СКОРОСТЬ, КМ/С', v, 'v'],
+      [460, 'МАССА, Т', m, 'ink'],
+      [700, 'РЕАКТИВНАЯ СИЛА, МН', Fr, 'F'],
+      [940, '', num(pk.ln, 2), 'ink', 'ln']
+    ];
+    return [
+      [150, 'СКОРОСТЬ, КМ/С', v, 'v'],
+      [300, 'МАССА, Т', m, 'ink'],
+      [490, 'РЕАКТИВНАЯ СИЛА, МН', Fr, 'F'],
+      [620, 'ВЕС, МН', num(pk.ves, 2), 'W'],
+      [780, 'ПОТЕРИ, КМ/С', num(pk.poteri, 2), 'F'],
+      [950, '', num(pk.ln, 2), 'ink', 'ln']
+    ];
+  }
+  return [
+    [220, 'СКОРОСТЬ, КМ/С', v, 'v'],
+    [460, 'МАССА, Т', m, 'ink'],
+    [700, 'РЕАКТИВНАЯ СИЛА, МН', Fr, 'F'],
+    [940, 'ИМПУЛЬС, Т·КМ/С', num(pk.impuls, 1), 'ink']
+  ];
+}
+
+/* Латех-слой поверх канвы: буквы величин и формулы канва не набирает.
+   Числа на осях, имена осей, подпись тонкой линии, подпись разрыва gt и
+   подпись логарифма в строке показаний. Позиции в логических координатах
+   кадра, слой пересчитывается при смене параметров, а не каждый кадр. */
+function podpisi(M, sh, pk) {
+  var out = [], yz = yv(sh, 0);
+  tikiT(sh).forEach(function (t) { out.push({ x: xt(sh, t), y: yz + 22, tex: tik(t) }); });
+  tikiV(sh).forEach(function (v) { out.push({ x: P.x0 - 12, y: yv(sh, v), tex: tik(v), cls: 'ax-right' }); });
+  out.push({ x: P.x1 + 24, y: yz, tex: 't,\\ \\text{с}', cls: 'ax-left' });
+  out.push({ x: P.x0 + 14, y: P.y0 - 18, tex: 'v,\\ \\text{км/с}', cls: 'ax-left' });
+  if (M.raketa) {
+    /* Подпись над полкой тонкой линии, у правого края: выше полки пусто в
+       любом режиме, а над серединой горения подпись налезала бы на ось v,
+       когда горение занимает четверть оси. */
+    out.push({ x: P.x1 - 4, y: yv(sh, formula(M, M.Tk)) - 18,
+               tex: 'v_{\\text{отн}}\\ln(m_0/m)', cls: 'ax-right lab-formula' });
+    /* Разрыв подписан gt только когда ракета летела с нулевой секунды:
+       после стояния на опоре потери больше, и та подпись была бы неправдой. */
+    if (M.g > 0 && M.t1 === 0)
+      out.push({ x: P.x1 + 10, y: (yv(sh, formula(M, M.Tk)) + yv(sh, tochno(M, M.Tk))) / 2,
+                 tex: 'g\\,t', cls: 'ax-left lab-gt' });
+  } else {
+    out.push({ x: P.x1 - 4, y: yv(sh, formula(M, M.Tk)) + 22,
+               tex: 'm_0 v_0/m', cls: 'ax-right lab-formula' });
+  }
+  raskladka(pk).forEach(function (r) {
+    if (r[4] === 'ln') out.push({ x: r[0], y: ROWY - 6, tex: '\\ln(m_0/m)', cls: 'ax-right' });
+  });
+  return out;
+}
+
+/* Новый прогон по текущим параметрам. Масштаб диаграммы сил берётся один
+   раз на прогон, по наибольшей силе за него: у ракеты это реактивная сила
+   или стартовый вес, и видно, как вес тает при неизменной реактивной
+   силе; у вагона сила на старте и дальше только убывает. */
+function perestroit(S) {
+  S.M = ustroit(S.p);
+  S.sh = shkala(S.M);
+  S.s = nachalo(S.M);
+  S.trace = [[0, S.s.v]];
+  S.otryv = 0;
+  S.polotno = 0;
+  var F0 = S.M.raketa ? S.M.u * S.M.mu : S.M.mu * S.M.v0;
+  S.masshtab = 110 / Math.max(F0, S.M.g > 0 ? M0 * G : 0, 1e-6);
+  S.run = true;
+  S.pok = pokazaniya(S.M, S.s);
+  S.faza = S.pok.faza;
+  vystavit(S);
+}
+
+/* Показания наружу: объект собирается заново на каждом шаге модели, а не в
+   теле компонента, потому что автопроверка двигает модель через __demoTick
+   без рендера. */
+function vystavit(S) {
+  S.pok.temp = S.M.T / PLAY;          /* секунд модели на секунду экрана */
+  S.pok.run = S.run;
+  window.__demoState = S.pok;
+}
+
+function Raketa() {
+  var st = useRef(null);
+  if (!st.current) {
+    st.current = { p: { rezhim: 'raketa', tyazhest: false, u: 2, mu: 1, f: 0.98 },
+                   kadr: 0, polosy: [] };
+    for (var i = 0; i < 26; i++)
+      st.current.polosy.push({ x: 20 + Math.random() * 300, y: Math.random() * 336 });
+    perestroit(st.current);
+  }
+  var S = st.current;
+  /* Пара из одного вызова useState: два отдельных дают два независимых
+     состояния, и рейка перестаёт отзываться на ползунок. */
+  var pair = useState({ rezhim: 'raketa', tyazhest: false, u: 2, mu: 1, f: 0.98, run: true, tick: 0 });
+  var ui = pair[0], setUi = pair[1];
+
+  function obnovit() {
+    setUi(function (u) { return Object.assign({}, u, { run: S.run, tick: u.tick + 1 }); });
+  }
+
+  function step(dt) {
+    S.kadr += dt;
+    var M = S.M, s = S.s;
+    if (!S.run || konecLi(M, s)) return;
+    var byl = s.opora;
+    shag(M, s, dt * M.T / PLAY);
+    S.trace.push([s.t, s.v]);
+    S.pok = pokazaniya(M, s);
+    if (konecLi(M, s)) S.run = false;
+    vystavit(S);
+    if (byl && !s.opora) S.otryv = 0;
+    /* Смена фазы меняет строку показаний и кнопку: рендер только тогда */
+    if (S.pok.faza !== S.faza || !S.run) { S.faza = S.pok.faza; obnovit(); }
+    if (s.opora) return;
+    S.otryv += dt;
+    if (M.raketa) {
+      /* Полосы фона едут мимо ракеты со скоростью v: камера привязана к ней,
+         и при подъёме они идут вниз, при падении вверх. */
+      S.polosy.forEach(function (p) {
+        p.y += s.v * KP * dt;
+        if (p.y > 336) p.y -= 336; else if (p.y < 0) p.y += 336;
+      });
+    } else {
+      /* Рельсы уезжают назад со скоростью вагона; капли падают отвесно
+         относительно земли, то есть относительно вагона идут ещё и назад
+         с той же скоростью, и косина дождя выпрямляется вместе с
+         торможением. Пока дождь идёт. */
+      S.polotno += s.v * KPX * dt;
+      if (s.t < M.T) S.polosy.forEach(function (p) {
+        p.x -= s.v * KPX * dt;
+        p.y += RAIN * dt;
+        if (p.x < 0) p.x += 340;
+        if (p.y > 296) { p.y -= 296; p.x = 20 + Math.random() * 300; }
+      });
+    }
+  }
+
+  /* ── ракета ──────────────────────────────────────────────── */
+
+  function risovatRaketu(ctx, tone) {
+    var M = S.M, s = S.s, pk = S.pok;
+    var ink = tone.ink, muted = tone.muted;
+    var letit = !s.opora && s.t > 0;
+
+    /* Подъём ракеты в кадре и уход земли: при отрыве за секунду экрана,
+       при возвращении обратным ходом, по времени до земли h/|v|. На земле
+       после посадки ракета стоит там же, где стояла на старте. */
+    var vverh = C.ease(Math.min(1, S.otryv / 0.9));
+    var vniz = 1;
+    if (s.zemlya) vniz = 0;
+    else if (s.v < 0) vniz = C.clamp(s.h / -s.v / (1.5 * S.pok.temp), 0, 1);
+    var dolyaPodyoma = letit ? Math.min(vverh, vniz) : 0;
+    var podyom = 40 * dolyaPodyoma;
+    var cx = L.cx, base = L.zemlya - podyom;
+
+    var IMENA = { start: 'НА СТАРТЕ', opora: 'СТОИТ НА ОПОРЕ', gorenie: 'ЛЕТИТ',
+                  inerciya: 'ЛЕТИТ ПО ИНЕРЦИИ', padenie: 'ПАДАЕТ', zemlya: 'НА ЗЕМЛЕ' };
+    C.label(ctx, cx, 30, IMENA[pk.faza] || '', 17, 'rgba(' + muted + ',.95)');
+    if (letit || s.zemlya) C.label(ctx, cx, 52, 'высота ' + vys(pk.h), 17, 'rgba(' + muted + ',.8)');
+
+    /* Полосы фона: только в полёте */
+    if (letit && !s.zemlya) {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 62, 340, 278); ctx.clip();
+      ctx.strokeStyle = 'rgba(' + ink + ',.22)'; ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      S.polosy.forEach(function (p) {
+        ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y + 8 + 2.5 * Math.abs(s.v));
+      });
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    /* Земля со стендом: под соплом газоотводный лоток, в который уходит
+       пламя. При отрыве земля уходит вниз втрое быстрее, чем поднимается
+       ракета, и пропадает за краем панели; при посадке возвращается. */
+    var yG = L.zemlya + podyom * 3;
+    if (yG < 340) {
+      ctx.strokeStyle = 'rgba(' + ink + ',.5)'; ctx.lineWidth = 2; ctx.lineCap = 'butt';
+      ctx.beginPath();
+      ctx.moveTo(40, yG); ctx.lineTo(cx - 30, yG); ctx.lineTo(cx - 30, yG + 26);
+      ctx.moveTo(cx + 30, yG + 26); ctx.lineTo(cx + 30, yG); ctx.lineTo(300, yG);
+      ctx.stroke();
+    }
+
+    /* Пламя, пока идёт горение: длина растёт со скоростью истечения,
+       мерцание от времени экрана. Цвета фиксированные, это данные, а не
+       оформление темы. */
+    if (pk.gorit && (s.t > 0 || s.opora)) {
+      var lp = (16 + 12 * M.u) * (1 + .1 * Math.sin(S.kadr * 41) + .06 * Math.sin(S.kadr * 27));
+      var gr = ctx.createLinearGradient(0, base, 0, base + lp);
+      gr.addColorStop(0, 'rgba(255,224,138,.95)');
+      gr.addColorStop(.45, 'rgba(224,138,82,.8)');
+      gr.addColorStop(1, 'rgba(224,138,82,0)');
+      C.glow(ctx, cx, base + 4, 30, '255,180,84', .45);
+      ctx.fillStyle = gr;
+      ctx.beginPath();
+      ctx.moveTo(cx - 10, base);
+      ctx.quadraticCurveTo(cx - 9, base + lp * .6, cx, base + lp);
+      ctx.quadraticCurveTo(cx + 9, base + lp * .6, cx + 10, base);
+      ctx.closePath(); ctx.fill();
+    }
+
+    /* Корпус: сопло, стабилизаторы, бак, головной блок. Внутри бака
+       уровень топлива по остатку массы. */
+    ctx.strokeStyle = 'rgba(' + ink + ',.8)'; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+    ctx.fillStyle = 'rgba(' + ink + ',.07)';
+    ctx.beginPath();
+    ctx.moveTo(cx - 9, base - 18); ctx.lineTo(cx - 13, base); ctx.lineTo(cx + 13, base); ctx.lineTo(cx + 9, base - 18);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    [-1, 1].forEach(function (d) {
+      ctx.beginPath();
+      ctx.moveTo(cx + d * 22, base - 50); ctx.lineTo(cx + d * 36, base - 4); ctx.lineTo(cx + d * 22, base - 4);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    });
+    ctx.beginPath();
+    ctx.moveTo(cx - 22, base - 18); ctx.lineTo(cx - 22, base - 160);
+    ctx.quadraticCurveTo(cx - 22, base - 190, cx, base - 200);
+    ctx.quadraticCurveTo(cx + 22, base - 190, cx + 22, base - 160);
+    ctx.lineTo(cx + 22, base - 18);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+
+    var dolya = C.clamp((pk.m - (M0 - M.mt)) / M.mt, 0, 1);
+    var tankT = base - 136, tankB = base - 22, hT = tankB - tankT;
+    ctx.fillStyle = 'rgba(' + CM + ',.38)';
+    ctx.fillRect(cx - 18, tankB - hT * dolya, 36, hT * dolya);
+    ctx.strokeStyle = 'rgba(' + ink + ',.35)'; ctx.lineWidth = 1.2;
+    ctx.strokeRect(cx - 18, tankT, 36, hT);
+    ctx.fillStyle = 'rgba(' + ink + ',.28)';
+    ctx.fillRect(cx - 18, base - 158, 36, 20);
+
+    /* Диаграмма сил справа от ракеты: реактивная сила, вес, реакция опоры.
+       Один масштаб на прогон, и при стоянии на опоре видно, как вес
+       укорачивается до реактивной силы, а опора сходит на нет. После
+       выгорания остаётся один вес. */
+    var k = S.masshtab, fx = L.fx, fy = L.fy;
+    var mut = 'rgba(' + muted + ',.9)';
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(fx, fy, 3.5, 0, 6.2832); ctx.fill();
+    var Fr = pk.F_reak;
+    if (Fr * k >= 2) {
+      strelka(ctx, fx, fy, fx, fy - Fr * k, CF, 3.2);
+      C.label(ctx, fx, fy - Fr * k - 12, 'реактивная сила', 17, CF);
+    }
+    if (M.g > 0) {
+      strelka(ctx, fx + 16, fy, fx + 16, fy + pk.ves * k, CW, 3.2);
+      C.label(ctx, fx + 26, fy + pk.ves * k + 6, 'вес', 17, CW, 'left');
+    }
+    if ((s.opora || s.zemlya) && pk.ves > 0) {
+      var N = s.opora ? pk.N : pk.ves;
+      if (N * k >= 2) {
+        strelka(ctx, fx - 16, fy, fx - 16, fy - N * k, mut, 3.2);
+        C.label(ctx, fx - 26, fy - N * k + 6, 'опора', 17, mut, 'right');
+      }
+    }
+  }
+
+  /* ── вагон ───────────────────────────────────────────────── */
+
+  function risovatVagon(ctx, tone) {
+    var M = S.M, s = S.s, pk = S.pok;
+    var ink = tone.ink, muted = tone.muted;
+    var cx = L.cx, rail = L.zemlya, top = 262;
+
+    var IMENA = { start: 'НА СТАРТЕ', dozhd: 'ВАГОН ПОД ДОЖДЁМ', posle: 'ДОЖДЬ КОНЧИЛСЯ' };
+    C.label(ctx, cx, 30, IMENA[pk.faza] || '', 17, 'rgba(' + muted + ',.95)');
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 44, 340, 296); ctx.clip();
+
+    /* Дождь: штрих каждой капли лежит вдоль её скорости относительно
+       вагона, отвесная составляющая от падения, обратная — от хода вагона.
+       Капли, попавшие на кучу и платформу, рисуются под ними: налипли. */
+    if (pk.gorit) {
+      var vx = -s.v * KPX, vy = RAIN, ln = Math.hypot(vx, vy);
+      var ex = vx / ln * 11, ey = vy / ln * 11;
+      ctx.strokeStyle = 'rgba(' + ink + ',.4)'; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+      ctx.beginPath();
+      S.polosy.forEach(function (p) {
+        ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + ex, p.y + ey);
+      });
+      ctx.stroke();
+    }
+
+    /* Рельс со шпалами, уезжающими назад */
+    ctx.strokeStyle = 'rgba(' + ink + ',.5)'; ctx.lineWidth = 2; ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(0, rail); ctx.lineTo(340, rail);
+    var sdvig = S.polotno % 36;
+    for (var x = -sdvig; x < 340; x += 36) { ctx.moveTo(x, rail); ctx.lineTo(x, rail + 9); }
+    ctx.stroke();
+
+    /* Куча налипшей массы на платформе: высота по прибывшей массе, при
+       параболическом профиле и той же ширине основания площадь кучи ей
+       пропорциональна. Куча из лайма, как топливо в баке ракеты: масса,
+       которая обменивается. */
+    var dolya = C.clamp((pk.m - M0) / M.mt, 0, 1), hp = 66 * dolya;
+    if (hp > 0.5) {
+      ctx.fillStyle = 'rgba(' + CM + ',.38)';
+      ctx.strokeStyle = 'rgba(' + CM + ',.9)'; ctx.lineWidth = 1.6; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - 58, top);
+      ctx.quadraticCurveTo(cx - 36, top - hp * 1.12, cx, top - hp);
+      ctx.quadraticCurveTo(cx + 36, top - hp * 1.12, cx + 58, top);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+
+    /* Платформа с колёсами */
+    ctx.strokeStyle = 'rgba(' + ink + ',.8)'; ctx.lineWidth = 2;
+    ctx.fillStyle = 'rgba(' + ink + ',.07)';
+    C.roundRect(ctx, cx - 64, top, 128, 20, 3); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(' + ink + ',.15)';
+    [-40, 40].forEach(function (d) {
+      ctx.beginPath(); ctx.arc(cx + d, rail - 9, 8.5, 0, 6.2832); ctx.fill(); ctx.stroke();
+    });
+    ctx.restore();
+
+    /* Сила: против хода, длина по модулю −μv; на старте она равна масштабу
+       диаграммы и дальше только укорачивается вместе со скоростью. Стрелка
+       хода вагона над ней, серая: направление, а не сила. */
+    var k = S.masshtab, Fr = pk.F_reak, fy = 150;
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(cx, fy, 3.5, 0, 6.2832); ctx.fill();
+    if (-Fr * k >= 2) {
+      strelka(ctx, cx, fy, cx + Fr * k, fy, CF, 3.2);
+      C.label(ctx, cx + Fr * k / 2, fy - 14, 'реактивная сила', 17, CF);
+    }
+    strelka(ctx, cx + 70, 112, cx + 70 + 44, 112, 'rgba(' + muted + ',.9)', 2.4);
+    C.label(ctx, cx + 60, 118, 'ход', 17, 'rgba(' + muted + ',.9)', 'right');
+  }
+
+  /* ── график ──────────────────────────────────────────────── */
+
+  function risovatGrafik(ctx, tone) {
+    var M = S.M, sh = S.sh, s = S.s;
+    var ink = tone.ink, yz = yv(sh, 0);
+
+    ctx.strokeStyle = 'rgba(' + ink + ',.34)'; ctx.lineWidth = 1.6; ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(P.x0, yz); ctx.lineTo(P.x1 + 16, yz); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(P.x1 + 7, yz - 5); ctx.lineTo(P.x1 + 16, yz); ctx.lineTo(P.x1 + 7, yz + 5); ctx.stroke();
+    var yTop = P.y0 - 4;
+    ctx.beginPath(); ctx.moveTo(P.x0, yv(sh, sh.vLo)); ctx.lineTo(P.x0, yTop); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(P.x0 - 5, yTop + 9); ctx.lineTo(P.x0, yTop); ctx.lineTo(P.x0 + 5, yTop + 9); ctx.stroke();
+    ctx.beginPath();
+    tikiT(sh).forEach(function (t) { var x = xt(sh, t); ctx.moveTo(x, yz - 5); ctx.lineTo(x, yz + 5); });
+    tikiV(sh).forEach(function (v) { var y = yv(sh, v); ctx.moveTo(P.x0 - 5, y); ctx.lineTo(P.x0 + 5, y); });
+    ctx.stroke();
+
+    /* Конец обмена массой: отвес через всё поле, от него идёт инерция */
+    ctx.save();
+    ctx.setLineDash([3, 5]);
+    ctx.strokeStyle = 'rgba(' + ink + ',.3)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(xt(sh, M.T), P.y0 + 6); ctx.lineTo(xt(sh, M.T), yv(sh, sh.vLo)); ctx.stroke();
+    ctx.restore();
+
+    /* Толстая линия счёта: то, что демка проинтегрировала к этому кадру. */
+    if (S.trace.length > 1) {
+      ctx.strokeStyle = CV; ctx.lineWidth = 3.2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.beginPath();
+      S.trace.forEach(function (p, i) {
+        var x = xt(sh, p[0]), y = yv(sh, p[1]);
+        if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      });
+      ctx.stroke();
+    }
+
+    /* Тонкая линия формулы поверх толстой: там, где они совпадают, чернила
+       ложатся посередине бирюзы, и совпадение видно, а не подразумевается. */
+    ctx.strokeStyle = 'rgba(' + ink + ',.8)'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (var i = 0; i <= 240; i++) {
+      var t = M.Tk * i / 240, x = xt(sh, t), y = yv(sh, formula(M, t));
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+
+    /* Разрыв между счётом и формулой на текущей секунде: гравитационные
+       потери. Пока ракета стоит на опоре, разрыв идёт от нуля: весь газ
+       ушёл на удержание веса. */
+    var xn = xt(sh, s.t), yn = yv(sh, s.v);
+    if (M.raketa && M.g > 0 && s.t > 0) {
+      var yf = yv(sh, formula(M, s.t));
+      if (yn - yf > 3) {
+        ctx.save();
+        ctx.strokeStyle = CF; ctx.lineWidth = 1.6; ctx.setLineDash([3, 4]);
+        ctx.beginPath(); ctx.moveTo(xn, yf); ctx.lineTo(xn, yn); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(xn - 5, yf); ctx.lineTo(xn + 5, yf); ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    /* Остриё: где сейчас идёт счёт, с риской по времени до оси. */
+    if (s.t > 0) {
+      ctx.save();
+      ctx.setLineDash([4, 6]);
+      ctx.strokeStyle = 'rgba(' + ink + ',.4)'; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(xn, yz); ctx.lineTo(xn, yn); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.fillStyle = CV;
+    ctx.beginPath(); ctx.arc(xn, yn, 5.5, 0, 6.2832); ctx.fill();
+  }
+
+  /* Слой подписей прижимается к вписанному кадру, а не к обёртке. Ядро
+     вписывает логические 1000×440 в канву с полями (paint в demo-core), и в
+     высоком окне обёртка выходит выше кадра: проценты от неё сажали числа
+     мимо рисок (у кадрового интеграла в окне 800×600 то же). Рамка кадра
+     считается той же формулой, что в ядре, и пишется в стиль слоя только
+     при смене размера. */
+  var axRef = useRef(null);
+  function prizhat(ctx) {
+    var el = axRef.current;
+    if (!el) return;
+    var rect = ctx.canvas.getBoundingClientRect();
+    var sc = Math.min(rect.width / W, rect.height / HGT);
+    var fw = W * sc, fh = HGT * sc;
+    var key = rect.width + ':' + rect.height;
+    if (S.ramka === key) return;
+    S.ramka = key;
+    el.style.left = (rect.width - fw) / 2 + 'px';
+    el.style.top = (rect.height - fh) / 2 + 'px';
+    el.style.width = fw + 'px';
+    el.style.height = fh + 'px';
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    prizhat(ctx);
+    if (S.M.raketa) risovatRaketu(ctx, tone); else risovatVagon(ctx, tone);
+    risovatGrafik(ctx, tone);
+    var pk = S.pok;
+    var col = { v: CV, F: CF, W: CW, ink: 'rgb(' + tone.ink + ')' };
+    raskladka(pk).forEach(function (r) {
+      C.readout(ctx, r[0], ROWY, r[1], r[2], col[r[3]]);
+    });
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Прогон по любым параметрам без экрана, для аудита: __demoProgon({ u: 1,
+     mu: 0.5, tyazhest: true }) дописывает переданное к текущим настройкам;
+     третьим аргументом можно остановиться на нужной секунде. */
+  window.__demoProgon = function (p, dt, doT) {
+    return progon(Object.assign({}, S.p, p || {}), dt, doT);
+  };
+
+  function sync() {
+    setUi(function (u) {
+      return { rezhim: S.p.rezhim, tyazhest: S.p.tyazhest, u: S.p.u, mu: S.p.mu, f: S.p.f,
+               run: S.run, tick: u.tick + 1 };
+    });
+  }
+  function vybrat(r) { S.p.rezhim = r; perestroit(S); sync(); }
+  function tyazhest() { S.p.tyazhest = !S.p.tyazhest; perestroit(S); sync(); }
+  function setU(v) { S.p.u = Math.round(v * 10) / 10; perestroit(S); sync(); }
+  function setMu(v) { S.p.mu = Math.round(v * 10) / 10; perestroit(S); sync(); }
+  function setF(v) { S.p.f = Math.round(v) / 100; perestroit(S); sync(); }
+  function pusk() {
+    if (konecLi(S.M, S.s)) perestroit(S); else S.run = !S.run;
+    vystavit(S); sync();
+  }
+  function sbros() { perestroit(S); S.run = false; vystavit(S); sync(); }
+
+  /* Строка показаний пересказывает кадр словами; числа в ней те же, что
+     напечатаны на сцене. Коротко: в витрине строке отведено две-три
+     строки, и длинный текст выдавливал сцену. */
+  function slova() {
+    var M = S.M, pk = S.pok;
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var gorit = pk.gorit || pk.faza === 'start';
+    if (M.raketa) {
+      if (M.g === 0) {
+        if (gorit)
+          return 'Внешних сил нет, и линия счёта ложится на формулу Циолковского ' +
+            kx('v = v_{\\text{отн}}\\ln(m_0/m)') + '. К концу горения ' +
+            A(num(formula(M, M.T), 2) + ' км/с') +
+            (blizko(M.u, 2) && blizko(M.f, 0.98)
+              ? ': до орбитальных восьми не хватает, для них нужно ' +
+                kx('m_0/m = e^4 \\approx 54{,}6') + ', то есть 98,2 % топлива.'
+              : '.');
+        return 'Топливо кончилось, сил нет, и скорость ' + A(num(pk.v, 2) + ' км/с') +
+          ' держится: на графике полка, масса больше не меняется.';
+      }
+      if (M.t1 === Infinity)
+        return 'Реактивная сила ' + A(num(M.u * M.mu, 2) + ' МН') + ' меньше веса до конца горения: ' +
+          'топливо сгорело, а ракета так и не оторвалась от опоры.';
+      if (pk.faza === 'opora')
+        return 'Реактивная сила ' + A(num(M.u * M.mu, 2) + ' МН') + ' меньше стартового веса ' +
+          A(num(M0 * G, 2) + ' МН') + ': ракета стоит на опоре и жжёт топливо. Оторвётся, когда ' +
+          'масса упадёт до ' + kx('v_{\\text{отн}}|dm/dt|/g') + ' = ' + A(num(massa(M, M.t1), 1) + ' т') +
+          ', на ' + num(M.t1, 0) + '-й секунде из ' + num(M.T, 0) + '.';
+      if (gorit) {
+        if (M.t1 === 0)
+          return 'Тяжесть, ' + kx('F = -mg') + '. Реактивная сила ' + A(num(M.u * M.mu, 2) + ' МН') +
+            ' больше веса ' + A(num(M0 * G, 2) + ' МН') + ', ракета отрывается сразу, но каждая ' +
+            'секунда горения стоит ' + kx('g') + ': за ' + num(M.T, 0) + ' с потери ' + kx('gt') +
+            ' = ' + A(num(G * M.T, 2) + ' км/с') + '.';
+        return 'Первые ' + num(M.t1, 0) + ' с ракета стояла, и газ за это время ушёл на удержание ' +
+          'веса: потери против тонкой линии ' + A(num(pk.poteri, 2) + ' км/с') + ' больше, чем ' +
+          kx('g(t - t_1)') + ' = ' + num(M.g * (pk.t - M.t1), 2) + ' км/с за полёт.';
+      }
+      var tv = num(pk.vershina, 0);
+      if (pk.faza === 'zemlya')
+        return 'Ракета вернулась на землю на ' + num(pk.t, 0) + '-й секунде. Вершина была на ' + tv +
+          '-й, высота ' + A(vys(pk.hMax)) + '.';
+      if (pk.faza === 'padenie')
+        return 'Вершина пройдена на ' + tv + '-й секунде, высота ' + A(vys(pk.hMax)) +
+          '. Ракета падает, скорость отрицательна, и тяжесть по-прежнему отнимает ' + kx('g') +
+          ' в секунду; на землю вернётся на ' + num(pk.posadka, 0) + '-й.';
+      return 'Двигатель выключен, осталась одна тяжесть: скорость убывает на ' + kx('g') +
+        ' в секунду, и полки нет. Вершина будет на ' + tv + '-й секунде' +
+        (pk.vershina > M.Tk ? ', за краем графика.' : '.');
+    }
+    if (gorit)
+      return 'Знак ' + kx('dm') + ' сменился: вагон под дождём. Капли покоятся относительно земли, ' +
+        'относительно вагона идут со скоростью ' + kx('-v') + ', и то же слагаемое ' +
+        kx('v_{\\text{отн}}\\,dm/dt') + ' тормозит. Вдоль рельсов внешних сил нет, импульс ' +
+        kx('mv') + ' = ' + A(num(pk.impuls, 1) + ' т·км/с') + ' сохраняется, и скорость падает как ' +
+        kx('1/m') + '.';
+    return 'Дождь кончился: масса ' + A(num(pk.m, 1) + ' т') + ' и скорость ' +
+      A(num(pk.v, 2) + ' км/с') + ' держатся, импульс те же ' + A(num(pk.impuls, 1) + ' т·км/с') + '.';
+  }
+
+  var labs = podpisi(S.M, S.sh, S.pok);
+  function spanAt(sp, i) {
+    return html`<span key=${i} class=${sp.cls || null}
+      style=${{ left: (sp.x / W * 100) + '%', top: (sp.y / HGT * 100) + '%' }}
+      dangerouslySetInnerHTML=${{ __html: kx(sp.tex) }}></span>`;
+  }
+
+  var raketa = ui.rezhim === 'raketa';
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} active=${raketa} onClick=${function () { vybrat('raketa'); }}>Ракета<//>
+          <${C.Btn} active=${!raketa} onClick=${function () { vybrat('nalipanie'); }}>Налипание<//>
+        <//>
+        ${/* Тяжесть одной кнопкой-тумблером: подсвечена, когда включена. У
+              вагона её держат рельсы, и кнопка гаснет. */''}
+        <${C.Group}>
+          <${C.Btn} active=${ui.tyazhest && raketa} disabled=${!raketa} onClick=${tyazhest}>Тяжесть<//>
+        <//>
+        <${C.Slider} label=${raketa ? 'Истечение:' : 'Скорость:'} min=${1} max=${4} step=${0.1}
+                     value=${ui.u} onChange=${setU} display=${num(ui.u, 1) + ' км/с'} />
+        <${C.Slider} label=${raketa ? 'Расход:' : 'Дождь:'} min=${0.5} max=${5} step=${0.1}
+                     value=${ui.mu} onChange=${setMu} display=${num(ui.mu, 1) + ' т/с'} />
+        <${C.Slider} label=${raketa ? 'Топливо:' : 'Налипнет:'} min=${50} max=${98} step=${1}
+                     value=${Math.round(ui.f * 100)} onChange=${setF}
+                     display=${raketa ? Math.round(ui.f * 100) + ' %' : num(ui.f * M0, 0) + ' т'} />
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      ${/* Сцена держит пропорцию и обязана влезать в колонку: ведёт высота,
+            ширина выводится из неё (замеры 08.09 в кадровом интеграле). */''}
+      <div class="stage-wrap"
+           style=${{ aspectRatio: W + ' / ' + HGT, flex: '0 1 auto', minHeight: 0,
+                     height: '100%', width: 'auto', maxWidth: '100%',
+                     alignSelf: 'center' }}>
+        <canvas class="stage" ref=${ref}></canvas>
+        <div class="ax is-on" ref=${axRef}>${labs.map(spanAt)}</div>
+      </div>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(Raketa);
+</script>
+</body>
+</html>

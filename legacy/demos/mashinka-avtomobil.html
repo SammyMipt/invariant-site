@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Машина разгоняется: чья это работа</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-04/">&larr; Неделя 04</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=mashinka-avtomobil"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блоки главы `teorema-kyoniga` (перекрёстное слагаемое прочитано) и
+   `rabota-vnutrennih-sil`. Парадокс автомобиля: машина массой 1000 кг
+   разгоняется с места до 20 м/с. В системе дороги она получает 200 кДж; в
+   системе, идущей назад со скоростью 20 м/с, она разгоняется с 20 до
+   40 м/с и получает 600 кДж. Бензина при этом сгорает одинаково. Демка
+   считает, кто доплатил разницу.
+
+   МОДЕЛЬ. Два тела, машина и Земля. Колёса катятся без проскальзывания,
+   их массой пренебрегаем. Горизонтальная сила одна: трение покоя в пятне
+   контакта ведущего колеса, F вперёд на колесо и −F назад на дорогу.
+   Сопротивления воздуха и качения нет, вертикальные силы работы не
+   совершают. Разгон идёт с постоянной силой; ускорение 4 м/с² выбрано
+   так, что он длится 5 с и занимает 50 м. Трению покоя для этого нужен
+   коэффициент a/g = 0,41, если весь вес лежит на ведущих колёсах, и
+   около 0,8 при половине: сухой асфальт это держит. Энергии от выбора
+   ускорения не зависят, их задают масса, конечная скорость и скорость
+   наблюдателя.
+
+   Модель считается в системе, где Земля стояла до пуска: это и есть
+   система дороги, инерциальная. Земля тоже тело, масса 6·10²⁴ кг; под
+   силой −F она за разгон набирает скорость −F·t/M = −3,3·10⁻²¹ м/с. Шаг
+   h = 1/1200 с. Сила постоянна, скорости внутри шага линейны, поэтому и
+   координаты, и трапеции интегралов точны до округления.
+
+   НАБЛЮДАТЕЛЬ едет вдоль дороги со скоростью V, плюс по ходу машины. Его
+   начало совпадает с началом дороги в момент пуска, скорости у него v − V.
+   Работа каждой силы считается в его системе интегралом ∫F·v dt, где v
+   есть скорость ТОЧКИ ПРИЛОЖЕНИЯ, а не тела:
+
+     трение на машину приложено к той точке шины, что сейчас касается
+       дороги. Её скорость есть скорость оси плюс вращение, v − V − ωR, а
+       ω задаёт качение без проскальзывания: скорость машины относительно
+       дороги, делённая на радиус. Выходит скорость дороги, в системе
+       дороги ноль;
+     трение на Землю приложено к точке дороги под колесом, её скорость
+       есть скорость Земли минус V;
+     двигатель. Его внутренние силы крутят колесо относительно кузова;
+       колесу без массы нужен момент τ = F·R, мощность пары моментов τω.
+       Угловая скорость у наблюдателей, идущих друг относительно друга
+       поступательно, одна, и работа двигателя у всех одна.
+
+   Скорости двух точек касания считаются порознь, по шине и по дороге, и
+   нулевая работа пары выходит из счёта, а не закладывается.
+
+   Приросты энергии машины и Земли берутся по их скоростям, а не как сумма
+   работ. То, что сумма работ с ними сходится, и есть теорема о
+   кинетической энергии, проверенная счётом: balanceCar и balanceEarth в
+   __demoState.
+
+   ЗЕМЛЯ И ДВОЙНАЯ ТОЧНОСТЬ. Для наблюдателя, идущего назад, Земля идёт
+   вперёд со скоростью 20 м/с, и за разгон её скорость падает на
+   3,3·10⁻²¹ м/с. В двойной точности 20 − 3,3·10⁻²¹ есть ровно 20, и
+   разность квадратов в лоб дала бы ноль. Поэтому она раскладывается на
+   множители, u₁′² − u₀′² = (u₁ − u₀)(u₁′ + u₀′): та же формула, записанная
+   так, чтобы её посчитала машина. Выходит 6·10²⁴·(−3,3·10⁻²¹)·20 = −400 кДж.
+
+   СМЕНА НАБЛЮДАТЕЛЯ на ходу не склеивает два интеграла. Модель в системе
+   дороги от наблюдателя не зависит и восстанавливается по номеру шага,
+   поэтому при смене все интегралы пересчитываются с пуска до текущего
+   шага для нового V. Работы трения у двух наблюдателей различаются ровно
+   на −V, умноженное на импульс силы F·t; это перекрёстное слагаемое
+   Кёнига, и оно сверено прогоном (отчёт сборки).
+
+   ЧИСЛА ИЗ ГЛАВЫ. Система дороги: машине +200 кДж, трение покоя над
+   машиной 0, над Землёй 0, пара 0, двигатель 200 кДж. Система, идущая
+   назад со скоростью 20 м/с: машине +600 кДж, трение над машиной +400,
+   над Землёй −400, прирост энергии Земли −400, пара 0, двигатель те же
+   200. Бензин: 200 кДж / (0,3 · 44 МДж/кг) = 15,2 г у любого наблюдателя;
+   44 МДж/кг есть удельная теплота сгорания бензина, кпд 0,3 есть доля
+   этой теплоты, ушедшая в работу двигателя. */
+
+/* ── чистая физика ──────────────────────────────────────────────
+   Отсюда и до пометки «конец чистой физики» код не знает о браузере и
+   целиком копируется в node для прогона без глаз. */
+
+var M_M = 1000;                          /* кг, машина: число главы */
+var V_KON = 20;                          /* м/с, конечная скорость в системе дороги: число главы */
+var A_RAZG = 4;                          /* м/с², ускорение: выбрано, см. шапку */
+var T_RAZG = V_KON / A_RAZG;             /* 5 с */
+var F_TR = M_M * A_RAZG;                 /* Н, трение покоя на ведущее колесо: 4 кН */
+var M_Z = 6e24;                          /* кг, Земля */
+var R_K = 0.3;                           /* м, радиус колеса; в энергии не входит */
+var KPD = 0.3;                           /* доля теплоты сгорания, ушедшая в работу двигателя */
+var Q_BENZ = 44e6;                       /* Дж/кг, удельная теплота сгорания бензина */
+var H = 1 / 1200;                        /* с, шаг */
+var N_RAZG = Math.round(T_RAZG / H);     /* 6000 шагов на разгон */
+var V_MIN = -30, V_MAX = 30;             /* м/с, ползунок наблюдателя */
+var V_NAZAD = -20;                       /* м/с, «система, идущая назад»: число главы */
+var V_VPERED = 20;                       /* м/с, система, идущая вперёд вместе с машиной после
+                                            разгона: кнопка по просьбе автора 21.09, для
+                                            сравнения с таблицей слайда */
+
+/* Состояние: машина и Земля в системе дороги, интегралы в системе
+   наблюдателя V. Импульс силы копится для сверки с перекрёстным
+   слагаемым Кёнига. */
+function novaya(V) {
+  return { V: V, n: 0, t: 0,
+           vM: 0, xM: 0,                 /* машина: скорость и координата центра */
+           vZ: 0, xZ: 0,                 /* Земля */
+           aTrM: 0, aTrZ: 0,             /* работа трения покоя над машиной и над Землёй */
+           aDv: 0,                       /* работа двигателя */
+           imp: 0 };                     /* импульс силы трения на машину */
+}
+
+/* Угловая скорость колеса из качения без проскальзывания и скорости двух
+   точек касания в системе наблюдателя: точки шины (ось плюс вращение
+   нижней точки назад) и точки дороги (скорость Земли). */
+function omega(vM, vZ) { return (vM - vZ) / R_K; }
+function vShiny(vM, vZ, V) { return (vM - V) - omega(vM, vZ) * R_K; }
+function vDorogi(vZ, V) { return vZ - V; }
+
+/* Один шаг. Подынтегральные функции внутри шага линейны по времени, и
+   трапеция берёт их точно. После 6000-го шага сила снимается: разгон
+   кончен, дальше модель стоит. */
+function shag(m) {
+  if (m.n >= N_RAZG) return;
+  var V = m.V, vM0 = m.vM, vZ0 = m.vZ;
+  var vM1 = vM0 + F_TR / M_M * H;
+  var vZ1 = vZ0 - F_TR / M_Z * H;
+  m.xM += (vM0 + vM1) / 2 * H;
+  m.xZ += (vZ0 + vZ1) / 2 * H;
+  m.aTrM += F_TR * (vShiny(vM0, vZ0, V) + vShiny(vM1, vZ1, V)) / 2 * H;
+  m.aTrZ += -F_TR * (vDorogi(vZ0, V) + vDorogi(vZ1, V)) / 2 * H;
+  m.aDv += F_TR * R_K * (omega(vM0, vZ0) + omega(vM1, vZ1)) / 2 * H;
+  m.imp += F_TR * H;
+  m.vM = vM1; m.vZ = vZ1;
+  m.n++; m.t = m.n * H;
+}
+
+/* Модель с пуска до шага n для наблюдателя V: так же пересчитывается всё
+   при смене наблюдателя на ходу. */
+function progon(V, n) {
+  var m = novaya(V);
+  for (var i = 0; i < n; i++) shag(m);
+  return m;
+}
+
+/* Прирост энергии машины по её скоростям у наблюдателя. */
+function dKmashiny(m) {
+  var v0 = 0 - m.V, v1 = m.vM - m.V;
+  return M_M / 2 * (v1 * v1 - v0 * v0);
+}
+
+/* Прирост энергии Земли по её скоростям: разность квадратов разложена
+   на множители, см. шапку. Разность скоростей берётся в системе дороги,
+   где V не прибавляется и малое число не теряется. */
+function dKzemli(m) {
+  var u0 = 0 - m.V, u1 = m.vZ - m.V;
+  return M_Z / 2 * (m.vZ - 0) * (u1 + u0);
+}
+
+/* Бензин на работу двигателя, в граммах. */
+function benzin(aDv) { return aDv / (KPD * Q_BENZ) * 1000; }
+
+/* Где за разгон побывают машина и стартовая черта дороги у наблюдателя V:
+   по этому размаху ставится камера дальнего вида. Считается прогоном той
+   же модели, а не формулой. */
+function razmah(V) {
+  var m = novaya(V), lo = 0, hi = 0;
+  for (var i = 0; i < N_RAZG; i++) {
+    shag(m);
+    var xm = m.xM - V * m.t, xd = m.xZ - V * m.t;
+    lo = Math.min(lo, xm, xd); hi = Math.max(hi, xm, xd);
+  }
+  return { lo: lo, hi: hi };
+}
+
+/* Сводка: то, что демка утверждает, в единицах СИ; топливо в граммах. */
+function svodka(m, sila) {
+  var V = m.V, s = {};
+  var f = sila ? F_TR : 0;
+  s.t = m.t;
+  s.Vobs = V;
+  s.vCar = m.vM - V;                     /* машина у наблюдателя */
+  s.vCarRoad = m.vM;                     /* машина в системе дороги */
+  s.vEarth = m.vZ;                       /* Земля в системе дороги */
+  s.vEarthObs = m.vZ - V;
+  s.vContact = vShiny(m.vM, m.vZ, V);    /* точка касания шины у наблюдателя */
+  s.dKcar = dKmashiny(m);
+  s.workFrictionCar = m.aTrM;
+  s.workFrictionEarth = m.aTrZ;
+  s.dKearth = dKzemli(m);
+  s.workPair = m.aTrM + m.aTrZ;
+  s.workEngine = m.aDv;
+  s.fuelGrams = benzin(m.aDv);
+  s.dKsum = s.dKcar + s.dKearth;         /* машина и Земля вместе */
+  s.balanceCar = s.dKcar - (m.aTrM + m.aDv);
+  s.balanceEarth = s.dKearth - m.aTrZ;
+  s.impulse = m.imp;
+  s.powerFrictionCar = f * s.vContact;
+  s.powerFrictionEarth = -f * vDorogi(m.vZ, V);
+  s.powerEngine = f * R_K * omega(m.vM, m.vZ);
+  s.done = m.n >= N_RAZG;
+  return s;
+}
+/* ── конец чистой физики ── */
+
+/* ══════════════════ сцена ══════════════════
+
+   Сверху дорога глазами наблюдателя: машина, стартовая черта дороги и
+   точка касания ведущего колеса. Камера охватывает весь размах разгона у
+   выбранного наблюдателя (razmah), так что у стоящего на дороге машина
+   уезжает на 50 м, а у идущего назад на 20 м/с машина проходит 150 м и
+   дорога вместе с ней 100 м. Машина нарисована не в масштабе: на экране
+   ей хватает семидесяти пикселей, иначе на полосе в сто пятьдесят метров
+   она была бы точкой. Под дорогой столбец показаний в килоджоулях.
+
+   Сборка сцены закончена генеральной сессией 15.09: билдер оборвался на
+   лимите после модели, модель выше не менялась. */
+
+var W = 1000, HGT = 440;
+var X0 = 80, X1 = 920;                   /* экранные края полосы */
+var Y_ROAD = 118;                        /* полотно дороги */
+var TAU = 6.2832;
+var SHAG_RAZMETKI = 10;                  /* м между штрихами разметки */
+
+/* Русская запятая и настоящий минус; ноль остаётся нулём. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* Килоджоули со знаком: знак здесь и есть физика, кто отдал, кто получил. */
+function kdzh(v) {
+  var s = num(v / 1000, 1);
+  return (v > 0 && s !== num(0, 1)) ? '+' + s : s;
+}
+
+function Mashinka() {
+  var ref0 = useRef(null);
+  if (!ref0.current) {
+    ref0.current = { V: 0, m: novaya(0), run: false, kadr: razmah(0), sv: null };
+  }
+  var S = ref0.current;
+  var pair = useState({ run: false, V: 0, done: false });
+  var ui = pair[0], setUi = pair[1];
+
+  /* Показания пишутся из шага: автопроверка двигает модель через
+     __demoTick без рендера. Сила есть, пока идёт разгон. */
+  function pokazaniya() {
+    var s = svodka(S.m, S.m.n > 0 && S.m.n < N_RAZG);
+    s.run = S.run;
+    S.sv = s;
+    window.__demoState = s;
+  }
+  if (!S.sv) pokazaniya();
+
+  function step(dt) {
+    if (!S.run) return;
+    var k = Math.round(dt / H);
+    for (var i = 0; i < k; i++) shag(S.m);
+    if (S.m.n >= N_RAZG) {
+      S.run = false;
+      setUi({ run: false, V: S.V, done: true });
+    }
+    pokazaniya();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    var ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var m = S.m, V = S.V, sv = S.sv;
+    var lo = S.kadr.lo, hi = S.kadr.hi;
+    var pad = Math.max(4, 0.06 * (hi - lo));
+    lo -= pad; hi += pad;
+    function sx(x) { return X0 + (x - lo) / (hi - lo) * (X1 - X0); }
+    var i;
+
+    /* Полотно и разметка: штрихи едут вместе с дорогой, то есть со
+       скоростью Земли у наблюдателя. */
+    ctx.strokeStyle = 'rgba(' + ink + ',.55)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(X0 - 20, Y_ROAD); ctx.lineTo(X1 + 20, Y_ROAD); ctx.stroke();
+    var xd0 = m.xZ - V * m.t;                  /* стартовая черта дороги у наблюдателя */
+    var sdvig = ((xd0 - lo) % SHAG_RAZMETKI + SHAG_RAZMETKI) % SHAG_RAZMETKI;
+    ctx.strokeStyle = 'rgba(' + muted + ',.8)'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (var x = lo + sdvig; x <= hi; x += SHAG_RAZMETKI) {
+      ctx.moveTo(sx(x), Y_ROAD + 14); ctx.lineTo(sx(x) + 12, Y_ROAD + 14);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgb(' + acc + ')'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(sx(xd0), Y_ROAD - 4); ctx.lineTo(sx(xd0), Y_ROAD + 26); ctx.stroke();
+    C.label(ctx, sx(xd0), Y_ROAD + 48, 'старт', 17, 'rgb(' + acc + ')');
+
+    /* Машина: кузов и два колеса, ведущее заднее. Центр машины стоит в
+       её координате у наблюдателя. */
+    var xm = sx(m.xM - V * m.t);
+    C.roundRect(ctx, xm - 38, Y_ROAD - 40, 76, 24, 6);
+    ctx.fillStyle = 'rgba(77,182,198,.92)'; ctx.fill();
+    C.roundRect(ctx, xm - 20, Y_ROAD - 56, 40, 18, 5);
+    ctx.fillStyle = 'rgba(77,182,198,.7)'; ctx.fill();
+    [-22, 22].forEach(function (d) {
+      ctx.fillStyle = 'rgb(' + ink + ')';
+      ctx.beginPath(); ctx.arc(xm + d, Y_ROAD - 9, 9, 0, TAU); ctx.fill();
+    });
+    C.label(ctx, xm, Y_ROAD - 66, '1000 кг', 17, 'rgb(77,182,198)');
+
+    /* Сила трения покоя на ведущее колесо: вперёд, в точке касания. */
+    if (m.n > 0 && m.n < N_RAZG) {
+      var xk = xm - 22;
+      ctx.strokeStyle = 'rgb(' + acc + ')'; ctx.fillStyle = 'rgb(' + acc + ')'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(xk, Y_ROAD + 2); ctx.lineTo(xk + 46, Y_ROAD + 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(xk + 54, Y_ROAD + 2); ctx.lineTo(xk + 44, Y_ROAD - 4);
+      ctx.lineTo(xk + 44, Y_ROAD + 8); ctx.closePath(); ctx.fill();
+    }
+
+    /* Кто куда едет у наблюдателя. */
+    var mut = 'rgba(' + muted + ',.95)';
+    C.label(ctx, X0 - 20, 30, V === 0 ? 'наблюдатель стоит на дороге' :
+            'наблюдатель едет ' + (V < 0 ? 'назад' : 'вперёд') + ' со скоростью ' + num(Math.abs(V), 0) + ' м/с',
+            18, mut, 'left');
+    C.label(ctx, X1 + 20, 30, 'машина ' + num(sv.vCar, 1) + ' м/с, дорога ' + num(sv.vEarthObs, 1) + ' м/с',
+            18, mut, 'right');
+
+    /* ── столбец показаний ── */
+    var rows = [
+      ['прирост энергии машины', kdzh(sv.dKcar) + ' кДж', 'rgb(77,182,198)'],
+      ['работа трения покоя над машиной', kdzh(sv.workFrictionCar) + ' кДж', 'rgb(' + acc + ')'],
+      ['работа трения покоя над Землёй', kdzh(sv.workFrictionEarth) + ' кДж', 'rgb(' + acc + ')'],
+      ['прирост энергии Земли', kdzh(sv.dKearth) + ' кДж', 'rgb(' + ink + ')'],
+      ['работа пары сил трения покоя', kdzh(sv.workPair) + ' кДж', 'rgb(' + ink + ')'],
+      ['работа двигателя', kdzh(sv.workEngine) + ' кДж', 'rgb(' + ink + ')'],
+      ['бензин при кпд 0,3', num(sv.fuelGrams, 1) + ' г', 'rgb(' + ink + ')']
+    ];
+    var y0 = 208, dy = 32;
+    ctx.strokeStyle = 'rgba(' + ink + ',.12)'; ctx.lineWidth = 1;
+    for (i = 0; i < rows.length; i++) {
+      var y = y0 + i * dy;
+      C.label(ctx, 250, y, rows[i][0], 19, mut, 'left');
+      ctx.font = '600 22px "JetBrains Mono", ui-monospace, monospace';
+      ctx.fillStyle = rows[i][2]; ctx.textAlign = 'right';
+      ctx.fillText(rows[i][1], 750, y);
+      if (i === 3 || i === 5) {
+        ctx.beginPath(); ctx.moveTo(250, y + 12); ctx.lineTo(750, y + 12); ctx.stroke();
+      }
+    }
+    ctx.textAlign = 'center';
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Модель наружу: автопроверка гоняет разгон целиком у любого
+     наблюдателя и сверяет с тем, что печатает сцена. */
+  window.__demoModel = { novaya: novaya, shag: shag, progon: progon, svodka: svodka,
+                         dKmashiny: dKmashiny, dKzemli: dKzemli, benzin: benzin,
+                         razmah: razmah, N_RAZG: N_RAZG, H: H, V_NAZAD: V_NAZAD };
+  window.__demoRun = function (V) { return svodka(progon(V, N_RAZG), false); };
+
+  function sbros() {
+    S.m = novaya(S.V); S.run = false; S.kadr = razmah(S.V);
+    pokazaniya();
+    setUi({ run: false, V: S.V, done: false });
+  }
+  /* «Пуск» разгоняет; после конца разгона он же повторяет опыт. */
+  function pusk() {
+    if (S.m.n >= N_RAZG) S.m = novaya(S.V);
+    S.run = !S.run;
+    pokazaniya();
+    setUi({ run: S.run, V: S.V, done: false });
+  }
+  /* Смена наблюдателя на ходу: модель в системе дороги та же, интегралы
+     пересчитываются с пуска для нового V. */
+  function nablyudatel(V) {
+    V = Math.round(V);
+    S.V = V;
+    S.m = progon(V, S.m.n);
+    S.kadr = razmah(V);
+    pokazaniya();
+    setUi({ run: S.run, V: V, done: S.m.n >= N_RAZG });
+  }
+
+  function slova() {
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var sv = S.sv;
+    if (S.m.n === 0) {
+      return 'Машина массой ' + A('1000 кг') + ' стоит на дороге. «Пуск» разгоняет её с постоянной ' +
+        'силой до ' + A('20 м/с') + ' за 5 с; колёса катятся без проскальзывания. Наблюдателя можно ' +
+        'пересадить в систему, которая едет вдоль дороги, в том числе во время разгона.';
+    }
+    if (!sv.done) {
+      return 'Разгон идёт. Машину толкает вперёд сила трения покоя дороги на ведущее колесо, ' +
+        'а на Землю назад действует парная ей сила.';
+    }
+    if (S.V === 0) {
+      return 'В системе дороги точка касания колеса стоит, и трение покоя работы не совершает: ' +
+        'все ' + A('200 кДж') + ' машине дал двигатель, на это ушло ' + A(num(sv.fuelGrams, 1) + ' г') +
+        ' бензина. Пересадите наблюдателя назад на 20 м/с.';
+    }
+    var mashina = sv.dKcar < 0
+      ? 'машина потеряла ' + A(num(-sv.dKcar / 1000, 1) + ' кДж')
+      : 'машина получила ' + A(kdzh(sv.dKcar) + ' кДж');
+    return 'У этого наблюдателя ' + mashina + ', а двигатель ' +
+      'совершил, как у всех, ' + A('200 кДж') + ', и бензина ушло ' + A(num(sv.fuelGrams, 1) + ' г') +
+      '. Разницу дало трение покоя: точка касания едет вместе с дорогой, и над машиной сила ' +
+      'трения совершила ' + A(kdzh(sv.workFrictionCar) + ' кДж') + ', а энергия Земли изменилась на ' +
+      A(kdzh(sv.dKearth) + ' кДж') + '. Работа пары сил трения покоя ноль у любого наблюдателя.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+        <${C.Group} label="Наблюдатель:">
+          <${C.Btn} active=${ui.V === 0} onClick=${function () { nablyudatel(0); }}>дорога<//>
+          <${C.Btn} active=${ui.V === V_NAZAD} onClick=${function () { nablyudatel(V_NAZAD); }}>назад 20 м/с<//>
+          <${C.Btn} active=${ui.V === V_VPERED} onClick=${function () { nablyudatel(V_VPERED); }}>вперёд 20 м/с<//>
+        <//>
+        <${C.Slider} label="Скорость наблюдателя:" min=${V_MIN} max=${V_MAX} step=${1}
+                     value=${ui.V} onChange=${nablyudatel}
+                     display=${num(ui.V, 0) + ' м/с'} />
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(Mashinka);
+</script>
+</body>
+</html>

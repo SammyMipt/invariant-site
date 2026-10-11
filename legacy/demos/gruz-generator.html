@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Груз, генератор и лампочка</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-04/">&larr; Неделя 04</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=gruz-generator"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы zakon-sohraneniya-energii и врезка «Граница строгости». Опыт
+   всех троих лекторов МФТИ: груз на нити, намотанной на шкив генератора,
+   опускается и крутит генератор, генератор нагружен лампочкой. Механическая
+   энергия груза убывает, и демка ищет, куда она делась: каждая статья
+   считается отдельно, потом статьи складываются и сверяются с убылью.
+
+   УРАВНЕНИЕ. Нить нерастяжима и невесома, поэтому скорость груза v и
+   угловая скорость шкива ω связаны радиусом шкива: v = ωρ. Генератор с
+   постоянным магнитом: ЭДС пропорциональна угловой скорости, ε = kω. Ток в
+   цепи из обмотки r и лампочки R есть I = ε/(R + r), и тот же ток тормозит
+   ротор моментом kI. Постоянная k в обоих местах одна: с разными генератор
+   брал бы энергию ниоткуда или терял бы её без следа. Груз:
+   m·dv/dt = mg − T. Ротор со шкивом: J·dω/dt = Tρ − kI. Натяжение T
+   исключается, и остаётся
+
+       (m + J/ρ²)·dv/dt = mg − k²v/(ρ²(R + r)).
+
+   Разомкнутая цепь: тока нет, тормоза нет, груз и ротор разгоняются вместе с
+   ускорением mg/(m + J/ρ²) = 8,92 м/с². Короткое замыкание: R = 0, весь ток
+   идёт через обмотку, лампочка вне цепи.
+
+   Правая часть обращается в ноль при установившейся скорости
+   v* = mgρ²(R + r)/k², и к ней скорость подходит экспонентой со временем
+   τ = (m + J/ρ²)ρ²(R + r)/k². В установившемся режиме ток I* = mgρ/k от
+   лампочки не зависит: момент kI обязан уравновесить момент груза mgρ.
+   Поэтому мощность обмотки I*²r при любой лампочке одна, 3,85 Вт, а
+   мощность лампочки I*²R растёт вместе с R, пока груз успевает выйти на
+   установившуюся скорость.
+
+   ЧТО СЧИТАЕТСЯ. Рунге–Кутта четвёртого порядка по четвёрке «путь вниз y,
+   скорость v, тепло в лампочке, тепло в обмотке» с шагом 1/1200 с. Тепло
+   набирается интегралами ∫I²R dt и ∫I²r dt по тем же шагам, из тока, а не
+   из баланса. Убыль потенциальной энергии mgy берётся из пройденного пути,
+   кинетическая груза mv²/2 и ротора Jω²/2 из скорости. Четыре статьи
+   считаются порознь, их сумма сверяется с убылью, и расхождение лежит в
+   __demoState.balanceError в долях от mgh. В схему баланс не заложен: он
+   выходит, только если тормозящий момент kI в механике и мощность εI в цепи
+   описывают одно и то же. Касание пола ловится точно: шаг, на котором путь
+   перевалил бы за 1,5 м, переигрывается укороченным, и его длина ищется
+   Ньютоном по пути. Рядом считается точное решение, v = v*(1 − e^(−t/τ)),
+   при разомкнутой цепи v = at; расхождение счёта с ним тоже в __demoState.
+
+   ЧИСЛА. Из брифа: m = 2 кг, h = 1,5 м, g = 9,81 м/с², радиус шкива 0,05 м;
+   убыль за весь спуск mgh = 29,43 Дж. Подобраны: k = 1 В·с/рад (он же
+   Н·м/А), r = 4 Ом, J = 5·10⁻⁴ кг·м², то есть J/ρ² = 0,2 кг, десятая часть
+   груза; ряд R по ряду E6 от 1 до 100 Ом и два края ползунка. Условие брифа:
+   при средних R груз выходит на установившуюся скорость на первой половине
+   спуска. Выход считается по порогу: скорость отстаёт от установившейся
+   меньше чем на процент. От короткого замыкания до 22 Ом так и есть: при
+   10 Ом (середина ползунка) v* = 0,687 м/с, τ = 0,077 с, выход на 0,19 м
+   пути, спуск 2,26 с; при 22 Ом выход на 0,66 м из 0,75. При 33 Ом выход
+   уходит во вторую половину спуска (1,34 м), с 47 Ом груз до пола на
+   установившуюся не выходит. Короткое замыкание: v* = 0,196 м/с, спуск
+   7,67 с, всё тепло в обмотке. Разомкнутая цепь: пол через 0,58 с на
+   5,17 м/с, в движении груза 26,75 Дж и ротора 2,68 Дж. Ток в
+   установившемся режиме 0,98 А; лампочка 10 Ом получает 9,6 Вт. Больше
+   всего энергии лампочке достаётся при 22 Ом, 80 % убыли, ярче всего она
+   вспыхивает у пола при 68 Ом, 48 Вт.
+
+   ЧЕГО ЗДЕСЬ НЕТ. Сопротивление лампочки постоянно: у настоящей холодная
+   нить держит в разы меньше, чем раскалённая. Индуктивность обмотки не
+   учтена: при миллигенри она даёт время порядка 10⁻⁴ с против τ от 0,02 с.
+   Трения в подшипниках нет, иначе у тепла была бы пятая статья. Опыт
+   кончается касанием пола; удар о пол и выбег ротора после него демка не
+   считает, и кинетическая энергия остаётся последней статьёй. */
+
+/* ── чистая физика ──────────────────────────────────────────────
+   Отсюда и до пометки «конец чистой физики» код не знает о браузере и
+   целиком копируется в node для прогона без глаз; так снята таблица
+   «ожидали / получили» в отчёте сборки. */
+
+var M = 2;                 /* кг, груз: число брифа */
+var H0 = 1.5;              /* м, высота спуска: число брифа */
+var G = 9.81;              /* м/с² */
+var RHO = 0.05;            /* м, радиус шкива: число брифа */
+var K_G = 1;               /* В·с/рад, он же Н·м/А: постоянная генератора, подобрана */
+var R_OB = 4;              /* Ом, обмотка, подобрана */
+var J_ROT = 5e-4;          /* кг·м², ротор со шкивом, подобран: J/ρ² = 0,2 кг */
+var M_PR = M + J_ROT / (RHO * RHO);   /* кг, 2,2: груз и ротор, приведённые к нити */
+var E_POLN = M * G * H0;   /* Дж, 29,43: убыль потенциальной энергии за весь спуск */
+var H = 1 / 1200;          /* с, шаг схемы: у короткого замыкания τ = 0,022 с, это 26 шагов */
+var POROG = 0.01;          /* вышел на установившуюся: отстаёт от неё меньше чем на процент */
+
+/* Положения ползунка: край «короткое замыкание», ряд E6 от 1 до 100 Ом и
+   край «цепь разомкнута», у которого сопротивление бесконечно. */
+var RYAD = [0, 1, 1.5, 2.2, 3.3, 4.7, 6.8, 10, 15, 22, 33, 47, 68, 100, Infinity];
+var R_NACH = 7;            /* 10 Ом, середина ряда */
+
+function razomknuta(R) { return R === Infinity; }
+
+/* Коэффициент торможения k²/(ρ²(R + r)), кг/с: тормозящая сила, приведённая
+   к нити, есть его произведение на скорость. */
+function tormoz(R) { return razomknuta(R) ? 0 : K_G * K_G / (RHO * RHO * (R + R_OB)); }
+
+/* Ток: ЭДС kω на полное сопротивление цепи, ω = v/ρ. */
+function tok(R, v) { return razomknuta(R) ? 0 : K_G * v / RHO / (R + R_OB); }
+
+/* Установившаяся скорость mgρ²(R + r)/k² и время подхода к ней; у
+   разомкнутой цепи их нет. */
+function vUst(R) { return razomknuta(R) ? null : M * G * RHO * RHO * (R + R_OB) / (K_G * K_G); }
+function tauUst(R) { return razomknuta(R) ? null : M_PR / tormoz(R); }
+
+/* Правая часть: производные пути, скорости и двух теплот. Все четыре
+   зависят только от скорости, и пробы Рунге–Кутты берутся по ней. У
+   разомкнутой цепи ток ноль, и 0·∞ в лампочке получиться не должно. */
+function proizv(R, v) {
+  var I = tok(R, v);
+  return [v,
+          (M * G - tormoz(R) * v) / M_PR,
+          razomknuta(R) ? 0 : I * I * R,      /* мощность в лампочке, Вт */
+          I * I * R_OB];                       /* мощность в обмотке, Вт */
+}
+
+function shagRK(R, s, h) {
+  var k1 = proizv(R, s[1]);
+  var k2 = proizv(R, s[1] + h / 2 * k1[1]);
+  var k3 = proizv(R, s[1] + h / 2 * k2[1]);
+  var k4 = proizv(R, s[1] + h * k3[1]);
+  var o = [];
+  for (var i = 0; i < 4; i++) o.push(s[i] + h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]));
+  return o;
+}
+
+/* Модель: сопротивление, время, четвёрка [путь вниз, скорость, тепло в
+   лампочке, тепло в обмотке], флаг «у пола», место выхода на
+   установившуюся скорость и след для графика, пары [путь, скорость]. */
+function sozdat(R) {
+  return { R: R, t: 0, s: [0, 0, 0, 0], pol: false, yVyshel: null, tVyshel: null,
+           sled: [[0, 0]] };
+}
+
+/* Продвинуть модель на dt. Шаг не длиннее H. Тот шаг, на котором путь
+   перевалил бы за h, переигрывается укороченным, и его длина f ищется
+   Ньютоном по пути, dy/df = v: первая прикидка линейная, четырёх итераций
+   хватает до последнего знака. След пишется, когда груз сдвинулся на 3 мм
+   или скорость изменилась на 5 мм/с: так кривая одинаково гладкая и в
+   кадре, и при прогоне крупными шагами. */
+function prodvinut(m, dt) {
+  if (m.pol || !(dt > 0)) return;
+  var n = Math.ceil(dt / H - 1e-9), h = dt / n, vu = vUst(m.R);
+  for (var i = 0; i < n && !m.pol; i++) {
+    var s1 = shagRK(m.R, m.s, h);
+    if (s1[0] >= H0) {
+      var f = h * (H0 - m.s[0]) / (s1[0] - m.s[0]);
+      for (var k = 0; k < 4; k++) { var q = shagRK(m.R, m.s, f); f -= (q[0] - H0) / q[1]; }
+      m.s = shagRK(m.R, m.s, f); m.t += f; m.pol = true;
+    } else { m.s = s1; m.t += h; }
+    if (m.yVyshel === null && vu !== null && m.s[1] >= (1 - POROG) * vu) {
+      m.yVyshel = m.s[0]; m.tVyshel = m.t;
+    }
+    var last = m.sled[m.sled.length - 1];
+    if (m.pol || m.s[0] - last[0] >= 0.003 || Math.abs(m.s[1] - last[1]) >= 0.005)
+      m.sled.push([m.s[0], m.s[1]]);
+  }
+}
+
+/* Точное решение того же уравнения из покоя: к нему обязан сойтись счёт. */
+function tochno(R, t) {
+  if (razomknuta(R)) return M * G / M_PR * t;
+  return vUst(R) * (1 - Math.exp(-t / tauUst(R)));
+}
+
+/* Показания: всё, что демка утверждает, в единицах СИ. Пишутся в
+   переданный объект на месте: автопроверка держит ссылку на него. */
+function pokazaniya(m, p) {
+  var R = m.R, y = m.s[0], v = m.s[1], I = tok(R, v), om = v / RHO;
+  p.R = R;                                  /* Ом; 0 у замыкания, Infinity у разомкнутой */
+  p.circuit = R === 0 ? 'short' : razomknuta(R) ? 'open' : 'lamp';
+  p.t = m.t;
+  p.y = y;                                  /* м, путь вниз от старта */
+  p.height = H0 - y;                        /* м, низ груза над полом */
+  p.v = v;                                  /* м/с, вниз */
+  p.omega = om;                             /* рад/с, шкив */
+  p.vTerminal = vUst(R);                    /* м/с, по формуле; у разомкнутой null */
+  p.tau = tauUst(R);
+  p.current = I;                            /* А */
+  p.powerLamp = razomknuta(R) ? 0 : I * I * R;
+  p.powerWinding = I * I * R_OB;
+  p.lostPotential = M * G * y;
+  p.kineticLoad = M * v * v / 2;
+  p.kineticRotor = J_ROT * om * om / 2;
+  p.kinetic = p.kineticLoad + p.kineticRotor;
+  p.heatLamp = m.s[2];                      /* ∫I²R dt */
+  p.heatWinding = m.s[3];                   /* ∫I²r dt */
+  p.sum = p.kinetic + p.heatLamp + p.heatWinding;
+  p.balanceError = (p.sum - p.lostPotential) / E_POLN;   /* доля от mgh, со знаком */
+  p.vExact = tochno(R, m.t);
+  p.exactError = v - p.vExact;              /* м/с, счёт против точного решения */
+  p.yReached = m.yVyshel;                   /* м пути до выхода на установившуюся */
+  p.tReached = m.tVyshel;
+  p.done = m.pol;
+  p.tDescent = m.pol ? m.t : null;
+  return p;
+}
+
+/* Прогон без экрана до пола; возвращает итоговые показания. Им считается
+   сводка по положениям ползунка, его же зовёт __demoProgon. */
+function progon(R, dt) {
+  var m = sozdat(R), h = dt || 1 / 60, n = 0;
+  while (!m.pol && n++ < 1e6) prodvinut(m, h);
+  return pokazaniya(m, {});
+}
+/* ── конец чистой физики ── */
+
+/* Сводка по всем положениям ползунка, один раз при загрузке. Скорость у
+   пола задаёт шкалу графика, наибольшая мощность лампочки задаёт полный
+   накал рисунка. Из покоя скорость только растёт, поэтому пик мощности у
+   каждого R приходится на касание пола. */
+var SVODKA = RYAD.map(function (R) { return progon(R, 0.05); });
+var P_MAX = Math.max.apply(null, SVODKA.map(function (s) { return s.powerLamp; }));
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева установка: генератор под потолком, шкив со спицами, нить и груз,
+   лампочка на проводах. Справа от груза график скорости, у которого высота
+   идёт вниз в том же масштабе, что путь груза: конец кривой всегда на
+   одной высоте с грузом, и видно, на какой высоте скорость перестала расти.
+   Левая ось графика служит линейкой высоты. Скорость по горизонтали, шкала
+   своя у каждого R, чтобы установившаяся стояла на двух третях ширины.
+
+   Справа два столбика: убыль потенциальной энергии и четыре статьи, куда
+   она ушла. Масштаб столбиков выбран так, что убыль за весь спуск занимает
+   ровно высоту спуска на рисунке, и синий столбик растёт на столько же
+   пикселей, на сколько опустился груз (синяя полоса у пути груза того же
+   цвета). Цвета статей повторяются на установке: груз бирюзовый, спицы
+   ротора фиолетовые, лампочка светит янтарём, корпус генератора краснеет
+   по накопленному теплу обмотки.
+
+   Яркость лампочки идёт по мощности I²R: альфа свечения растёт как корень
+   из доли мощности, полный накал равен самой яркой вспышке на ползунке
+   (68 Ом у пола). Линейная шкала погасила бы средние положения до
+   неразличимости. */
+
+var W = 1000, HGT = 460;
+var PX = 150, PY = 66;                 /* ось генератора и шкива */
+var R_KORP = 30, R_SHK = 20;           /* px, корпус и шкив: не в масштабе */
+var NX = PX + R_SHK;                   /* нить сходит со шкива справа */
+var GRUZ_W = 44, GRUZ_H = 36;          /* px, груз */
+var Y0 = 140, Y_POL = 420;             /* низ груза на старте и пол */
+var SCY = (Y_POL - Y0) / H0;           /* px на метр по вертикали, 186,7 */
+var SCE = (Y_POL - Y0) / E_POLN;       /* px на джоуль: mgh во всю высоту спуска */
+var Y_POLOV = Y0 + H0 / 2 * SCY;       /* половина спуска */
+var GX0 = 262, GX1 = 560;              /* поле графика скорости */
+var KX = [594, 648], KW = 44;          /* столбики: убыль и четыре статьи */
+var LX = 712, LXR = 990;               /* легенда: левый край и правый край чисел */
+var LY = [172, 212, 244, 276, 308];    /* строки легенды: убыль отдельно, статьи вместе */
+var LAMPA = { x: 52, y: 72 };          /* центр колбы */
+var MONO = '"JetBrains Mono", ui-monospace, monospace';
+var TAU2 = 6.2832;
+
+/* Цвета данных от темы не зависят. Синий у убыли высоты тот же, что у веса
+   в «ракете»; бирюза скорости из рисунков главы у груза; фиолетовый у
+   ротора; янтарь у лампочки; красная охра у нагрева обмотки. */
+var C_POT = '122,166,255';
+var C_GRUZ = '77,182,198';
+var C_ROT = '167,139,250';
+var C_LAMP = '245,180,50';
+var C_OBM = '224,108,82';
+
+/* Русская запятая и настоящий минус; остатки счёта в последних знаках
+   печатались бы как «−0,00», а ноль есть ноль. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function omy(R) { return num(R, R % 1 ? 1 : 0) + ' Ом'; }
+
+/* Подпись ползунка добита неразрывными пробелами до длины самой длинной:
+   значение моноширинное, и рейка не прыгает, пока ручку ведут по ряду. */
+function podpisPolzunka(R) {
+  var s = R === 0 ? 'короткое замыкание' : razomknuta(R) ? 'цепь разомкнута' : 'лампочка ' + omy(R);
+  while (s.length < 18) s += ' ';
+  return s;
+}
+
+/* Ближайший круглый шаг оси: 1, 2, 5 на степень десяти. */
+function krasivo(x) {
+  var p = Math.pow(10, Math.floor(Math.log10(x))), r = x / p;
+  return (r < 1.5 ? 1 : r < 3.5 ? 2 : r < 7.5 ? 5 : 10) * p;
+}
+
+/* Шкала скорости для положения ползунка: наибольшая из скорости у пола и
+   установившейся, с запасом в 1,4 раза, чтобы справа от пунктира
+   установившейся влезла её подпись. */
+function osSkorosti(i) {
+  var s = SVODKA[i], top = 1.4 * Math.max(s.v, s.vTerminal || 0), d = krasivo(top / 4);
+  return { d: d, max: Math.ceil(top / d - 1e-9) * d };
+}
+
+/* Положение ползунка, ближайшее к заданному сопротивлению. */
+function blizhajshij(R) {
+  var best = 0, bd = Infinity;
+  RYAD.forEach(function (x, i) {
+    var d = x === R ? 0 : (razomknuta(x) || razomknuta(R)) ? Infinity : Math.abs(x - R);
+    if (d < bd) { bd = d; best = i; }
+  });
+  return best;
+}
+
+/* Показания живут в одном объекте весь сеанс и правятся на месте:
+   автопроверка читает его после __demoTick, когда рендера не было. */
+var POKAZ = {};
+window.__demoState = POKAZ;
+
+function GruzGenerator() {
+  /* До «Пуска» опыт стоит: груз на старте, столбики пусты. Так же ведут
+     себя демки третьей недели (решение автора 11.09). */
+  var ref0 = useRef(null);
+  if (!ref0.current) {
+    ref0.current = { i: R_NACH, run: false, fazaUi: 'start' };
+    sobrat(ref0.current);
+  }
+  var S = ref0.current;
+  /* Пара берётся из одного вызова useState: два отдельных дают два
+     независимых состояния, и рейка перестаёт отзываться на ползунок. */
+  var pair = useState({ i: R_NACH, run: false, faza: 'start' });
+  var ui = pair[0], setUi = pair[1];
+
+  /* Новый опыт по текущему положению ползунка: груз на старте. */
+  function sobrat(s) {
+    s.m = sozdat(RYAD[s.i]);
+    s.os = osSkorosti(s.i);
+    s.fazaUi = 'start';
+    pokazaniya(s.m, POKAZ);
+    POKAZ.run = !!s.run; POKAZ.faza = 'start';
+    POKAZ.lampBrightness = 0; POKAZ.pMax = P_MAX;
+  }
+
+  /* Фазы опыта: start — стоим до «Пуска»; razgon — скорость растёт;
+     ustanov — вышла на установившуюся; svobodno — цепь разомкнута и груз
+     падает; pauza; pol — груз коснулся пола, опыт кончился. */
+  function faza() {
+    var m = S.m;
+    if (m.pol) return 'pol';
+    if (!S.run) return m.t === 0 ? 'start' : 'pauza';
+    if (razomknuta(m.R)) return 'svobodno';
+    return m.yVyshel === null ? 'razgon' : 'ustanov';
+  }
+
+  function sync() { setUi({ i: S.i, run: S.run, faza: S.fazaUi }); }
+
+  /* Показания пишутся из шага, а не из отрисовки: автопроверка двигает
+     модель через __demoTick, рендера при этом нет. Рендер только на смене
+     фазы: строка показаний и кнопка меняются тогда. */
+  function otmetit() {
+    pokazaniya(S.m, POKAZ);
+    POKAZ.lampBrightness = Math.sqrt(C.clamp(POKAZ.powerLamp / P_MAX, 0, 1));
+    var f = faza();
+    POKAZ.run = S.run; POKAZ.faza = f;
+    if (f !== S.fazaUi) { S.fazaUi = f; sync(); }
+  }
+
+  /* Кадр: модельное время идёт в реальном темпе. Разомкнутая цепь роняет
+     груз за 0,58 с, короткое замыкание опускает его 7,7 с, и эту разницу
+     зал должен увидеть глазами. */
+  function step(dt) {
+    if (!S.run) return;
+    prodvinut(S.m, dt);
+    if (S.m.pol) S.run = false;
+    otmetit();
+  }
+
+  /* ── установка ── */
+
+  function ustanovka(ctx, tone) {
+    var ink = tone.ink, muted = tone.muted;
+    var m = S.m, R = m.R, p = POKAZ;
+    var y = m.s[0], om = m.s[1] / RHO;
+    var yb = Y0 + y * SCY;                           /* низ груза */
+    var mut = 'rgba(' + muted + ',.95)';
+    var i;
+
+    /* половина спуска: пунктир через путь груза и график */
+    ctx.save();
+    ctx.setLineDash([4, 6]);
+    ctx.strokeStyle = 'rgba(' + muted + ',.55)'; ctx.lineWidth = 1.3;
+    ctx.beginPath(); ctx.moveTo(118, Y_POLOV); ctx.lineTo(GX1, Y_POLOV); ctx.stroke();
+    ctx.restore();
+    C.label(ctx, 16, Y_POLOV - 8, 'половина спуска', 17, mut, 'left');
+
+    /* потолок и кронштейн */
+    ctx.strokeStyle = 'rgba(' + ink + ',.55)'; ctx.lineWidth = 2.5; ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(PX - 36, 20); ctx.lineTo(PX + 36, 20); ctx.stroke();
+    ctx.strokeStyle = 'rgba(' + ink + ',.28)'; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (i = PX - 30; i <= PX + 36; i += 9) { ctx.moveTo(i, 19); ctx.lineTo(i - 7, 12); }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(' + ink + ',.55)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(PX, 20); ctx.lineTo(PX, PY - R_KORP); ctx.stroke();
+
+    /* ── цепь: провода, лампочка, ключ или перемычка ── */
+    var L = LAMPA;
+    var b = Math.sqrt(C.clamp(p.powerLamp / P_MAX, 0, 1));
+    if (b > 0.02) C.glow(ctx, L.x, L.y, 20 + 56 * b, C_LAMP, 0.8 * b);
+
+    ctx.strokeStyle = 'rgba(' + ink + ',.6)'; ctx.lineWidth = 2;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    /* верхний провод: от вывода генератора к боковому контакту цоколя;
+       у разомкнутой цепи в нём открыт ключ */
+    if (razomknuta(R)) {
+      ctx.moveTo(120, 56); ctx.lineTo(112, 56);
+      ctx.moveTo(96, 56); ctx.lineTo(110, 47);
+      ctx.moveTo(96, 56);
+    } else ctx.moveTo(120, 56);
+    ctx.lineTo(84, 56); ctx.lineTo(84, 92); ctx.lineTo(L.x + 7, 92);
+    /* нижний провод: ко дну цоколя */
+    ctx.moveTo(120, 78); ctx.lineTo(100, 78); ctx.lineTo(100, 110);
+    ctx.lineTo(L.x, 110); ctx.lineTo(L.x, L.y + 26);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(' + ink + ',.75)';
+    (razomknuta(R) ? [[120, 56], [120, 78], [96, 56], [112, 56]] : [[120, 56], [120, 78]])
+      .forEach(function (q) { ctx.beginPath(); ctx.arc(q[0], q[1], 2.6, 0, TAU2); ctx.fill(); });
+    /* короткое замыкание: перемычка между проводами мимо лампочки */
+    if (R === 0) {
+      ctx.strokeStyle = 'rgb(' + C_OBM + ')'; ctx.lineWidth = 3.4;
+      ctx.beginPath(); ctx.moveTo(84, 84); ctx.lineTo(100, 84); ctx.stroke();
+      ctx.fillStyle = 'rgb(' + C_OBM + ')';
+      [84, 100].forEach(function (x) { ctx.beginPath(); ctx.arc(x, 84, 3, 0, TAU2); ctx.fill(); });
+    }
+
+    /* колба, нить накала, цоколь */
+    ctx.beginPath(); ctx.arc(L.x, L.y, 15, 0, TAU2);
+    ctx.fillStyle = 'rgba(' + C_LAMP + ',' + (0.1 + 0.85 * b).toFixed(3) + ')'; ctx.fill();
+    ctx.strokeStyle = 'rgba(' + ink + ',.6)'; ctx.lineWidth = 1.6; ctx.stroke();
+    ctx.strokeStyle = b > 0.02 ? 'rgba(255,244,214,' + (0.55 + 0.45 * b).toFixed(3) + ')'
+                               : 'rgba(' + ink + ',.45)';
+    ctx.lineWidth = 1.4; ctx.lineJoin = 'miter';
+    ctx.beginPath();
+    ctx.moveTo(L.x - 5, L.y + 13); ctx.lineTo(L.x - 5, L.y + 1);
+    for (i = 0; i < 5; i++) ctx.lineTo(L.x - 5 + (i + 0.5) * 2, L.y + (i % 2 ? 1 : -3));
+    ctx.lineTo(L.x + 5, L.y + 1); ctx.lineTo(L.x + 5, L.y + 13);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(' + ink + ',.4)';
+    C.roundRect(ctx, L.x - 7, L.y + 14, 14, 12, 2); ctx.fill();
+    C.label(ctx, L.x, L.y - 26, razomknuta(R) ? 'разомкнута' : R === 0 ? 'накоротко' : omy(R),
+            17, mut);
+
+    /* ── генератор: корпус краснеет по накопленному теплу обмотки, как
+       нагрелся бы, если бы тепло не уходило ── */
+    ctx.beginPath(); ctx.arc(PX, PY, R_KORP, 0, TAU2);
+    ctx.fillStyle = 'rgba(' + ink + ',.07)'; ctx.fill();
+    var nagrev = C.clamp(p.heatWinding / E_POLN, 0, 1);
+    if (nagrev > 0.003) {
+      ctx.fillStyle = 'rgba(' + C_OBM + ',' + (0.7 * nagrev).toFixed(3) + ')'; ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(' + ink + ',.6)'; ctx.lineWidth = 2; ctx.stroke();
+    C.label(ctx, PX + R_KORP + 10, PY - 10, 'генератор', 17, mut, 'left');
+
+    /* Шкив: спицы повёрнуты на настоящий угол y/ρ. На быстром ходу они
+       тают в размытый диск: при 100 рад/с кадр в 1/60 с поворачивает шкив
+       на 1,7 рад, и чёткие спицы дали бы стробоскоп, крутящийся не туда. */
+    var razmyt = C.clamp((om - 15) / 60, 0, 1);
+    ctx.beginPath(); ctx.arc(PX, PY, R_SHK, 0, TAU2);
+    ctx.fillStyle = 'rgba(' + C_ROT + ',' + (0.12 + 0.3 * razmyt).toFixed(3) + ')'; ctx.fill();
+    ctx.strokeStyle = 'rgba(' + ink + ',.85)'; ctx.lineWidth = 2.2; ctx.stroke();
+    var fi = y / RHO;
+    ctx.strokeStyle = 'rgba(' + C_ROT + ',' + (1 - 0.8 * razmyt).toFixed(3) + ')';
+    ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (i = 0; i < 3; i++) {
+      var a = fi + i * TAU2 / 3;
+      ctx.moveTo(PX, PY);
+      ctx.lineTo(PX + (R_SHK - 3) * Math.cos(a), PY + (R_SHK - 3) * Math.sin(a));
+    }
+    ctx.stroke();
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(PX, PY, 3.5, 0, TAU2); ctx.fill();
+
+    /* пол */
+    ctx.strokeStyle = 'rgba(' + ink + ',.6)'; ctx.lineWidth = 2.5; ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(104, Y_POL); ctx.lineTo(236, Y_POL); ctx.stroke();
+    ctx.strokeStyle = 'rgba(' + ink + ',.28)'; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (i = 112; i <= 236; i += 10) { ctx.moveTo(i, Y_POL + 2); ctx.lineTo(i - 8, Y_POL + 10); }
+    ctx.stroke();
+
+    /* пройденная высота: синяя полоса у пути груза, та же длина, что у
+       синего столбика справа */
+    if (y > 0) {
+      ctx.fillStyle = 'rgba(' + C_POT + ',.85)';
+      ctx.fillRect(NX - GRUZ_W / 2 - 14, Y0, 6, y * SCY);
+    }
+
+    /* нить и груз */
+    ctx.strokeStyle = 'rgba(' + ink + ',.8)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(NX, PY); ctx.lineTo(NX, yb - GRUZ_H); ctx.stroke();
+    C.roundRect(ctx, NX - GRUZ_W / 2, yb - GRUZ_H, GRUZ_W, GRUZ_H, 4);
+    ctx.fillStyle = 'rgba(' + C_GRUZ + ',.92)'; ctx.fill();
+    C.label(ctx, NX, yb - 12, '2 кг', 17, '#06080f');
+  }
+
+  /* ── график скорости: высота вниз, как путь груза ── */
+
+  function grafik(ctx, tone) {
+    var ink = tone.ink, muted = tone.muted, m = S.m, os = S.os;
+    var mut = 'rgba(' + muted + ',.95)';
+    var dec = os.d < 0.099 ? 2 : os.d < 0.99 ? 1 : 0;
+    var k, x, yy;
+    function gx(v) { return GX0 + v / os.max * (GX1 - GX0); }
+
+    C.label(ctx, GX0, 100, 'скорость груза, м/с', 17, mut, 'left');
+    for (k = 0; k * os.d <= os.max + 1e-9; k++) {
+      x = gx(k * os.d);
+      if (k) {
+        ctx.strokeStyle = 'rgba(' + ink + ',.07)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, Y0); ctx.lineTo(x, Y_POL); ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.6; ctx.lineCap = 'butt';
+      ctx.beginPath(); ctx.moveTo(x, Y0 - 6); ctx.lineTo(x, Y0); ctx.stroke();
+      C.label(ctx, x, Y0 - 12, num(k * os.d, dec), 17, mut);
+    }
+
+    /* левая ось: высота низа груза над полом */
+    ctx.strokeStyle = 'rgba(' + ink + ',.45)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(GX0, Y0); ctx.lineTo(GX0, Y_POL); ctx.lineTo(GX1, Y_POL); ctx.stroke();
+    [1.5, 1, 0.5, 0].forEach(function (hv) {
+      yy = Y0 + (H0 - hv) * SCY;
+      ctx.strokeStyle = 'rgba(' + muted + ',.6)';
+      ctx.beginPath(); ctx.moveTo(GX0 - 6, yy); ctx.lineTo(GX0, yy); ctx.stroke();
+      C.label(ctx, GX0 - 10, yy + 6, hv ? num(hv, hv % 1 ? 1 : 0) + ' м' : '0', 17, mut, 'right');
+    });
+
+    /* Установившаяся скорость по формуле: пунктир и подпись справа от него.
+       Из покоя скорость подходит к ней снизу, поэтому правее пунктира кривой
+       не бывает, и подпись там ни на что не ляжет. */
+    var vu = vUst(m.R);
+    if (vu !== null && vu <= os.max) {
+      x = gx(vu);
+      ctx.save();
+      ctx.setLineDash([5, 5]);
+      ctx.strokeStyle = 'rgba(' + ink + ',.55)'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(x, Y0); ctx.lineTo(x, Y_POL); ctx.stroke();
+      ctx.restore();
+      C.label(ctx, x + 7, Y0 + 24, 'установившаяся', 17, 'rgba(' + ink + ',.9)', 'left');
+    }
+
+    /* след счёта и текущая высота */
+    var xt = gx(m.s[1]), yt = Y0 + m.s[0] * SCY;
+    if (m.t > 0) {
+      ctx.save();
+      ctx.setLineDash([3, 5]);
+      ctx.strokeStyle = 'rgba(' + ink + ',.3)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(GX0 + 2, yt); ctx.lineTo(xt - 8, yt); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.strokeStyle = 'rgb(' + C_GRUZ + ')'; ctx.lineWidth = 3;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    m.sled.forEach(function (q, j) {
+      var px = gx(q[1]), py = Y0 + q[0] * SCY;
+      if (j) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+    });
+    ctx.lineTo(xt, yt);
+    ctx.stroke();
+    ctx.fillStyle = 'rgb(' + C_GRUZ + ')';
+    ctx.beginPath(); ctx.arc(xt, yt, 5.5, 0, TAU2); ctx.fill();
+  }
+
+  /* ── энергия: два столбика и легенда ── */
+
+  function stolbik(ctx, x, e0, e, rgb) {
+    if (e * SCE < 0.05) return;
+    ctx.fillStyle = 'rgba(' + rgb + ',.9)';
+    ctx.fillRect(x, Y_POL - (e0 + e) * SCE, KW, e * SCE);
+  }
+
+  function chislo(ctx, x, y, s, color) {
+    ctx.font = '600 17px ' + MONO;
+    ctx.textAlign = 'right';
+    ctx.fillStyle = color;
+    ctx.fillText(s, x, y);
+  }
+
+  function energiya(ctx, tone) {
+    var ink = tone.ink, muted = tone.muted, acc = tone.accent, p = POKAZ;
+    var mut = 'rgba(' + muted + ',.95)', cInk = 'rgb(' + ink + ')';
+
+    /* баки: полная высота есть убыль за весь спуск */
+    ctx.strokeStyle = 'rgba(' + ink + ',.22)'; ctx.lineWidth = 1.2;
+    KX.forEach(function (x) { ctx.strokeRect(x + 0.5, Y0 + 0.5, KW - 1, Y_POL - Y0 - 1); });
+    stolbik(ctx, KX[0], 0, p.lostPotential, C_POT);
+    /* статьи снизу вверх в обратном порядке легенды: сверху кинетическая,
+       которая на установившемся ходу стоит, под ней копится тепло */
+    var niz = 0;
+    [[p.heatWinding, C_OBM], [p.heatLamp, C_LAMP], [p.kineticRotor, C_ROT], [p.kineticLoad, C_GRUZ]]
+      .forEach(function (st) { stolbik(ctx, KX[1], niz, st[0], st[1]); niz += st[0]; });
+    ctx.strokeStyle = 'rgba(' + ink + ',.6)'; ctx.lineWidth = 2; ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(KX[0] - 8, Y_POL); ctx.lineTo(KX[1] + KW + 8, Y_POL); ctx.stroke();
+    C.label(ctx, (KX[0] + KX[1] + KW) / 2, Y0 - 12, 'всего ' + num(E_POLN, 2) + ' Дж', 17, mut);
+    C.label(ctx, KX[0] + KW / 2, Y_POL + 26, 'ушло', 17, mut);
+    C.label(ctx, KX[1] + KW / 2, Y_POL + 26, 'нашлось', 17, mut);
+
+    var rows = [
+      ['убыль потенциальной', p.lostPotential, C_POT],
+      ['кинетическая груза', p.kineticLoad, C_GRUZ],
+      ['кинетическая ротора', p.kineticRotor, C_ROT],
+      ['тепло в лампочке', p.heatLamp, C_LAMP],
+      ['тепло в обмотке', p.heatWinding, C_OBM]
+    ];
+    rows.forEach(function (r, k) {
+      var yy = LY[k];
+      C.roundRect(ctx, LX, yy - 11, 12, 12, 2);
+      ctx.fillStyle = 'rgb(' + r[2] + ')'; ctx.fill();
+      C.label(ctx, LX + 20, yy, r[0], 17, 'rgba(' + ink + ',.92)', 'left');
+      chislo(ctx, LXR, yy, num(r[1], 2) + ' Дж', cInk);
+    });
+    var ys = LY[4] + 20;
+    ctx.strokeStyle = 'rgba(' + ink + ',.3)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(LX + 20, ys); ctx.lineTo(LXR, ys); ctx.stroke();
+    C.label(ctx, LX + 20, ys + 28, 'сумма четырёх статей', 17, mut, 'left');
+    chislo(ctx, LXR, ys + 28, num(p.sum, 2) + ' Дж', cInk);
+    C.label(ctx, LX + 20, ys + 60, 'расхождение с убылью', 17, mut, 'left');
+    chislo(ctx, LXR, ys + 60, num(Math.abs(p.balanceError) * 100, 4) + ' %', 'rgb(' + acc + ')');
+  }
+
+  /* ── приборы над графиком ── */
+
+  function pribory(ctx, tone) {
+    var cInk = 'rgb(' + tone.ink + ')', p = POKAZ;
+    C.readout(ctx, 440, 34, 'скорость, м/с', num(p.v, 3), 'rgb(' + C_GRUZ + ')');
+    C.readout(ctx, 650, 34, 'установившаяся, м/с',
+              p.vTerminal === null ? '—' : num(p.vTerminal, 3), cInk);
+    C.readout(ctx, 800, 34, 'ток, А', num(p.current, 2), cInk);
+    C.readout(ctx, 990, 34, 'лампочка, Вт', num(p.powerLamp, 1), 'rgb(' + C_LAMP + ')');
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    ustanovka(ctx, tone);
+    grafik(ctx, tone);
+    energiya(ctx, tone);
+    pribory(ctx, tone);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Прогон без мыши. __demoPusk(R) ставит ползунок на ближайшее к R
+     положение (0 — замыкание, Infinity — разомкнутая цепь) и пускает груз
+     с верха; дальше его двигает __demoTick. __demoProgon(R) гонит модель
+     до пола без экрана при любом R и отдаёт итоговые показания. */
+  window.__demoPusk = function (R) {
+    if (R != null) S.i = blizhajshij(R);
+    S.run = true; sobrat(S); otmetit(); sync();
+    return RYAD[S.i];
+  };
+  window.__demoProgon = function (R, dt) { return progon(R == null ? RYAD[S.i] : R, dt); };
+  window.__demoModel = { sozdat: sozdat, prodvinut: prodvinut, pokazaniya: pokazaniya,
+                         progon: progon, tochno: tochno, vUst: vUst, tauUst: tauUst, tok: tok,
+                         RYAD: RYAD, SVODKA: SVODKA, P_MAX: P_MAX, H: H, M_PR: M_PR,
+                         E_POLN: E_POLN };
+
+  /* «Пуск» отпускает груз, на ходу ставит паузу, после пола повторяет опыт
+     с верха. «Сброс» ставит груз на старт и ждёт «Пуска». */
+  function pusk() {
+    if (S.m.pol) { S.run = true; sobrat(S); }
+    else S.run = !S.run;
+    otmetit(); sync();
+  }
+  function sbros() { S.run = false; sobrat(S); otmetit(); sync(); }
+  /* Ползунок начинает опыт заново: кривая с изломом посередине читалась бы
+     как две кривые, а шкала графика у каждого R своя. */
+  function vybrat(v) { S.i = C.clamp(Math.round(v), 0, RYAD.length - 1); sbros(); }
+
+  /* Строка показаний пересказывает кадр словами; числа в ней те же, что
+     на сцене. Коротко: в витрине строке отведено две-три строки. */
+  function slova() {
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var m = S.m, R = m.R, p = POKAZ, f = S.fazaUi;
+    var otkr = razomknuta(R), kz = R === 0;
+    var Is = num(M * G * RHO / K_G, 2) + ' А';
+    if (f === 'start') {
+      var nach = 'Груз 2 кг висит на нити, намотанной на шкив генератора, в 1,5 м над ' +
+        'полом; запас его потенциальной энергии ' + A(num(E_POLN, 2) + ' Дж') + '. ';
+      if (otkr) return nach + 'Цепь разомкнута, тока не будет, и генератор груз не ' +
+        'тормозит. «Пуск» отпускает груз.';
+      if (kz) return nach + 'Выводы генератора замкнуты накоротко, лампочка вне цепи. ' +
+        '«Пуск» отпускает груз.';
+      return nach + 'Генератор нагружен лампочкой ' + A(omy(R)) + '. «Пуск» отпускает груз.';
+    }
+    if (f === 'pauza')
+      return 'Пауза: груз прошёл ' + A(num(p.y, 2) + ' м') + ' из 1,5, лампочка получила ' +
+        num(p.heatLamp, 2) + ' Дж, обмотка ' + num(p.heatWinding, 2) + ' Дж.';
+    if (f === 'svobodno')
+      return 'Тока нет, генератор не тормозит, и груз падает почти свободно: с ускорением ' +
+        A('8,92 м/с²') + ' вместо 9,81, потому что вместе с ним разгоняется ротор. Вся ' +
+        'убыль потенциальной энергии уходит в кинетическую.';
+    if (f === 'razgon')
+      return 'Груз разгоняется. Чем быстрее он идёт, тем больше ЭДС и ток и тем сильнее ток ' +
+        'тормозит шкив.';
+    if (f === 'ustanov') {
+      if (kz)
+        return 'Груз идёт ровно, ' + A(num(p.vTerminal, 3) + ' м/с') + ', медленнее, чем с ' +
+          'любой лампочкой: всё сопротивление цепи в обмотке, 4 Ом. Ток ' + Is + ', и вся ' +
+          'убыль потенциальной энергии уходит в нагрев обмотки.';
+      return 'Груз идёт ровно, ' + A(num(p.vTerminal, 3) + ' м/с') + ': тормозящий момент ' +
+        'тока уравновесил тяжесть, и ток ' + Is + ' от лампочки не зависит. Кинетическая ' +
+        'энергия больше не растёт, вся убыль потенциальной уходит в тепло лампочки и ' +
+        'обмотки, в отношении их сопротивлений ' + num(R, R % 1 ? 1 : 0) + ' к 4.';
+    }
+    /* груз у пола */
+    var za = 'Груз у пола через ' + A(num(p.t, 2) + ' с');
+    var itog = 'вместе ' + num(p.sum, 2) + ' Дж, убыль найдена целиком, расхождение ' +
+      num(Math.abs(p.balanceError) * 100, 4) + ' %.';
+    if (otkr)
+      return za + ' на скорости ' + num(p.v, 2) + ' м/с. Тока не было, тепла нет: ' +
+        A(num(p.kineticLoad, 2) + ' Дж') + ' в движении груза, ' +
+        A(num(p.kineticRotor, 2) + ' Дж') + ' во вращении ротора; ' + itog;
+    if (kz)
+      return za + ', самый медленный спуск. Лампочка вне цепи: ' +
+        A(num(p.heatWinding, 2) + ' Дж') + ' ушли в нагрев обмотки, ' +
+        num(p.kinetic, 2) + ' Дж осталось в движении; ' + itog;
+    var vyh = p.yReached !== null
+      ? ', на установившуюся скорость вышел за первые ' + num(p.yReached, 2) + ' м пути'
+      : ' и до установившейся скорости не дошёл: ' + num(p.v, 2) + ' м/с против ' +
+        num(p.vTerminal, 2);
+    return za + vyh + '. Лампочке досталось ' + A(num(p.heatLamp, 2) + ' Дж') +
+      ', обмотке ' + A(num(p.heatWinding, 2) + ' Дж') + ', движению груза и ротора ' +
+      A(num(p.kinetic, 2) + ' Дж') + '; ' + itog;
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+        <${C.Slider} label="Нагрузка:" min=${0} max=${RYAD.length - 1} step=${1}
+                     value=${ui.i} onChange=${vybrat}
+                     display=${podpisPolzunka(RYAD[ui.i])} />
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(GruzGenerator);
+</script>
+</body>
+</html>

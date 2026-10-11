@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как появляются гравитационные волны</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-05/">&larr; Неделя 05</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=gravitacionnye-volny"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `gravitacionnoe-pole`, абзац о том, почему появляются волны
+   (замечание автора 25.09 № 8: «явную демку того, как они появляются, с
+   комментариями почему»). Два равных тела обходят общий центр масс.
+   Изменение поля доходит до точки на расстоянии r через время r/c, и поле
+   там показывает, где тела были тогда.
+
+   ЕДИНИЦЫ. G = 1, полная масса M = m₁ + m₂ = 1, массы равны, приведённая
+   масса μ = 1/4. Начальное расстояние между телами a₀ = 1, угловая скорость
+   Ω = √(GM/a³), при a₀ она 1, период обращения 2π. Скорость каждого тела
+   Ωa/2; ползунок задаёт её в долях скорости света, отсюда c.
+
+   ЧТО СЧИТАЕТСЯ. Полная масса пары постоянна, и её вклад в поле, −GM/r,
+   стоит на месте: волн он не даёт. Центр масс неподвижен, дипольный момент
+   Σmᵢrᵢ всё время ноль, и он волн тоже не даёт. Первый меняющийся вклад
+   квадрупольный: Q_ij = Σ mᵢ (xᵢxⱼ − δᵢⱼ r²/3). Для него запаздывающее
+   решение волнового уравнения вне источника точное:
+       Φ ∝ nᵢnⱼ [ 3 Q_ij / r³ + 3 Q̇_ij / (c r²) + Q̈_ij / (c² r) ],
+   всё в запаздывающий момент t − r/c; n направление на точку. Q берётся из
+   положений тел, записанных в историю через каждые H = 0,02, производные
+   считаются разностями по истории, а не формулой. Вблизи пары главный
+   первый член, и узор поворачивается вместе с парой; вдали главный
+   последний, он спадает как 1/r и закручивается в спираль. Это поле
+   скалярной модели с запаздыванием; общая теория относительности даёт
+   поле тензорное, но картина та же: ближняя зона вращается, дальняя
+   уходит волной с удвоенной частотой обращения, потому что распределение
+   масс пары повторяется через пол-оборота.
+
+   ЯРКОСТЬ. Каждый член делится на свою огибающую, и узор видно на любом
+   расстоянии; настоящий спад по амплитуде (1/r³ вблизи, 1/r вдали) на
+   цвете не показан, это сказано в подписи.
+
+   СКОРОСТЬ СВЕТА БЕСКОНЕЧНА. Запаздывания нет, остаётся первый член в
+   текущий момент: узор поворачивается как целое, ничего не уходит.
+
+   ИЗЛУЧЕНИЕ УНОСИТ ЭНЕРГИЮ. Расстояние между телами убывает по формуле
+   Питерса: da/dt = −(64/5) G³ m₁ m₂ M / (c⁵ a³). Тела сближаются, частота
+   растёт, амплитуда растёт как a²Ω² ∝ 1/a; при a = 0,2 тела сливаются, и за
+   последней волной идёт тишина. Так сближается пульсар Халса и Тейлора, так
+   кончилось слияние, которое LIGO поймал в 2015 году. */
+
+var M = 1, M1 = 0.5, M2 = 0.5, MU = M1 * M2 / M, A0 = 1;
+var H = 0.02;                       /* шаг истории */
+var A_SLIYANIE = 0.2;
+var BETA_MIN = 0.1, BETA_MAX = 0.3, BETA_NACH = 0.15;
+var NG = 120;                       /* ячеек поля по стороне */
+var VOLN = 2.5;                     /* сколько длин волн помещается в радиус поля */
+
+function omega(a) { return Math.sqrt(M / (a * a * a)); }
+
+/* Второй момент масс пары (без следа) при расстоянии a и фазе ψ; тела на
+   расстояниях a·m₂/M и a·m₁/M от центра масс. Порядок: [Qxx, Qxy, Qyy]. */
+function kvadrupol(a, psi) {
+  var c = Math.cos(psi), s = Math.sin(psi);
+  var I = MU * a * a;                         /* Σ m r² */
+  var xx = I * c * c, xy = I * c * s, yy = I * s * s;
+  return [xx - I / 3, xy, yy - I / 3];
+}
+
+function Istoriya(betaB) {
+  /* скорость тела при a₀: Ω₀a₀·m₂/M; ползунок задаёт её в долях c */
+  this.c = omega(A0) * A0 * (M2 / M) / betaB;
+  this.lam = Math.PI * this.c / omega(A0);    /* длина волны 2πc/(2Ω) */
+  this.R = VOLN * this.lam;                   /* радиус поля */
+  this.t = 0; this.a = A0; this.psi = 0; this.slilis = false; this.tSl = null;
+  /* прошлое: до пуска пара ходила по окружности a₀ */
+  var nazad = this.R / this.c + 4 * H;
+  this.t0 = -Math.ceil(nazad / H) * H;
+  this.Q = [];
+  for (var t = this.t0; t <= 1e-9; t += H) this.Q.push(kvadrupol(A0, omega(A0) * t));
+}
+Istoriya.prototype.zapisat = function () {
+  this.Q.push(this.slilis ? [0, 0, 0] : kvadrupol(this.a, this.psi));
+};
+/* Q и производные в момент τ по истории; до начала истории прошлое
+   продолжено окружностью (история заведена с запасом). */
+Istoriya.prototype.v = function (tau) {
+  var i = (tau - this.t0) / H;
+  var n = this.Q.length;
+  var k = Math.floor(i), f = i - k;
+  if (k < 1) { k = 1; f = 0; }
+  if (k > n - 3) { k = n - 3; f = 1; }
+  var Q = this.Q, res = [];
+  for (var j = 0; j < 3; j++) {
+    var q0 = Q[k][j] * (1 - f) + Q[k + 1][j] * f;
+    var qm = Q[k - 1][j] * (1 - f) + Q[k][j] * f;
+    var qp = Q[k + 1][j] * (1 - f) + Q[k + 2][j] * f;
+    res.push([q0, (qp - qm) / (2 * H), (qp - 2 * q0 + qm) / (H * H)]);
+  }
+  return res;
+};
+
+/* Шаг пары на h: фаза по Ω(a), расстояние по Питерсу, если включены потери. */
+function shagPary(s, h, poteri) {
+  if (s.slilis) { s.t += h; return; }
+  var c5 = Math.pow(s.c, 5);
+  var da = poteri ? -(64 / 5) * M1 * M2 * M / (c5 * s.a * s.a * s.a) : 0;
+  /* два полушага, чтобы фаза шла по среднему Ω */
+  var a1 = s.a + da * h / 2;
+  s.psi += omega(Math.max(a1, A_SLIYANIE)) * h;
+  s.a = s.a + da * h;
+  s.t += h;
+  if (s.a <= A_SLIYANIE) { s.a = A_SLIYANIE; s.slilis = true; s.tSl = s.t; }
+}
+
+/* Значение поля в точке (x, y) на канве поля, отнесённое к огибающей. */
+function pole(ist, x, y, mgnovenno) {
+  var r = Math.hypot(x, y);
+  if (r < 1.2 * A0) return 0;
+  var nx = x / r, ny = y / r;
+  var Om = omega(A0);
+  var amp = MU * A0 * A0 / 2;                   /* амплитуда вращающейся части Q */
+  if (mgnovenno) {
+    var q = ist.slilis ? [0, 0, 0] : kvadrupol(ist.a, ist.psi);
+    var p = nx * nx * q[0] + 2 * nx * ny * q[1] + ny * ny * q[2];
+    return p / amp;
+  }
+  var d = ist.v(ist.t - r / ist.c);
+  var nn = function (k) { return nx * nx * d[0][k] + 2 * nx * ny * d[1][k] + ny * ny * d[2][k]; };
+  var c = ist.c;
+  var val = 3 * nn(0) / (r * r * r) + 3 * nn(1) / (c * r * r) + nn(2) / (c * c * r);
+  var env = 3 * amp / (r * r * r) + 3 * 2 * Om * amp / (c * r * r) + 4 * Om * Om * amp / (c * c * r);
+  return val / env;
+}
+
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева поле вокруг пары: бирюза там, где квадрупольная часть поля
+   положительна, охра где отрицательна. Пара сидит в центре; её в поле почти
+   не видно, поэтому справа окошко с увеличенной парой. Там же сигнал в
+   точке детектора (крестик на поле) за последние обороты и показания. */
+
+var W = 1000, HGT = 440;
+var PX = 220, PY = 220, PR = 205;               /* центр и радиус поля на канве */
+var GRX0 = 600, GRX1 = 980, GRY0 = 50, GRY1 = 190; /* график сигнала */
+var CPOS = [77, 182, 198], CNEG = [224, 138, 82];
+var OKNO = 1500;                                 /* точек в памяти графика */
+
+function GravVolny() {
+  var st = useRef(null);
+  if (!st.current) st.current = {
+    ist: new Istoriya(BETA_NACH), beta: BETA_NACH, mgnovenno: false, poteri: false,
+    idet: true, signal: [], nuli: [], img: null, off: null, buf: 0
+  };
+  var s = st.current;
+  var pair = useState({ beta: BETA_NACH, mgnovenno: false, poteri: false, idet: true });
+  var ui = pair[0], setUi = pair[1];
+
+  function obnovit() { setUi({ beta: s.beta, mgnovenno: s.mgnovenno, poteri: s.poteri, idet: s.idet }); pokazaniya(); }
+
+  function detektor() {
+    var ist = s.ist;
+    return { x: 0.8 * ist.R, y: 0 };
+  }
+
+  function izmerenie() {
+    /* период волны по последним переходам сигнала через ноль вверх */
+    var z = s.nuli;
+    var Tv = z.length >= 3 ? (z[z.length - 1] - z[z.length - 3]) / 2 : null;
+    var ist = s.ist, d = detektor();
+    /* Период обращения берётся по текущему расстоянию между телами. Без
+       потерь он тот же, что в запаздывающий момент, и отношение частот
+       честное; при потерях сигнал в детекторе отстаёт от пары, и отношение
+       не печатается. */
+    var Torb = 2 * Math.PI / omega(ist.a);
+    return { Tv: Tv, Torb: Torb, otn: Tv ? Torb / Tv : null, zap: Math.hypot(d.x, d.y) / ist.c / Torb };
+  }
+
+  function pokazaniya() {
+    var ist = s.ist, m = izmerenie();
+    window.__demoState = {
+      beta: s.beta, c: ist.c, lambda: ist.lam, t: ist.t, a: ist.a, omega: omega(ist.a),
+      merged: ist.slilis, instantaneous: s.mgnovenno, losses: s.poteri,
+      Twave: m.Tv, Torbit: m.Torb, ratio: m.otn, delayOrbits: m.zap,
+      signal: s.signal.length ? s.signal[s.signal.length - 1][1] : null
+    };
+  }
+
+  function nachat() {
+    s.ist = new Istoriya(s.beta); s.signal = []; s.nuli = []; s.buf = 0;
+    obnovit();
+  }
+
+  function step(dt) {
+    if (!s.idet) return;
+    var ist = s.ist;
+    s.buf += dt;
+    var d = detektor();
+    while (s.buf >= H) {
+      s.buf -= H;
+      shagPary(ist, H, s.poteri && !s.mgnovenno);
+      ist.zapisat();
+      var v = pole(ist, d.x, d.y, s.mgnovenno);
+      var pred = s.signal.length ? s.signal[s.signal.length - 1][1] : null;
+      s.signal.push([ist.t, v]);
+      if (s.signal.length > OKNO) s.signal.shift();
+      if (pred != null && pred < 0 && v >= 0) {
+        s.nuli.push(ist.t - H * v / (v - pred));
+        if (s.nuli.length > 8) s.nuli.shift();
+      }
+    }
+    pokazaniya();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted, mut = 'rgb(' + muted + ')';
+    var ist = s.ist, i, j;
+
+    /* поле: картинка NG×NG, растянутая на круг радиуса PR */
+    if (!s.off) {
+      s.off = document.createElement('canvas'); s.off.width = NG; s.off.height = NG;
+      s.img = s.off.getContext('2d').createImageData(NG, NG);
+    }
+    var data = s.img.data, R = ist.R;
+    for (j = 0; j < NG; j++) {
+      for (i = 0; i < NG; i++) {
+        var x = ((i + 0.5) / NG * 2 - 1) * R, y = (1 - (j + 0.5) / NG * 2) * R;
+        var k = 4 * (j * NG + i);
+        if (x * x + y * y > R * R) { data[k + 3] = 0; continue; }
+        var v = pole(ist, x, y, s.mgnovenno);
+        var col = v >= 0 ? CPOS : CNEG;
+        data[k] = col[0]; data[k + 1] = col[1]; data[k + 2] = col[2];
+        data[k + 3] = Math.round(255 * 0.8 * Math.tanh(1.3 * Math.abs(v)));
+      }
+    }
+    s.off.getContext('2d').putImageData(s.img, 0, 0);
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.beginPath(); ctx.arc(PX, PY, PR, 0, 2 * Math.PI); ctx.clip();
+    ctx.drawImage(s.off, PX - PR, PY - PR, 2 * PR, 2 * PR);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(' + muted + ',.45)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(PX, PY, PR, 0, 2 * Math.PI); ctx.stroke();
+
+    /* пара в центре и детектор */
+    var sc = PR / R;
+    var ca = Math.cos(ist.psi), sa = Math.sin(ist.psi);
+    var r1 = ist.a * M2 / M * sc, r2 = ist.a * M1 / M * sc;
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    if (!ist.slilis) {
+      ctx.beginPath(); ctx.arc(PX + r1 * ca, PY - r1 * sa, 2.6, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(PX - r2 * ca, PY + r2 * sa, 2.6, 0, 7); ctx.fill();
+    } else {
+      ctx.beginPath(); ctx.arc(PX, PY, 3.4, 0, 7); ctx.fill();
+    }
+    var d = detektor(), dx = PX + d.x * sc, dy = PY - d.y * sc;
+    ctx.strokeStyle = 'rgb(' + ink + ')'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(dx - 7, dy - 7); ctx.lineTo(dx + 7, dy + 7); ctx.moveTo(dx + 7, dy - 7); ctx.lineTo(dx - 7, dy + 7); ctx.stroke();
+    C.label(ctx, dx, dy + 24, 'детектор', 17, mut);
+
+    /* окошко с парой крупно */
+    var OX = 520, OY = 112, OR = 44;
+    ctx.fillStyle = 'rgba(' + ink + ',.06)'; ctx.strokeStyle = 'rgba(' + muted + ',.5)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(OX, OY, OR, 0, 7); ctx.fill(); ctx.stroke();
+    var so = OR * 0.8 / (A0 * M2 / M);
+    if (!ist.slilis) {
+      var q1 = ist.a * M2 / M * so, q2 = ist.a * M1 / M * so;
+      ctx.strokeStyle = 'rgba(' + muted + ',.5)';
+      ctx.beginPath(); ctx.arc(OX, OY, q1, 0, 7); ctx.stroke();
+      ctx.fillStyle = 'rgb(' + ink + ')';
+      ctx.beginPath(); ctx.arc(OX + q1 * ca, OY - q1 * sa, 5, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(OX - q2 * ca, OY + q2 * sa, 5, 0, 7); ctx.fill();
+    } else {
+      ctx.fillStyle = 'rgb(' + ink + ')'; ctx.beginPath(); ctx.arc(OX, OY, 7, 0, 7); ctx.fill();
+    }
+    C.label(ctx, OX, OY + OR + 20, 'пара крупно', 17, mut);
+
+    /* сигнал в детекторе */
+    ctx.strokeStyle = 'rgba(' + muted + ',.5)'; ctx.lineWidth = 1.2;
+    var gm = (GRY0 + GRY1) / 2;
+    ctx.beginPath(); ctx.moveTo(GRX0, gm); ctx.lineTo(GRX1, gm); ctx.stroke();
+    C.label(ctx, GRX0, GRY0 - 14, 'поле в детекторе', 17, mut, 'left');
+    var sg = s.signal;
+    if (sg.length > 1) {
+      var t1 = sg[sg.length - 1][0], t0 = t1 - OKNO * H;
+      ctx.strokeStyle = 'rgb(' + CPOS.join(',') + ')'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (i = 0; i < sg.length; i++) {
+        var gx = GRX0 + (sg[i][0] - t0) / (OKNO * H) * (GRX1 - GRX0);
+        var gy = gm - Math.tanh(0.8 * sg[i][1]) * (GRY1 - GRY0) / 2;
+        if (i === 0) ctx.moveTo(gx, gy); else ctx.lineTo(gx, gy);
+      }
+      ctx.stroke();
+    }
+
+    /* показания */
+    var m = izmerenie();
+    C.readout(ctx, 700, 240, 'СКОРОСТЬ ТЕЛА, v/c', num(omega(ist.a) * ist.a * (M2 / M) / ist.c, 3), 'rgb(' + ink + ')');
+    C.readout(ctx, 960, 240, 'РАССТОЯНИЕ МЕЖДУ ТЕЛАМИ', ist.slilis ? 'слились' : num(ist.a / A0, 3) + ' a₀', 'rgb(' + ink + ')');
+    C.readout(ctx, 700, 330, 'ЧАСТОТА ВОЛНЫ / ОБРАЩЕНИЯ', m.otn && !s.poteri ? num(m.otn, 2) : '—', 'rgb(' + CPOS.join(',') + ')');
+    C.readout(ctx, 960, 330, 'ЗАПАЗДЫВАНИЕ, ОБОРОТОВ', s.mgnovenno ? '0' : num(m.zap, 2), 'rgb(' + CNEG.join(',') + ')');
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+
+  function beta(v) { s.beta = C.clamp(v, BETA_MIN, BETA_MAX); nachat(); }
+  function mgnov(v) { s.mgnovenno = v; if (v) s.poteri = false; nachat(); }
+  function poteri() { if (s.mgnovenno) return; s.poteri = !s.poteri; if (!s.poteri) nachat(); else obnovit(); }
+  function pauza() { s.idet = !s.idet; obnovit(); }
+  function sbros() { s.poteri = false; nachat(); }
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var ist = s.ist;
+    if (s.mgnovenno)
+      return 'Скорость света бесконечна: поле всюду сразу знает, где тела. Узор поворачивается вместе с парой как целое, ' +
+        'ничего от пары не уходит, и энергию она не теряет. Детектор видит поле с частотой ' + A('вдвое выше') +
+        ' частоты обращения, но без запаздывания.';
+    if (ist.slilis)
+      return 'Тела слились. Последние волны ещё бегут наружу со скоростью света, а за ними поле уже не меняется: ' +
+        'распределение масс перестало вращаться. Так кончилось слияние чёрных дыр, которое LIGO зарегистрировал в 2015 году.';
+    if (s.poteri)
+      return 'Волны уносят энергию, и тела сближаются: расстояние ' + A(num(ist.a / A0, 3) + ' a₀') +
+        '. Чем ближе тела, тем быстрее они обходят друг друга, и сигнал в детекторе частит и растёт. ' +
+        'Так пульсар Халса и Тейлора десятилетиями сближается со своим компаньоном.';
+    return 'Поле доходит до точки на расстоянии r через время r/c и показывает, где тела были тогда. Вблизи пары ' +
+      'узор поворачивается вместе с ней, вдали отстаёт и закручивается в спираль, которая бежит наружу. ' +
+      'Полная масса пары не меняется, центр масс стоит, меняется только распределение масс, а оно повторяется через ' +
+      'пол-оборота: частота волны вдвое выше частоты обращения. Цвет показывает знак поля без спада с расстоянием.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Скорость света:">
+          <${C.Btn} active=${!ui.mgnovenno} onClick=${function () { mgnov(false); }}>конечна<//>
+          <${C.Btn} active=${ui.mgnovenno} onClick=${function () { mgnov(true); }}>бесконечна<//>
+        <//>
+        <${C.Slider} label="Скорость тела:" min=${BETA_MIN} max=${BETA_MAX} step=${0.01} value=${ui.beta}
+                     onChange=${beta} display=${num(ui.beta, 2) + ' c'} />
+        <${C.Group}>
+          <${C.Btn} active=${ui.poteri} disabled=${ui.mgnovenno} onClick=${poteri}>Излучение уносит энергию<//>
+          <${C.Btn} onClick=${pauza}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(GravVolny);
+</script>
+</body>
+</html>

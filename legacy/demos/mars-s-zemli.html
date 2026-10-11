@@ -1,0 +1,1055 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Марс с Земли</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-05/">&larr; Неделя 05</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=mars-s-zemli"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `zakony-keplera` (Браге мерил положения планет без телескопа
+   с точностью около двух угловых минут, Кеплер искал в его таблицах
+   кривые) и мост `dannye-dayut-zakony`. Просьба автора 29.09: «вот мы на
+   земле, что мы видим в телескоп и какие параметры приходят в таблицы».
+   Демка показывает, с чем наблюдатель на Земле остаётся после ночи у
+   инструмента: направление на Марс среди звёзд и время. Расстояния в
+   таблице нет. С телескопом к этому добавляется диск планеты: по его
+   поперечнику видно, во сколько раз Марс приблизился, но не сколько до
+   него километров (блок `nebo-i-tablicy`: «у Марса от 3,5″ до 25″»).
+
+   ОРБИТЫ. Средние элементы на эпоху J2000,0 (JD 2451545,0, 1 января
+   2000 года, 12:00), гелиоцентрические, в плоскости эклиптики J2000:
+       Земля: a = 1,00000 а.е., e = 0,01671, период 365,256 сут,
+              долгота перигелия 102,94°, средняя долгота на эпоху 100,46°;
+       Марс:  a = 1,52368 а.е., e = 0,09340, период 686,98 сут,
+              долгота перигелия 336,06°, наклон 1,850°, долгота
+              восходящего узла 49,56°, средняя долгота на эпоху 355,45°.
+   Элементы не меняются со временем, возмущения от других планет не
+   учтены. Долготы отсчитываются в системе J2000 и для звёзд, и для
+   планет; настоящие таблицы ведут их от равноденствия на дату, которое
+   прецессия сдвигает на 50″ в год, и звёзды в них сдвигаются вместе с ним.
+   Вторым маршрутом положения сверены интегрированием Верле с шагом
+   0,05 сут с того же состояния: за 10 лет расхождение 3·10⁻⁶ а.е. у Марса
+   и 2·10⁻⁵ а.е. у Земли. Средняя аномалия растёт равномерно, M = L₀ + 360°·t/P − ϖ;
+   уравнение Кеплера M = E − e sin E решается методом Ньютона до 10⁻¹⁵,
+   по E находятся истинная аномалия и радиус r = a(1 − e cos E), а по ним
+   координаты с учётом наклона и узла. Положения считаются в любой момент
+   напрямую, без шага интегрирования.
+
+   ЧТО ВИДНО С ЗЕМЛИ. Вектор от Земли к Марсу даёт геоцентрическую долготу
+   λ и широту β Марса; долгота Солнца отличается от гелиоцентрической
+   долготы Земли на 180°, поэтому по ней известно, где Земля. Из этих
+   углов и дат и состоит таблица. Скорость по долготе берётся численно,
+   центральной разностью с шагом 0,02 сут; где она меньше нуля, Марс
+   пятится. Противостояние: долгота Марса отличается от долготы Солнца на
+   180°; эта разность убывает монотонно (Солнце по небу всегда быстрее
+   Марса), и корень ищется делением отрезка пополам. Точки стояния, где
+   скорость по долготе проходит через ноль, ищутся так же в 90 сутках по
+   обе стороны от противостояния. Всё это модель находит сама; ни одно
+   число ниже в код не вписано.
+
+   ДИСК В ТЕЛЕСКОП. Видимый поперечник 2·arctg(R/Δ), экваториальный радиус
+   Марса R = 3396,2 км, 1 а.е. = 149 597 870,7 км: на расстоянии 1 а.е.
+   это 9,365″. Фаза по углу i при Марсе между Солнцем и Землёй, освещённая
+   доля поперечника (1 + cos i)/2. Освещённый край смотрит на Солнце; в
+   окуляре восток слева, как на полосе, и терминатор ставится поперёк
+   эклиптики: Солнце и Марс оба у эклиптики, наклон терминатора к ней в
+   окуляре не рисуется.
+
+   ЧИСЛА, проверенные прогоном 30.09 через __demoTick и __demoState (таблица
+   в отчёте briefs/demki_nedelya05_mars-s-zemli_REPORT.md):
+     противостояние 19 февраля 2027, 14:36, до Марса 0,6778 а.е.; попятное
+     движение с 10 января по 1 апреля 2027, 80,98 сут, петля 19,51° по
+     долготе (перебором по 0,01 сут: 80,98 сут и 19,507°; по суточному
+     следу в странице 81 сутки и 19,50°); от противостояния 16 января
+     2025 прошло 764,54 сут; диск в этот день 13,8″;
+     56 противостояний 1971–2089 годов: средний промежуток (наклон прямой
+     «дата от номера») 779,94 сут, по средним движениям
+     1/(1/365,256 − 1/686,98) = 779,93; отдельные промежутки от 764,0 до
+     810,9 сут; до Марса в противостоянии от 0,3731 а.е. (28 августа 2003)
+     до 0,6778 а.е. (2027); попятное движение от 59,9 до 81,1 сут, петля
+     от 10,0° до 19,5°;
+     Марс возвращается к той же гелиоцентрической долготе через 686,980 сут;
+     диск от 3,50″ (соединение, 2,676 а.е.) до 25,10″ (2003), фаза не меньше
+     0,839 (угол при Марсе до 47,4°);
+     ошибка записи по 6000 строкам: «Браге» до 1,99′, «телескоп» до 0,50″.
+   Против настоящего неба модель ошибается на несколько угловых минут:
+   двенадцать противостояний 2003–2027 годов у неё отстоят от
+   опубликованных таблиц (SEDS, nakedeyeplanets.com) не больше чем на
+   81 минуту; 2020 год у неё 14 октября в 00:10 UTC, в таблице 13 октября
+   в 23:20, 2027 год 19 февраля в 14:36 против 15:45. Разность долгот
+   Марса и Солнца у противостояния бежит 1,4° в сутки, так что час
+   означает около 3,5′: того же порядка, что точность Браге.
+
+   ТОЧНОСТЬ ЗАПИСИ. «Браге»: к точному углу добавляется ошибка, равномерная
+   в пределах ±1,5′, и результат округляется до минуты, так что ошибка
+   записи не больше 2′. Ошибка псевдослучайная, но определяется датой и
+   столбцом, поэтому одна и та же строка всегда записана одинаково.
+   «Телескоп»: угол округляется до секунды дуги. Секунды здесь показывают
+   формат записи, а не точность модели.
+
+   ПРИЁМ КЕПЛЕРА. Через звёздный период Марса, 686,98 сут, Марс снова в той
+   же точке пространства, а Земля в другой. Два направления на Марс,
+   снятые через марсианский год, пересекаются в Марсе; зная положения
+   Земли, по ним находят расстояние Марса от Солнца: долготы дают точку
+   в плоскости эклиптики, широты её высоту над плоскостью. Демка делает
+   это по записанным углам (с их ошибкой) и сравнивает с моделью. Прогон
+   за 2000 сут с 1 октября 2026 года: при точных углах расхождение с
+   расстоянием Марса в модели до 3·10⁻¹² а.е.; при записи Браге и угле
+   между лучами от 20° до 0,0027 а.е. (перебор через 15 минут, 35 917
+   моментов; максимум 20 января 2031 при угле 20,2°), а худшее сочетание
+   ошибок по 2′ во всех четырёх углах дало бы 0,0033 а.е. Число на экран
+   идёт, только если Марс виден в оба дня; иначе строка показаний говорит,
+   что записи нет. Без высоты выходила бы проекция на эклиптику, в
+   противостояние 2027 года 1,664 а.е. вместо 1,665.
+
+   УЧАСТОК НЕБА. Справа полоса эклиптики шириной 64° по долготе; долгота
+   растёт влево, к востоку, как на карте неба, если смотреть на юг из
+   северного полушария. Широта растянута втрое. Полоса листается шагом
+   56° от долготы ближайшего противостояния, поэтому петля всегда в
+   середине своей страницы; середина по широте ставится посередине пути
+   Марса на странице. Звёзды: прямые восхождения и склонения J2000
+   (каталог Hipparcos), пересчитанные на эклиптику с наклоном 23,4393°;
+   сверено с табличными эклиптическими координатами до минуты дуги.
+   Границы созвездий на эклиптике по границам МАС. */
+
+var D2R = Math.PI / 180;
+var ZEMLYA = { a: 1.00000, e: 0.01671, P: 365.256, L0: 100.46, pi: 102.94, i: 0, Om: 0 };
+var MARS = { a: 1.52368, e: 0.09340, P: 686.98, L0: 355.45, pi: 336.06, i: 1.850, Om: 49.56 };
+var J2000_MS = Date.UTC(2000, 0, 1, 12, 0, 0);
+var T_START = (Date.UTC(2026, 9, 1) - J2000_MS) / 86400000;   /* 1 октября 2026 */
+var ELONG_MIN = 15;         /* ближе к Солнцу Марс в его свете не наблюдают */
+var R_MARS = 3396.2, AE_KM = 149597870.7;                     /* км */
+var SHAG_NACH = 10, SHAG_MIN = 1, SHAG_MAX = 30;              /* строка таблицы, сут */
+var SKOR_NACH = 20, SKOR_MIN = 2, SKOR_MAX = 100;             /* сут в секунду показа */
+
+function wrap360(x) { x %= 360; return x < 0 ? x + 360 : x; }
+function wrap180(x) { x = wrap360(x); return x > 180 ? x - 360 : x; }
+
+/* Уравнение Кеплера M = E − e sin E, метод Ньютона. */
+function anomaliya(M, e) {
+  var E = M + e * Math.sin(M);
+  for (var k = 0; k < 30; k++) {
+    var d = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+    E -= d;
+    if (Math.abs(d) < 1e-15) break;
+  }
+  return E;
+}
+
+/* Гелиоцентрические эклиптические координаты планеты, а.е.; t в сутках от J2000,0. */
+function polozhenie(p, t) {
+  var M = wrap360(p.L0 + 360 / p.P * t - p.pi) * D2R;
+  var E = anomaliya(M, p.e);
+  var nu = 2 * Math.atan2(Math.sqrt(1 + p.e) * Math.sin(E / 2), Math.sqrt(1 - p.e) * Math.cos(E / 2));
+  var r = p.a * (1 - p.e * Math.cos(E));
+  var u = (p.pi - p.Om) * D2R + nu;                 /* аргумент широты */
+  var cO = Math.cos(p.Om * D2R), sO = Math.sin(p.Om * D2R);
+  var ci = Math.cos(p.i * D2R), si = Math.sin(p.i * D2R);
+  var cu = Math.cos(u), su = Math.sin(u);
+  return [r * (cO * cu - sO * su * ci), r * (sO * cu + cO * su * ci), r * su * si];
+}
+
+/* Что видно с Земли в момент t. */
+function sZemli(t) {
+  var z = polozhenie(ZEMLYA, t), m = polozhenie(MARS, t);
+  var dx = m[0] - z[0], dy = m[1] - z[1], dz = m[2] - z[2];
+  var dist = Math.hypot(dx, dy, dz), rz = Math.hypot(z[0], z[1], z[2]);
+  var cosEl = -(dx * z[0] + dy * z[1] + dz * z[2]) / (dist * rz);
+  var rm = Math.hypot(m[0], m[1], m[2]);
+  var cosI = -(m[0] * -dx + m[1] * -dy + m[2] * -dz) / (rm * dist);   /* угол при Марсе: к Солнцу и к Земле */
+  return {
+    z: z, m: m,
+    lam: wrap360(Math.atan2(dy, dx) / D2R),
+    bet: Math.atan2(dz, Math.hypot(dx, dy)) / D2R,
+    sun: wrap360(Math.atan2(-z[1], -z[0]) / D2R),
+    dist: dist,
+    elong: Math.acos(C.clamp(cosEl, -1, 1)) / D2R,
+    helio: wrap360(Math.atan2(m[1], m[0]) / D2R),
+    disk: 2 * Math.atan(R_MARS / (AE_KM * dist)) / D2R * 3600,       /* поперечник, ″ */
+    cosI: cosI
+  };
+}
+
+/* Скорость Марса по долготе, градусов в сутки, центральной разностью. */
+function skorost(t) {
+  var h = 0.02;
+  return wrap180(sZemli(t + h).lam - sZemli(t - h).lam) / (2 * h);
+}
+/* До противостояния разность долгот Марса и Солнца минус 180° положительна, после отрицательна. */
+function protivo(t) { var g = sZemli(t); return wrap180(g.lam - g.sun - 180); }
+
+/* Корень делением пополам; на концах отрезка знаки разные. Сорок делений
+   сужают отрезок в 90 сут до 10⁻¹⁰ сут. */
+function koren(fn, a, b) {
+  var fa = fn(a);
+  for (var k = 0; k < 40; k++) {
+    var c = (a + b) / 2, fc = fn(c);
+    if ((fc > 0) === (fa > 0)) { a = c; fa = fc; } else b = c;
+  }
+  return (a + b) / 2;
+}
+
+/* Противостояние и его петля: точки стояния, ширина по долготе, длительность. */
+function opisat(to) {
+  var g = sZemli(to);
+  var s1 = koren(skorost, to - 90, to), s2 = koren(skorost, to, to + 90);
+  var g1 = sZemli(s1), g2 = sZemli(s2);
+  return {
+    t: to, lam: g.lam, bet: g.bet, dist: g.dist,
+    st1: s1, st2: s2, lam1: g1.lam, bet1: g1.bet, lam2: g2.lam, bet2: g2.bet,
+    span: wrap180(g1.lam - g2.lam), days: s2 - s1
+  };
+}
+
+/* Каталог противостояний: шаг 5 сут, смена знака protivo сверху вниз.
+   Разность долгот Марса и Солнца убывает всё время, от 0,20 до 1,42° в
+   сутки (прогон 1970–2090 по суткам), так что за шаг она меняется меньше
+   чем на 8°, и скачок через ±180° в соединении с Солнцем отличается от
+   противостояния по величине. В соединении Марс дальше всего
+   и диск у него меньше всего; соединения собираются для этого числа. */
+var KAT = { ot: T_START, do: T_START, spisok: [], soed: [] };
+function soedinenie(t) { var g = sZemli(t); return wrap180(g.lam - g.sun); }
+function naytiProtivostoyaniya(t0, t1) {
+  var res = [], h = 5, pred = protivo(t0);
+  for (var t = t0 + h; t <= t1 + 1e-9; t += h) {
+    var cur = protivo(t);
+    if (pred > 0 && cur <= 0 && pred - cur < 90) res.push(opisat(koren(protivo, t - h, t)));
+    if (pred < 0 && cur > 0 && cur - pred > 90) {
+      var ts = koren(soedinenie, t - h, t);
+      KAT.soed.push({ t: ts, dist: sZemli(ts).dist });
+    }
+    pred = cur;
+  }
+  return res;
+}
+function katalog(t) {
+  while (t - 1200 < KAT.ot) { KAT.spisok = naytiProtivostoyaniya(KAT.ot - 8000, KAT.ot).concat(KAT.spisok); KAT.ot -= 8000; }
+  while (t + 1200 > KAT.do) { KAT.spisok = KAT.spisok.concat(naytiProtivostoyaniya(KAT.do, KAT.do + 8000)); KAT.do += 8000; }
+  return KAT.spisok;
+}
+var SVODKA_OT = (Date.UTC(1970, 0, 1) - J2000_MS) / 86400000;
+var SVODKA_DO = (Date.UTC(2090, 0, 1) - J2000_MS) / 86400000;
+katalog(SVODKA_OT); katalog(SVODKA_DO);
+
+/* Ближайшее по времени противостояние и предыдущее. */
+function blizhajshee(t) {
+  var sp = katalog(t), best = 0;
+  for (var i = 1; i < sp.length; i++) if (Math.abs(sp[i].t - t) < Math.abs(sp[best].t - t)) best = i;
+  return { o: sp[best], pred: sp[best - 1] || null, sled: sp[best + 1] || null };
+}
+function sleduyushee(t) {
+  var sp = katalog(t);
+  for (var i = 0; i < sp.length; i++) if (sp[i].t > t + 0.5) return sp[i];
+  return null;
+}
+
+/* Сводка по противостояниям 1970–2089 годов: средний промежуток, разброс
+   промежутков, расстояний, петель, поперечник диска; звёздный период по
+   возврату гелиоцентрической долготы. */
+var SVODKA = (function () {
+  var sp = KAT.spisok.filter(function (o) { return o.t > SVODKA_OT && o.t < SVODKA_DO; });
+  var iv = [], i;
+  for (i = 1; i < sp.length; i++) iv.push(sp[i].t - sp[i - 1].t);
+  function mn(a) { return Math.min.apply(null, a); }
+  function mx(a) { return Math.max.apply(null, a); }
+  var d = sp.map(function (o) { return o.dist; });
+  var dn = sp.map(function (o) { return o.days; });
+  var sn = sp.map(function (o) { return o.span; });
+  var h0 = sZemli(T_START).helio;
+  var tv = koren(function (t) { return wrap180(sZemli(t).helio - h0); }, T_START + 600, T_START + 800);
+  var dmin = sp[d.indexOf(mn(d))];
+  var ds = KAT.soed.filter(function (o) { return o.t > SVODKA_OT && o.t < SVODKA_DO; })
+                   .map(function (o) { return o.dist; });
+  /* Средний промежуток как наклон прямой t(номер): простое (t_посл − t_перв)/(n − 1)
+     зависит от того, на какие места 15–17-летнего цикла попали концы окна. */
+  var xs = 0, ys = 0, sxy = 0, sxx = 0;
+  for (i = 0; i < sp.length; i++) { xs += i; ys += sp[i].t; }
+  xs /= sp.length; ys /= sp.length;
+  for (i = 0; i < sp.length; i++) { sxy += (i - xs) * (sp[i].t - ys); sxx += (i - xs) * (i - xs); }
+  return {
+    n: sp.length, synodicMean: sxy / sxx, synodicEnds: (sp[sp.length - 1].t - sp[0].t) / (sp.length - 1),
+    synodicTheory: 1 / (1 / ZEMLYA.P - 1 / MARS.P),
+    intervalMin: mn(iv), intervalMax: mx(iv),
+    distMin: mn(d), distMax: mx(d), distMinDate: dmin.t,
+    loopDaysMin: mn(dn), loopDaysMax: mx(dn), loopSpanMin: mn(sn), loopSpanMax: mx(sn),
+    siderealMeasured: tv - T_START,
+    conjDistMax: mx(ds), diskMax: sZemli(dmin.t).disk,
+    diskMin: 2 * Math.atan(R_MARS / (AE_KM * mx(ds))) / D2R * 3600
+  };
+})();
+
+/* ── запись в таблицу ── */
+
+/* Псевдослучайное число от −1 до 1, заданное датой (с точностью до часа) и столбцом. */
+function shum(t, k) {
+  var h = (Math.round(t * 24) * 374761393 + k * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967295 * 2 - 1;
+}
+/* Записанный угол: у Браге с ошибкой до ±1,5′ и до минуты, у телескопа до секунды. */
+function zapis(v, t, k, rezhim, dolgota) {
+  var x = rezhim === 'brahe' ? Math.round((v + shum(t, k) * 1.5 / 60) * 60) / 60 :
+          rezhim === 'segodnya' ? Math.round(v * 3600) / 3600 : v;       /* 'tochno': как в модели */
+  return dolgota ? wrap360(x) : x;
+}
+
+function stroka(t) {
+  var g = sZemli(t);
+  var r = {
+    t: t, date: isoData(t), lambda: g.lam, beta: g.bet, lambdaSun: g.sun,
+    dist: g.dist, elong: g.elong, visible: g.elong >= ELONG_MIN, disk: g.disk
+  };
+  ['brahe', 'segodnya'].forEach(function (rz) {
+    r[rz] = { lambda: zapis(g.lam, t, 1, rz, true), beta: zapis(g.bet, t, 2, rz, false), lambdaSun: zapis(g.sun, t, 3, rz, true) };
+  });
+  return r;
+}
+
+/* Приём Кеплера: направления на Марс в t и t − P (записанные углы) и
+   положения Земли. Долготы дают точку пересечения лучей в плоскости
+   эклиптики, s и s1 — её расстояния от Земли в двух наблюдениях; высоту
+   над плоскостью дают широты, z = s·tg β, среднее по двум наблюдениям.
+   Орбита Земли лежит в плоскости эклиптики, поэтому при точных углах обе
+   высоты равны z Марса и r совпадает с его расстоянием от Солнца.
+   Записи есть, только если Марс виден в оба дня (элонгация от ELONG_MIN);
+   vidnoA и vidnoB говорят, в какой из дней он был у Солнца. Число r
+   считается и тогда, но на экран и в __demoState не идёт. */
+function treugolnik(t, rezhim) {
+  var t1 = t - MARS.P, a = sZemli(t), b = sZemli(t1);
+  var la = zapis(a.lam, t, 1, rezhim, true) * D2R, lb = zapis(b.lam, t1, 1, rezhim, true) * D2R;
+  var ba = zapis(a.bet, t, 2, rezhim, false) * D2R, bb = zapis(b.bet, t1, 2, rezhim, false) * D2R;
+  var ux = Math.cos(la), uy = Math.sin(la), vx = Math.cos(lb), vy = Math.sin(lb);
+  var det = vx * uy - ux * vy;
+  var rx = b.z[0] - a.z[0], ry = b.z[1] - a.z[1];
+  var s = (vx * ry - rx * vy) / det, s1 = (ux * ry - rx * uy) / det;
+  var px = a.z[0] + s * ux, py = a.z[1] + s * uy;
+  var pz = (s * Math.tan(ba) + s1 * Math.tan(bb)) / 2;
+  var ug = Math.abs(wrap180((la - lb) / D2R));
+  var vA = a.elong >= ELONG_MIN, vB = b.elong >= ELONG_MIN;
+  return { r: Math.hypot(px, py, pz), rTrue: Math.hypot(a.m[0], a.m[1], a.m[2]), angle: ug > 90 ? 180 - ug : ug,
+           t1: t1, vidnoA: vA, vidnoB: vB, vidno: vA && vB };
+}
+
+/* ── даты и числа ── */
+
+var MESYACY = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа',
+               'сентября', 'октября', 'ноября', 'декабря'];
+function dataIz(t) { return new Date(J2000_MS + t * 86400000); }
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+function isoData(t) { var d = dataIz(t); return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()); }
+function kratkaya(t) { var d = dataIz(t); return pad2(d.getUTCDate()) + '.' + pad2(d.getUTCMonth() + 1) + '.' + d.getUTCFullYear(); }
+function polnaya(t) { var d = dataIz(t); return d.getUTCDate() + ' ' + MESYACY[d.getUTCMonth()] + ' ' + d.getUTCFullYear(); }
+
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* Угол в градусах, минутах и (для телескопа) секундах. */
+function ugol(v, rezhim, znak) {
+  var ed = rezhim === 'brahe' ? 60 : 3600;
+  var n = Math.round(Math.abs(v) * ed);
+  var g = Math.floor(n / ed), ost = n - g * ed;
+  var s = (znak ? (v < 0 && n > 0 ? '−' : '+') : '') + g + '°';
+  if (rezhim === 'brahe') return s + pad2(ost) + '′';
+  return s + pad2(Math.floor(ost / 60)) + '′' + pad2(ost % 60) + '″';
+}
+
+/* ── небо ── */
+
+/* Созвездия на эклиптике: название, долгота входа и выхода по границам
+   МАС, угол подписи на кольце (сдвинут там, где рядом имя звезды). */
+var SOZVEZDIYA = [
+  ['Рыбы', 351.6, 29.1, 10.3], ['Овен', 29.1, 53.5, 41.3], ['Телец', 53.5, 90.4, 61],
+  ['Близнецы', 90.4, 118.3, 104.3], ['Рак', 118.3, 138.2, 128.2], ['Лев', 138.2, 174.2, 162],
+  ['Дева', 174.2, 217.8, 192.5], ['Весы', 217.8, 241.1, 229.5], ['Скорпион', 241.1, 247.7, 242.2],
+  ['Змееносец', 247.7, 266.3, 258.5], ['Стрелец', 266.3, 299.7, 283], ['Козерог', 299.7, 327.9, 313.8],
+  ['Водолей', 327.9, 351.6, 339.7]
+];
+
+/* Звёзды у эклиптики: имя (пусто — без подписи на полосе), α (ч, м, с),
+   δ (знак, °, ′, ″), звёздная величина, подпись на кольце. */
+var ZVEZDY_RADEC = [
+  ['Альдебаран', 4, 35, 55.24, 1, 16, 30, 33.5, 0.85, true],
+  ['Эльнат', 5, 26, 17.51, 1, 28, 36, 26.8, 1.65],
+  ['Плеяды', 3, 47, 29.08, 1, 24, 6, 18.5, 1.6],
+  ['Поллукс', 7, 45, 18.95, 1, 28, 1, 34.3, 1.14],
+  ['Кастор', 7, 34, 35.87, 1, 31, 53, 17.8, 1.58],
+  ['Альхена', 6, 37, 42.71, 1, 16, 23, 57.4, 1.92],
+  ['Регул', 10, 8, 22.31, 1, 11, 58, 2.0, 1.35, true],
+  ['Альгиеба', 10, 19, 58.35, 1, 19, 50, 29.4, 2.01],
+  ['Денебола', 11, 49, 3.58, 1, 14, 34, 19.4, 2.14],
+  ['', 12, 41, 39.6, -1, 1, 26, 58, 2.74],
+  ['Спика', 13, 25, 11.58, -1, 11, 9, 40.8, 0.97, true],
+  ['', 14, 50, 52.71, -1, 16, 2, 30.4, 2.75],
+  ['', 15, 17, 0.41, -1, 9, 22, 58.5, 2.61],
+  ['Дшубба', 16, 0, 20.01, -1, 22, 37, 18.1, 2.32],
+  ['Антарес', 16, 29, 24.46, -1, 26, 25, 55.2, 1.06, true],
+  ['', 18, 27, 58.24, -1, 25, 25, 18.1, 2.81],
+  ['Нунки', 18, 55, 15.93, -1, 26, 17, 48.2, 2.05],
+  ['Дабих', 20, 21, 0.68, -1, 14, 46, 52.9, 3.05],
+  ['', 21, 31, 33.53, -1, 5, 34, 16.2, 2.87],
+  ['Денеб Альгеди', 21, 47, 2.44, -1, 16, 7, 38.2, 2.81],
+  ['', 22, 5, 47.04, -1, 0, 19, 11.5, 2.95],
+  ['', 22, 54, 38.97, -1, 15, 49, 14.9, 3.27],
+  ['', 23, 17, 9.94, 1, 3, 16, 56.1, 3.69],
+  ['', 23, 59, 18.69, 1, 6, 51, 48.0, 4.03],
+  ['', 1, 31, 29.01, 1, 15, 20, 45.0, 3.62],
+  ['', 2, 2, 2.82, 1, 2, 45, 49.5, 3.82],
+  ['Шератан', 1, 54, 38.41, 1, 20, 48, 28.9, 2.64],
+  ['Хамаль', 2, 7, 10.41, 1, 23, 27, 44.7, 2.00],
+  ['', 8, 58, 29.22, 1, 11, 51, 27.7, 4.25],
+  ['', 8, 44, 41.10, 1, 18, 9, 15.5, 3.94]
+];
+var EPS = 23.4392911 * D2R;             /* наклон эклиптики к экватору на J2000 */
+var ZVEZDY = ZVEZDY_RADEC.map(function (s) {
+  var a = (s[1] + s[2] / 60 + s[3] / 3600) * 15 * D2R;
+  var d = s[4] * (s[5] + s[6] / 60 + s[7] / 3600) * D2R;
+  var sb = Math.sin(d) * Math.cos(EPS) - Math.cos(d) * Math.sin(EPS) * Math.sin(a);
+  var lam = Math.atan2(Math.sin(a) * Math.cos(EPS) + Math.tan(d) * Math.sin(EPS), Math.cos(a));
+  return { name: s[0], lam: wrap360(lam / D2R), bet: Math.asin(sb) / D2R, mag: s[8], kolco: !!s[9] };
+});
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева вид сверху с северного полюса эклиптики: Солнце, орбиты Земли и
+   Марса, луч зрения от Земли на Марс и кольцо созвездий зодиака.
+   Звёзды бесконечно далеко, поэтому на кольце важно только направление:
+   луч переносится параллельно в центр кольца (пунктир от Солнца), и метка
+   Марса стоит там, где он упирается в кольцо. Продолженный прямо от Земли
+   луч упёрся бы в нарисованное кольцо на угол до 30° не туда: кольцо на
+   рисунке всего вдвое дальше Земли. В противостоянии, когда Земля на
+   прямой Солнце — Марс, оба луча совпадают. Рядом метка Солнца и засечки
+   последних строк таблицы.
+   Справа сверху полоса неба с Марсом среди звёзд, под ней таблица. */
+
+var W = 1000, HGT = 460;
+var CX = 238, CY = 232, SC = 70, R_KOL = 140;           /* вид сверху: центр, пикс/а.е., кольцо */
+var SX0 = 494, SX1 = 988, SY0 = 46, SY1 = 206;          /* полоса неба */
+var POLU = 32, STR_SHAG = 56, RAST = 3;                 /* полуширина и шаг страницы, растяжка широты */
+var KX = (SX1 - SX0) / (2 * POLU), KY = RAST * KX;
+var SXC = (SX0 + SX1) / 2, SYC = (SY0 + SY1) / 2;
+var STROK_VIDNO = 8;
+var CM = '#e8663d', CZ = '#4db6c6', CS = '#f5a623';
+var CM_RGB = '232,102,61', CS_RGB = '245,166,35';
+var MONO = '17px "JetBrains Mono", ui-monospace, monospace';
+var TEKST = '17px "Golos Text", system-ui, sans-serif';
+
+/* Орбиты для рисунка: сотни точек за период, посчитанных тем же Кеплером. */
+function orbita(p) {
+  var pts = [];
+  for (var k = 0; k <= 360; k++) pts.push(polozhenie(p, p.P * k / 360));
+  return pts;
+}
+var ORB_Z = orbita(ZEMLYA), ORB_M = orbita(MARS);
+/* те же орбиты в пикселях рисунка, для выбора места подписей */
+function vPikseli(pts) { return pts.map(function (p) { return [CX + p[0] * SC, CY - p[1] * SC]; }); }
+var ORB_Z_PX = vPikseli(ORB_Z), ORB_M_PX = vPikseli(ORB_M);
+/* Штраф подписи за задетую линию: луч через буквы мешает читать, пунктир
+   меньше, бледная орбита за ними почти нет. Для сравнения: задетая подпись
+   стоит 100, пиксель захода в кружок 4, в кружок Солнца 6. */
+var V_LUCH = 40, V_PUNKT = 15, V_ORB = 3;
+
+/* Разность долгот с противостоянием без скачка через ±180°. */
+function dlU(t, lam, o) {
+  var d = wrap180(lam - o.lam);
+  if (t > o.t && d < -30) d += 360;
+  if (t < o.t && d > 30) d -= 360;
+  return d;
+}
+
+var KESH_B = {};
+/* Середина пути Марса по широте на странице k ближайшего противостояния o. */
+function seredinaShiroty(o, k) {
+  var key = o.t.toFixed(3) + ':' + k;
+  if (KESH_B[key] != null) return KESH_B[key];
+  var lo = Infinity, hi = -Infinity;
+  for (var tt = o.t - 420; tt <= o.t + 420; tt += 2) {
+    var g = sZemli(tt), d = dlU(tt, g.lam, o) - k * STR_SHAG;
+    if (Math.abs(d) <= POLU) { lo = Math.min(lo, g.bet); hi = Math.max(hi, g.bet); }
+  }
+  KESH_B[key] = isFinite(lo) ? (lo + hi) / 2 : 0;
+  return KESH_B[key];
+}
+
+function stranica(t, g) {
+  var b = blizhajshee(t), o = b.o;
+  var k = Math.round(dlU(t, g.lam, o) / STR_SHAG);
+  return { o: o, pred: b.pred, k: k, lc: wrap360(o.lam + k * STR_SHAG), bc: seredinaShiroty(o, k) };
+}
+
+function MarsSZemli() {
+  var st = useRef(null);
+  if (!st.current) st.current = {
+    t: T_START, idet: true, skor: SKOR_NACH, shag: SHAG_NACH, rezhim: 'brahe', kepler: false,
+    stroki: [], sled: [], nextRow: T_START, nextSled: T_START
+  };
+  var s = st.current;
+  var pair = useState(null);
+  var ui = pair[0] || { rezhim: 'brahe', shag: SHAG_NACH, skor: SKOR_NACH, idet: true, kepler: false, tekst: '' }, setUi = pair[1];
+
+  /* Строка показаний меняется только со сменой фазы (идёт, пятится, у
+     Солнца, противостояние), поэтому перерисовывать разметку каждый кадр
+     не нужно: step сверяет текст и обновляет, только если он другой. */
+  function obnovit() {
+    s.tekst = slova();
+    setUi({ rezhim: s.rezhim, shag: s.shag, skor: s.skor, idet: s.idet, kepler: s.kepler, tekst: s.tekst });
+    pokazaniya();
+  }
+
+  /* Время идёт вперёд до tNew: след раз в сутки и строки таблицы
+     в свои даты, а не в моменты кадров. */
+  function prodvinut(tNew) {
+    while (s.nextSled <= tNew) {
+      var g = sZemli(s.nextSled);
+      s.sled.push({ t: s.nextSled, lam: g.lam, bet: g.bet, vid: g.elong >= ELONG_MIN });
+      if (s.sled.length > 1600) s.sled.shift();
+      s.nextSled += 1;
+    }
+    while (s.nextRow <= tNew) {
+      s.stroki.push(stroka(s.nextRow));
+      if (s.stroki.length > 3000) s.stroki.shift();
+      s.nextRow += s.shag;
+    }
+    s.t = tNew;
+  }
+
+  function pokazaniya() {
+    var g = sZemli(s.t), b = blizhajshee(s.t), o = b.o, v = skorost(s.t);
+    var tr = treugolnik(s.t, s.rezhim), tr0 = treugolnik(s.t, 'tochno');
+    window.__demoState = {
+      t: s.t, date: isoData(s.t), lambdaMars: g.lam, betaMars: g.bet, lambdaSun: g.sun,
+      dist: g.dist, retrograde: v < 0, rows: s.stroki,
+      lastOppositionInterval: b.pred ? o.t - b.pred.t : null,
+      loopSpan: o.span, loopDays: o.days,
+      /* сверх заказанного: из чего это всё получено */
+      rateMars: v, elongation: g.elong, helioMars: g.helio, running: s.idet,
+      diskArcsec: g.disk, phaseLit: (1 + g.cosI) / 2, diskMin: SVODKA.diskMin, diskMax: SVODKA.diskMax,
+      conjDistMax: SVODKA.conjDistMax,
+      precision: s.rezhim, rowStep: s.shag, speed: s.skor, kepler: s.kepler,
+      opposition: { t: o.t, date: isoData(o.t), lambda: o.lam, beta: o.bet, dist: o.dist,
+                    stationary1: isoData(o.st1), stationary2: isoData(o.st2), tSt1: o.st1, tSt2: o.st2 },
+      previousOpposition: b.pred ? { t: b.pred.t, date: isoData(b.pred.t), dist: b.pred.dist } : null,
+      synodicMean: SVODKA.synodicMean, synodicTheory: SVODKA.synodicTheory, oppositionsCounted: SVODKA.n,
+      intervalMin: SVODKA.intervalMin, intervalMax: SVODKA.intervalMax,
+      oppDistMin: SVODKA.distMin, oppDistMinDate: isoData(SVODKA.distMinDate), oppDistMax: SVODKA.distMax,
+      loopDaysMin: SVODKA.loopDaysMin, loopDaysMax: SVODKA.loopDaysMax,
+      loopSpanMin: SVODKA.loopSpanMin, loopSpanMax: SVODKA.loopSpanMax,
+      siderealMeasured: SVODKA.siderealMeasured,
+      /* приём Кеплера: по записям только когда Марс виден в оба дня, иначе null */
+      triangulatedR: tr.vidno ? tr.r : null, triangulatedRExact: tr0.r, rMarsTrue: tr.rTrue, triangulationAngle: tr.angle,
+      triangulationVisible: tr.vidno, triangulationDates: [isoData(tr.t1), isoData(s.t)]
+    };
+  }
+
+  function step(dt) {
+    if (!s.idet) return;
+    prodvinut(s.t + dt * s.skor);
+    if (slova() !== s.tekst) obnovit(); else pokazaniya();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted;
+    var INK = 'rgb(' + ink + ')', MUT = 'rgb(' + muted + ')';
+    var g = sZemli(s.t), i, k;
+    function X(p) { return CX + p[0] * SC; }
+    function Y(p) { return CY - p[1] * SC; }
+
+    /* ── вид сверху ── */
+
+    /* кольцо зодиака: границы созвездий, имена, звёзды */
+    ctx.strokeStyle = 'rgba(' + muted + ',.55)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(CX, CY, R_KOL, 0, 2 * Math.PI); ctx.stroke();
+    SOZVEZDIYA.forEach(function (c) {
+      var a = c[1] * D2R;
+      ctx.beginPath();
+      ctx.moveTo(CX + R_KOL * Math.cos(a), CY - R_KOL * Math.sin(a));
+      ctx.lineTo(CX + (R_KOL + 7) * Math.cos(a), CY - (R_KOL + 7) * Math.sin(a));
+      ctx.stroke();
+      podpisRadialno(ctx, c[3], R_KOL + 9, c[0], 'rgba(' + muted + ',.95)');
+    });
+    ZVEZDY.forEach(function (z) {
+      var a = z.lam * D2R;
+      ctx.fillStyle = INK;
+      ctx.beginPath(); ctx.arc(CX + R_KOL * Math.cos(a), CY - R_KOL * Math.sin(a), z.mag < 1.5 ? 3 : z.mag < 2.3 ? 2 : 1.3, 0, 7); ctx.fill();
+      if (z.kolco) podpisRadialno(ctx, z.lam, R_KOL + 9, z.name, INK);
+    });
+
+    /* орбиты */
+    [[ORB_Z, CZ], [ORB_M, CM]].forEach(function (o) {
+      ctx.strokeStyle = o[1]; ctx.globalAlpha = 0.45; ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      o[0].forEach(function (p, j) { if (j === 0) ctx.moveTo(X(p), Y(p)); else ctx.lineTo(X(p), Y(p)); });
+      ctx.stroke(); ctx.globalAlpha = 1;
+    });
+
+    /* засечки последних строк таблицы и метка Солнца на кольце */
+    var poslednie = s.stroki.slice(-STROK_VIDNO);
+    poslednie.forEach(function (r, j) {
+      if (!r.visible) return;
+      var a = r.lambda * D2R;
+      ctx.strokeStyle = 'rgba(' + CM_RGB + ',' + (0.25 + 0.6 * (j + 1) / poslednie.length) + ')'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(CX + (R_KOL - 9) * Math.cos(a), CY - (R_KOL - 9) * Math.sin(a));
+      ctx.lineTo(CX + (R_KOL - 1) * Math.cos(a), CY - (R_KOL - 1) * Math.sin(a));
+      ctx.stroke();
+    });
+    metkaNaKolce(ctx, g.sun, CS);
+    metkaNaKolce(ctx, g.lam, CM);
+
+    /* приём Кеплера: Земля 687 и 1374 сут назад, лучи на тот же Марс.
+       Луч из дня, когда Марс был у Солнца и записи нет, бледный пунктир.
+       Подпись к прошлой Земле ставится туда, где она не вылезает на кольцо
+       созвездий и не задевает Солнце, планеты, лучи, орбиты и другую подпись. */
+    var pm = g.m;
+    if (s.kepler) {
+      var proshlye = [1, 2].map(function (n) {
+        var q = sZemli(s.t - n * MARS.P);
+        return { n: n, z: q.z, vid: q.elong >= ELONG_MIN };
+      });
+      var pomehi = [[CX, CY, 16, 6], [X(g.z), Y(g.z), 9], [X(pm), Y(pm), 9]];
+      var cl = Math.cos(g.lam * D2R), sl = Math.sin(g.lam * D2R), cs = Math.cos(g.sun * D2R), ss = Math.sin(g.sun * D2R);
+      var linii = [
+        [[[X(g.z), Y(g.z)], [X(pm), Y(pm)]], V_LUCH],                                   /* луч зрения сейчас */
+        [[[CX, CY], [CX + (R_KOL - 14) * cl, CY - (R_KOL - 14) * sl]], V_PUNKT],          /* пунктир */
+        [[[CX + (R_KOL - 14) * cl, CY - (R_KOL - 14) * sl], [CX + R_KOL * cl, CY - R_KOL * sl]], V_LUCH],   /* метка Марса */
+        [[[CX + (R_KOL - 14) * cs, CY - (R_KOL - 14) * ss], [CX + R_KOL * cs, CY - R_KOL * ss]], V_LUCH],   /* метка Солнца */
+        [ORB_Z_PX, V_ORB], [ORB_M_PX, V_ORB]
+      ];
+      proshlye.forEach(function (p) {
+        ctx.save();
+        if (p.vid) { ctx.strokeStyle = 'rgba(' + ink + ',.45)'; }
+        else { ctx.strokeStyle = 'rgba(' + ink + ',.25)'; ctx.setLineDash([3, 4]); }
+        ctx.lineWidth = 1.3;
+        ctx.beginPath(); ctx.moveTo(X(p.z), Y(p.z)); ctx.lineTo(X(pm), Y(pm)); ctx.stroke();
+        ctx.restore();
+        ctx.strokeStyle = CZ; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.arc(X(p.z), Y(p.z), 5.5, 0, 7); ctx.stroke();
+        pomehi.push([X(p.z), Y(p.z), 8]);
+        linii.push([[[X(p.z), Y(p.z)], [X(pm), Y(pm)]], p.vid ? V_LUCH : V_PUNKT]);
+      });
+      var zanyatoK = [];
+      proshlye.forEach(function (p) {
+        var b = mestoPodpisi(ctx, X(p.z), Y(p.z), '−' + num(p.n * MARS.P, 0) + ' сут', pomehi, zanyatoK, linii);
+        zanyatoK.push(b);
+        C.label(ctx, b[0], b[1] + 14, b[4], 17, MUT, 'left');
+      });
+    }
+
+    /* луч зрения от Земли на Марс и то же направление, перенесённое в
+       центр кольца: пунктир от Солнца до метки Марса на кольце */
+    var la = g.lam * D2R;
+    ctx.save(); ctx.setLineDash([3, 5]); ctx.strokeStyle = 'rgba(' + ink + ',.4)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(CX + (R_KOL - 14) * Math.cos(la), CY - (R_KOL - 14) * Math.sin(la)); ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(' + ink + ',.9)'; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(X(g.z), Y(g.z)); ctx.lineTo(X(pm), Y(pm)); ctx.stroke();
+
+    /* Солнце, Земля, Марс */
+    C.glow(ctx, CX, CY, 26, CS_RGB, 0.55);
+    ctx.fillStyle = CS; ctx.beginPath(); ctx.arc(CX, CY, 8, 0, 7); ctx.fill();
+    ctx.fillStyle = CZ; ctx.beginPath(); ctx.arc(X(g.z), Y(g.z), 6, 0, 7); ctx.fill();
+    C.glow(ctx, X(pm), Y(pm), 14, CM_RGB, 0.5);
+    ctx.fillStyle = CM; ctx.beginPath(); ctx.arc(X(pm), Y(pm), 5, 0, 7); ctx.fill();
+
+    /* дата, обозначения, масштаб */
+    C.label(ctx, 14, 26, polnaya(s.t), 19, INK, 'left');
+    if (s.rezhim === 'segodnya') okulyar(ctx, g, ink, muted);
+    [['Солнце', CS], ['Земля', CZ], ['Марс', CM]].forEach(function (l, j) {
+      ctx.fillStyle = l[1]; ctx.beginPath(); ctx.arc(20, 398 + 24 * j, 5, 0, 7); ctx.fill();
+      C.label(ctx, 32, 404 + 24 * j, l[0], 17, MUT, 'left');
+    });
+    ctx.strokeStyle = MUT; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(392, 440); ctx.lineTo(392 + SC, 440);
+    ctx.moveTo(392, 435); ctx.lineTo(392, 445); ctx.moveTo(392 + SC, 435); ctx.lineTo(392 + SC, 445); ctx.stroke();
+    C.label(ctx, 392 + SC / 2, 430, '1 а.е.', 17, MUT);
+
+    /* ── полоса неба ── */
+
+    var str = stranica(s.t, g), o = str.o;
+    function PX(dl) { return SXC - dl * KX; }
+    function PY(b) { return SYC - (b - str.bc) * KY; }
+    function naStranice(t, lam) { return dlU(t, lam, o) - str.k * STR_SHAG; }
+    function sm(lam) { return wrap180(lam - str.lc); }
+
+    C.label(ctx, SX0, 17, 'С Земли видно направление и время, расстояние не видно', 17, MUT, 'left');
+    ctx.fillStyle = 'rgba(' + ink + ',.03)'; ctx.fillRect(SX0, SY0, SX1 - SX0, SY1 - SY0);
+    ctx.strokeStyle = 'rgba(' + muted + ',.4)'; ctx.lineWidth = 1;
+    ctx.strokeRect(SX0, SY0, SX1 - SX0, SY1 - SY0);
+
+    /* деления долготы через 10° */
+    ctx.fillStyle = MUT;
+    for (var L = 0; L < 360; L += 10) {
+      var dl = sm(L);
+      if (Math.abs(dl) > POLU) continue;
+      var x = PX(dl);
+      ctx.strokeStyle = 'rgba(' + muted + ',.5)';
+      ctx.beginPath(); ctx.moveTo(x, SY1); ctx.lineTo(x, SY1 + 6); ctx.stroke();
+      C.label(ctx, x, SY1 + 23, L + '°', 17, MUT);
+    }
+
+    /* созвездия: засечки границ по верхнему краю полосы, имена над ней */
+    SOZVEZDIYA.forEach(function (c) {
+      var a = c[1], b = c[2] < c[1] ? c[2] + 360 : c[2], lo = Infinity, hi = -Infinity;
+      for (var l = a; l <= b + 1e-9; l += 0.5) {
+        var d = sm(l);
+        if (Math.abs(d) <= POLU) { lo = Math.min(lo, d); hi = Math.max(hi, d); }
+      }
+      [a, b].forEach(function (gr) {
+        var d = sm(gr);
+        if (Math.abs(d) > POLU) return;
+        ctx.strokeStyle = 'rgba(' + muted + ',.55)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(PX(d), SY0); ctx.lineTo(PX(d), SY0 + 9); ctx.stroke();
+      });
+      if (!isFinite(lo)) return;
+      ctx.font = TEKST;
+      var w = ctx.measureText(c[0]).width, xc = PX((lo + hi) / 2);
+      if ((hi - lo) * KX < w + 6) return;
+      C.label(ctx, xc, SY0 - 7, c[0], 17, 'rgba(' + muted + ',.9)');
+    });
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(SX0, SY0, SX1 - SX0, SY1 - SY0); ctx.clip();
+
+    /* эклиптика */
+    if (PY(0) > SY0 && PY(0) < SY1) {
+      ctx.save(); ctx.setLineDash([4, 6]); ctx.strokeStyle = 'rgba(' + muted + ',.55)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(SX0, PY(0)); ctx.lineTo(SX1, PY(0)); ctx.stroke(); ctx.restore();
+    }
+
+    /* звёзды и подписи ярких: подпись, налезающая на другую или на
+       подписи углов полосы, пропускается; звезда за верхним или нижним
+       краем полосы не рисуется вовсе, чтобы её подпись не висела у края */
+    ctx.font = TEKST;
+    var zanyato = [
+      [SX0, SY1 - 24, SX0 + 12 + ctx.measureText('← восток').width, SY1],
+      [SX1 - 12 - ctx.measureText('широта ×3').width, SY1 - 24, SX1, SY1]
+    ];
+    ZVEZDY.forEach(function (z) {
+      var d = sm(z.lam);
+      if (Math.abs(d) > POLU + 1) return;
+      var x = PX(d), y = PY(z.bet);
+      if (y < SY0 - 3 || y > SY1 + 3) return;
+      ctx.fillStyle = INK;
+      ctx.beginPath(); ctx.arc(x, y, Math.max(1.4, 4.2 - 1.0 * z.mag), 0, 7); ctx.fill();
+      if (!z.name) return;
+      ctx.font = TEKST;
+      var ly = y + 16 > SY1 ? y - 8 : y + 6;       /* у нижнего края подпись над звездой */
+      var w = ctx.measureText(z.name).width, sleva = x + 7 + w > SX1 - 4;   /* у правого края подпись слева */
+      var bx = sleva ? [x - 7 - w, ly - 12, x - 7, ly + 6] : [x + 7, ly - 12, x + 7 + w, ly + 6];
+      for (var j = 0; j < zanyato.length; j++) {
+        var q = zanyato[j];
+        if (bx[0] < q[2] && bx[2] > q[0] && bx[1] < q[3] && bx[3] > q[1]) return;
+      }
+      zanyato.push(bx);
+      C.label(ctx, sleva ? x - 7 : x + 7, ly, z.name, 17, 'rgba(' + ink + ',.75)', sleva ? 'right' : 'left');
+    });
+
+    /* Солнце на полосе */
+    var ds = sm(g.sun);
+    if (Math.abs(ds) < POLU + 2) {
+      C.glow(ctx, PX(ds), PY(0), 30, CS_RGB, 0.6);
+      ctx.fillStyle = CS; ctx.beginPath(); ctx.arc(PX(ds), PY(0), 9, 0, 7); ctx.fill();
+    }
+
+    /* след Марса за этот синодический цикл; где Марс у Солнца и его не
+       видно, след бледный. Потом точки строк таблицы. */
+    var tochki = s.sled.concat([{ t: s.t, lam: g.lam, bet: g.bet, vid: g.elong >= ELONG_MIN }]);
+    var pred = null, gruppa = null;
+    function konchit() { if (gruppa !== null) { ctx.globalAlpha = gruppa ? 0.85 : 0.25; ctx.stroke(); } gruppa = null; }
+    ctx.lineWidth = 2; ctx.strokeStyle = CM;
+    tochki.forEach(function (p) {
+      var d = Math.abs(p.t - o.t) <= 420 ? naStranice(p.t, p.lam) : 999;
+      if (Math.abs(d) > POLU + 3) { konchit(); pred = null; return; }
+      var x = PX(d), y = PY(p.bet);
+      if (pred) {
+        if (gruppa !== p.vid) { konchit(); ctx.beginPath(); ctx.moveTo(pred[0], pred[1]); gruppa = p.vid; }
+        ctx.lineTo(x, y);
+      }
+      pred = [x, y];
+    });
+    konchit(); ctx.globalAlpha = 1;
+    s.stroki.forEach(function (r) {
+      if (!r.visible || Math.abs(r.t - o.t) > 420) return;
+      var d = naStranice(r.t, r.lambda);
+      if (Math.abs(d) > POLU + 3) return;
+      ctx.fillStyle = CM; ctx.beginPath(); ctx.arc(PX(d), PY(r.beta), 3, 0, 7); ctx.fill();
+    });
+
+    /* точки стояния и противостояние, когда Марс их прошёл. «Стоит» пишется
+       сбоку от петли, «противостояние» снаружи петли (со стороны, где нет
+       точек стояния), а если там край полосы, то внутри. */
+    var vnutr = o.bet > (o.bet1 + o.bet2) / 2 ? 1 : -1;
+    [[o.st1, o.lam1, o.bet1, 'стоит', -1], [o.t, o.lam, o.bet, 'противостояние', 0], [o.st2, o.lam2, o.bet2, 'стоит', 1]].forEach(function (m) {
+      if (s.t < m[0] - 1e-6) return;
+      var d = naStranice(m[0], m[1]);
+      if (Math.abs(d) > POLU) return;
+      var x = PX(d), y = PY(m[2]);
+      ctx.strokeStyle = MUT; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(x, y, 6, 0, 7); ctx.stroke();
+      if (m[4] === 0) {
+        var vverh = vnutr > 0 ? y - 32 >= SY0 : !(y + 28 <= SY1);
+        C.label(ctx, x, y + (vverh ? -14 : 26), m[3], 17, MUT);
+      }
+      else C.label(ctx, x + 12 * m[4], y + 6, m[3], 17, MUT, m[4] < 0 ? 'right' : 'left');
+    });
+
+    /* Марс */
+    var mx = PX(naStranice(s.t, g.lam)), my = PY(g.bet);
+    if (g.elong < ELONG_MIN) ctx.globalAlpha = 0.4;
+    C.glow(ctx, mx, my, 18, CM_RGB, 0.55);
+    ctx.fillStyle = CM; ctx.beginPath(); ctx.arc(mx, my, 6, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+
+    C.label(ctx, SX0 + 6, SY1 - 8, '← восток', 17, MUT, 'left');
+    C.label(ctx, SX1 - 6, SY1 - 8, 'широта ×3', 17, MUT, 'right');
+    ctx.restore();
+
+    /* ── таблица ── */
+
+    var TY = 252, TR = 22;
+    C.label(ctx, SX0, TY, 'дата', 17, MUT, 'left');
+    C.label(ctx, 722, TY, 'долгота Марса', 17, MUT, 'right');
+    C.label(ctx, 856, TY, 'широта Марса', 17, MUT, 'right');
+    C.label(ctx, SX1, TY, 'долгота Солнца', 17, MUT, 'right');
+    ctx.strokeStyle = 'rgba(' + muted + ',.45)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(SX0, TY + 8); ctx.lineTo(SX1, TY + 8); ctx.stroke();
+    ctx.font = MONO;
+    poslednie.forEach(function (r, j) {
+      var y = TY + 26 + TR * j, nov = j === poslednie.length - 1, z = r[s.rezhim];
+      var cv = nov ? CM : 'rgba(' + ink + ',.85)';
+      ctx.font = MONO; ctx.textAlign = 'left'; ctx.fillStyle = nov ? INK : 'rgba(' + ink + ',.85)';
+      ctx.fillText(kratkaya(r.t), SX0, y);
+      ctx.textAlign = 'right';
+      if (r.visible) {
+        ctx.fillStyle = cv;
+        ctx.fillText(ugol(z.lambda, s.rezhim, false), 722, y);
+        ctx.fillText(ugol(z.beta, s.rezhim, true), 856, y);
+      } else {
+        ctx.font = TEKST; ctx.fillStyle = MUT;
+        ctx.fillText('у Солнца, не виден', 856, y);
+        ctx.font = MONO;
+      }
+      ctx.fillStyle = nov ? INK : 'rgba(' + ink + ',.85)';
+      ctx.fillText(ugol(z.lambdaSun, s.rezhim, false), SX1, y);
+    });
+    ctx.textAlign = 'center';
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!pair[0]) { prodvinut(s.t); s.tekst = slova(); ui.tekst = s.tekst; pokazaniya(); }
+  window.__demoModel = { sZemli: sZemli, skorost: skorost, katalog: katalog, blizhajshee: blizhajshee, treugolnik: treugolnik, svodka: SVODKA, stranica: stranica };
+
+  function tochnost(r) { s.rezhim = r; obnovit(); }
+  function shag(v) {
+    s.shag = Math.round(C.clamp(v, SHAG_MIN, SHAG_MAX));
+    var posl = s.stroki[s.stroki.length - 1];
+    s.nextRow = posl ? posl.t + s.shag : T_START;
+    obnovit();
+  }
+  function skor(v) { s.skor = C.clamp(v, SKOR_MIN, SKOR_MAX); obnovit(); }
+  function kSleduyushemu() {
+    var o = sleduyushee(s.t);
+    if (!o) return;
+    prodvinut(o.t);
+    s.idet = false; obnovit();
+  }
+  function kepler() { s.kepler = !s.kepler; obnovit(); }
+  function pauza() { s.idet = !s.idet; obnovit(); }
+  function sbros() {
+    s.t = T_START; s.stroki = []; s.sled = []; s.nextRow = T_START; s.nextSled = T_START;
+    s.idet = true; prodvinut(T_START); obnovit();
+  }
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var g = sZemli(s.t), b = blizhajshee(s.t), o = b.o, v = skorost(s.t);
+    if (s.kepler) {
+      var tr = treugolnik(s.t, s.rezhim);
+      var nachalo = 'Через ' + A('686,98 суток') + ' Марс снова в той же точке орбиты, а Земля в другой. ';
+      if (!tr.vidno) {
+        var u = ' ближе ' + ELONG_MIN + '° к Солнцу';
+        var kogda = !tr.vidnoA && !tr.vidnoB ? 'И сегодня, и ' + polnaya(tr.t1) + ' Марс' + u + ', записей за эти дни нет. ' :
+                    !tr.vidnoA ? 'Сегодня Марс' + u + ' и не виден, записи за сегодня нет. ' :
+                    polnaya(tr.t1) + ', за марсианский год до этого, Марс был' + u + ', и записи за тот день нет. ';
+        return nachalo + kogda + 'Расстояние по двум записям здесь не получить: Кеплер брал из таблиц Браге пары дат, ' +
+          'когда Марс виден оба раза.';
+      }
+      return nachalo + 'Направления на него, снятые ' + polnaya(tr.t1) + ' и сегодня, пересекаются в Марсе: по этим двум записям ' +
+        (s.rezhim === 'brahe' ? 'с точностью Браге ' : '') + 'он в ' + A(num(tr.r, 3) + ' а.е.') +
+        ' от Солнца, в модели ' + num(tr.rTrue, 3) + '. ' +
+        (tr.angle < 5 ? 'Сейчас лучи почти параллельны, угол ' + num(tr.angle, 1) + '°, и ошибка записи сильно сдвигает точку. ' : '') +
+        'Так Кеплер получил расстояния, которых в таблице нет.';
+    }
+    if (Math.abs(s.t - o.t) < 0.6)
+      return 'Противостояние ' + A(polnaya(o.t)) + ': Марс напротив Солнца, до него ' + A(num(o.dist, 3) + ' а.е.') +
+        ', но с Земли этого не видно, в таблицу идут только углы. ' +
+        (b.pred ? 'От прошлого противостояния прошло ' + A(num(o.t - b.pred.t, 1) + ' суток') +
+          ', в среднем ' + num(SVODKA.synodicMean, 1) + ': промежутки разные, потому что орбиты вытянуты.' : '');
+    if (g.elong < ELONG_MIN)
+      return 'Марс ближе ' + ELONG_MIN + '° к Солнцу и теряется в его свете. В таблице пропуск, пока он не отойдёт от Солнца.';
+    if (v < 0)
+      return 'Марс пятится: его долгота убывает. Земля по внутренней орбите обгоняет Марс, и направление на него ' +
+        'поворачивает назад. Петля шириной ' + A(num(o.span, 1) + '°') + ', попятное движение длится ' +
+        A(num(o.days, 1) + ' суток') + ' (с ' + polnaya(o.st1) + ' по ' + polnaya(o.st2) + ').';
+    if (s.rezhim === 'segodnya')
+      return 'С телескопом углы пишут до секунды дуги, и у Марса виден диск: сейчас ' + A(num(g.disk, 1) + '″') +
+        ', за Солнцем ' + num(SVODKA.diskMin, 1) + '″, в самое близкое противостояние ' + num(SVODKA.diskMax, 1) + '″. ' +
+        'По диску видно, во сколько раз Марс приблизился, но не сколько до него километров. Секунды в таблице ' +
+        'показывают только запись: без притяжения других планет модель уходит от неба на минуты.';
+    return 'Марс идёт среди звёзд на восток, по карте неба влево. В таблицу ложатся дата, долгота и широта Марса ' +
+      'с точностью Браге, около 2′, и долгота Солнца: по ней известно, где на своей орбите Земля.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Точность:">
+          <${C.Btn} active=${ui.rezhim === 'brahe'} onClick=${function () { tochnost('brahe'); }}>Браге, 2′<//>
+          <${C.Btn} active=${ui.rezhim === 'segodnya'} onClick=${function () { tochnost('segodnya'); }}>телескоп сегодня, 1″<//>
+        <//>
+        <${C.Slider} label="Строка раз в:" min=${SHAG_MIN} max=${SHAG_MAX} step=${1} value=${ui.shag}
+                     onChange=${shag} display=${ui.shag + ' сут'} />
+        <${C.Slider} label="Скорость:" log=${true} min=${SKOR_MIN} max=${SKOR_MAX} value=${ui.skor}
+                     onChange=${skor} display=${num(ui.skor, 0) + ' сут/с'} />
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${kSleduyushemu}>Следующее противостояние<//>
+          <${C.Btn} active=${ui.kepler} onClick=${kepler}>Через 687 суток<//>
+          <${C.Btn} onClick=${pauza}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${ui.tekst} />
+    </div>`;
+}
+
+/* Подпись вдоль радиуса кольца, от кольца наружу; на левой половине
+   развёрнута, чтобы читалась слева направо. */
+function podpisRadialno(ctx, ang, r0, text, color) {
+  var a = ang * D2R, lev = Math.cos(a) < 0;
+  ctx.save();
+  ctx.translate(CX + r0 * Math.cos(a), CY - r0 * Math.sin(a));
+  ctx.rotate(lev ? Math.PI - a : -a);
+  ctx.fillStyle = color; ctx.font = TEKST;
+  ctx.textAlign = lev ? 'right' : 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
+/* Поле зрения телескопа: диск Марса в масштабе 1,8 пикселя на секунду
+   дуги и его фаза. Восток слева, как на полосе; освещённый край к Солнцу.
+   Освещённая часть: полукруг со стороны Солнца и полуэллипс с полуосью
+   R·cos i с другой стороны (cos i у Марса всегда больше 0,67). */
+var OKX = 40, OKY = 70, OKR = 24, OK_MASSH = 1.8;
+function okulyar(ctx, g, ink, muted) {
+  ctx.fillStyle = 'rgba(' + ink + ',.04)'; ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.arc(OKX, OKY, OKR, 0, 7); ctx.fill(); ctx.stroke();
+  var R = g.disk * OK_MASSH / 2, rx = R * Math.max(0, g.cosI);
+  var solnceVostok = wrap180(g.sun - g.lam) > 0;          /* Солнце восточнее, то есть левее */
+  ctx.fillStyle = 'rgba(' + CM_RGB + ',.14)';
+  ctx.beginPath(); ctx.arc(OKX, OKY, R, 0, 7); ctx.fill();
+  ctx.fillStyle = CM;
+  ctx.beginPath();
+  if (solnceVostok) { ctx.arc(OKX, OKY, R, Math.PI / 2, 3 * Math.PI / 2); ctx.ellipse(OKX, OKY, rx, R, 0, -Math.PI / 2, Math.PI / 2); }
+  else { ctx.arc(OKX, OKY, R, -Math.PI / 2, Math.PI / 2); ctx.ellipse(OKX, OKY, rx, R, 0, Math.PI / 2, 3 * Math.PI / 2); }
+  ctx.fill();
+  C.label(ctx, OKX + OKR + 8, OKY - 14, 'в телескоп', 17, 'rgb(' + muted + ')', 'left');
+  C.label(ctx, OKX + OKR + 8, OKY + 8, 'диск ' + num(g.disk, 1) + '″', 17, 'rgb(' + ink + ')', 'left');
+}
+
+/* Место подписи у кружка (x, y): из 48 мест вокруг него, где рамка подписи
+   целиком внутри кольца созвездий (иначе она ложится на имена созвездий
+   снаружи кольца), берётся то, где меньше всего штраф за круги помех
+   [x, y, радиус, вес], линии [точки ломаной, вес] и уже занятые рамки.
+   Сцена бывает тесной, когда прошлые Земли, Земля и Марс по одну сторону
+   от Солнца: тогда свободного места нет, и подпись ложится на бледную
+   орбиту или пунктир, реже на луч (счёт по прогону в отчёте).
+   Возвращает [x0, y0, x1, y1, текст, штраф за отступ], y0 верх рамки. */
+function mestoPodpisi(ctx, x, y, text, pomehi, zanyato, linii) {
+  ctx.font = TEKST;
+  var w = ctx.measureText(text).width, h = 18;
+  /* центр рамки на «эллипсе» вокруг кружка: 16 направлений, три отступа;
+     дальний отступ штрафуется чуть больше ближнего */
+  var mesta = [];
+  [9, 16, 24].forEach(function (d) {
+    for (var k = 0; k < 16; k++) {
+      var th = k * Math.PI / 8;
+      mesta.push([x + Math.cos(th) * (d + w / 2) - w / 2, y + Math.sin(th) * (d + h / 2) - h / 2, (d - 9) / 2]);
+    }
+  });
+  function vnutri(b) {
+    return [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]].every(function (q) {
+      return Math.hypot(q[0] - CX, q[1] - CY) < R_KOL - 6;
+    });
+  }
+  /* Штраф места: заход рамки в круги помех в пикселях, умноженный на вес
+     круга (по умолчанию 4), вес каждой задетой линии и сотня за каждую
+     задетую подпись. Рамка для линий взята на пиксель шире буквы. */
+  function shtraf(b) {
+    var sh = 0, bb = [b[0] - 1, b[1] - 1, b[2] + 1, b[3] + 1];
+    pomehi.forEach(function (c) {
+      var qx = C.clamp(c[0], b[0], b[2]), qy = C.clamp(c[1], b[1], b[3]);
+      sh += (c[3] || 4) * Math.max(0, c[2] - Math.hypot(qx - c[0], qy - c[1]));
+    });
+    (linii || []).forEach(function (l) {
+      for (var j = 1; j < l[0].length; j++) if (otrezokVRamke(l[0][j - 1], l[0][j], bb)) { sh += l[1]; return; }
+    });
+    zanyato.forEach(function (q) { if (b[0] < q[2] && b[2] > q[0] && b[1] < q[3] && b[3] > q[1]) sh += 100; });
+    return sh;
+  }
+  var ramki = mesta.map(function (m) { return [m[0], m[1], m[0] + w, m[1] + h, text, m[2]]; });
+  var vse = ramki.filter(vnutri);
+  if (!vse.length) return ramki[4];
+  var luchshee = vse[0], min = Infinity;
+  for (var i = 0; i < vse.length; i++) {
+    var sh = shtraf(vse[i]) + vse[i][5];
+    if (sh < min) { min = sh; luchshee = vse[i]; }
+  }
+  return luchshee;
+}
+
+/* Задевает ли отрезок pq рамку b = [x0, y0, x1, y1]: отсечение по
+   Лиангу и Барски, по четырём сторонам. */
+function otrezokVRamke(p, q, b) {
+  var t0 = 0, t1 = 1, dx = q[0] - p[0], dy = q[1] - p[1];
+  var pp = [-dx, dx, -dy, dy], qq = [p[0] - b[0], b[2] - p[0], p[1] - b[1], b[3] - p[1]];
+  for (var i = 0; i < 4; i++) {
+    if (pp[i] === 0) { if (qq[i] < 0) return false; continue; }
+    var r = qq[i] / pp[i];
+    if (pp[i] < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+    else { if (r < t0) return false; if (r < t1) t1 = r; }
+  }
+  return true;
+}
+
+/* Метка направления на кольце: кружок и риска внутрь. */
+function metkaNaKolce(ctx, lam, color) {
+  var a = lam * D2R, c = Math.cos(a), sn = Math.sin(a);
+  ctx.strokeStyle = color; ctx.lineWidth = 2.4;
+  ctx.beginPath(); ctx.moveTo(CX + (R_KOL - 14) * c, CY - (R_KOL - 14) * sn); ctx.lineTo(CX + R_KOL * c, CY - R_KOL * sn); ctx.stroke();
+  ctx.fillStyle = color; ctx.beginPath(); ctx.arc(CX + R_KOL * c, CY - R_KOL * sn, 4.5, 0, 7); ctx.fill();
+}
+
+C.mount(MarsSZemli);
+</script>
+</body>
+</html>

@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Секущая садится на касательную</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-02/">&larr; Неделя 02</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=kasatelnaya"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Предельный переход из блока skorost руками. В тексте он показан словами
+   и статичным рисунком ris-horda-sekushchaya; здесь то же самое считается
+   и печатается числами.
+
+   КРИВАЯ. Парабола броска под 45° из блока normalnoe-i-tangencialnoe:
+   v0 = 10 м/с, g = 9,81 м/с², откуда y = x − 0,0981 x², где коэффициент
+   0,0981 = g/(2 v0² cos²α). Та же парабола, что в pics/parabola_krivizna.tex:
+   дальность 10,1937 м, вершина (5,0968; 2,5484). Дугой окружности радиуса 33
+   с рисунка ris-horda-sekushchaya здесь пользоваться нельзя: у окружности
+   кривизна всюду одна, а нам нужна кривая, у которой касательная в каждой
+   точке своя.
+
+   ВРЕМЯ. Идёт настоящий бросок, а не параметризация x = t: горизонтальная
+   скорость vx = v0 cos 45° = 7,0711 м/с постоянна, вертикальная убывает как
+   vx − g t, весь полёт длится 2 vx/g = 1,4416 с. Первая точка взята на
+   t0 = 0,40 с, промежуток идёт от 0,8 с до 0,002 с.
+
+   Первая сборка демки пускала точку по той же параболе со скоростью 1 м/с
+   (x численно равен t): форма кривой от этого не меняется, но соседняя
+   демка krivizna-okruzhnost бежит по этой же параболе с настоящими
+   числами броска, и одна кривая несла бы в двух демках одной главы два
+   разных поля скоростей. Ровно это расхождение половин мы весь день и
+   вычищали, поэтому здесь оно исправлено, а не оговорено.
+
+   ЧТО СЧИТАЕТСЯ.
+     |Δr|/Δt — из двух положений точки, r(t0+Δt) − r(t0), вычитанием;
+               готовая формула для хорды не подставляется;
+     v(t0)   — из аналитической производной r′(t) = (vx; vx − g t);
+     угол    — между направлением хорды и направлением r′(t0).
+   В точке t0 = 0,40 с точное значение |r′| = 7,7398 м/с. Нижний край
+   ползунка взят 0,002 с не наугад: ошибка отношения убывает как 2,0·Δt
+   м/с, и до совпадения в третьем знаке (0,005 м/с) нужно Δt меньше
+   0,0025 с. На краю выходит 7,7358 против 7,7398, то есть 7,74 и 7,74,
+   а угол между хордой и касательной 0,066°. На верхнем краю, при Δt = 0,8 с,
+   клин около тридцати градусов — его и видно невооружённым глазом.
+
+   О ТОЧНОСТИ ВЫЧИТАНИЯ. Координаты порядка 3 м, разность на нижнем краю
+   порядка 0,015 м, двойная точность оставляет от неё около 14 верных знаков.
+   До края ползунка вычитание считается без потерь, и подпирать его
+   разложением в ряд незачем.
+
+   ЛУПА. Правая половина сцены — крупный план у точки A, и масштаб в ней
+   подобран так, чтобы хорда всегда занимала одну и ту же длину на экране.
+   Тогда видно то, ради чего всё затевалось: хорда стягивается в точку,
+   а направление у неё остаётся, и меняется в лупе только угол между
+   секущей и касательной. */
+
+var VX = 7.0711;             /* м/с, горизонтальная скорость: v0 cos 45° при v0 = 10 */
+var G = 9.81;                /* м/с² */
+var T0 = 0.40;               /* с, первая точка */
+var TMAX = 2 * VX / G;       /* 1,4416 с — полёт целиком */
+var XMAX = VX * TMAX;        /* 10,1937 м — дальность, та же, что в pics/parabola_krivizna */
+var DT_MIN = 0.002, DT_MAX = 0.8;
+var SQUEEZE = 4.0;           /* с, за столько кнопка сжимает промежуток от края до края */
+
+/* закон движения и его производная, взятая аналитически */
+function pos(t){ return { x: VX * t, y: VX * t - 0.5 * G * t * t }; }
+function vel(t){ return { x: VX, y: VX - G * t }; }
+
+/* Всё, что демка утверждает, считается здесь и больше нигде. Возвращается
+   один объект: он же уходит в __demoState, по нему же рисуется сцена —
+   картинка и показания не могут разойтись по построению. */
+function measure(dt){
+  var a = pos(T0), b = pos(T0 + dt);
+  var dx = b.x - a.x, dy = b.y - a.y;
+  var chord = Math.sqrt(dx * dx + dy * dy);
+  var v = vel(T0);
+  var vAbs = Math.sqrt(v.x * v.x + v.y * v.y);
+  var aChord = Math.atan2(dy, dx), aTan = Math.atan2(v.y, v.x);
+  return {
+    dt: dt, t0: T0,
+    ax: a.x, ay: a.y, bx: b.x, by: b.y,
+    chord: chord,                       /* |Δr|, м */
+    ratio: chord / dt,                  /* |Δr|/Δt, м/с */
+    vExact: vAbs,                       /* |r′(t0)|, м/с */
+    angle: Math.abs(aTan - aChord) * 180 / Math.PI,
+    dirChord: aChord, dirTan: aTan
+  };
+}
+
+/* Русский разделитель: рядом с показаниями стоят подписи на русском,
+   и точка посреди запятых читается как чужая. */
+function num(v, d){ return v.toFixed(d).replace('.', ','); }
+
+function tex(s){
+  try { return katex.renderToString(s, { throwOnError: false }); }
+  catch (e) { return s; }
+}
+
+/* ══════════════════ сцена ══════════════════ */
+
+var W = 1000, HGT = 450;
+
+/* Левая половина: метры кладутся на экран одним масштабом по обеим осям.
+   Иначе нарисованный угол между хордой и касательной не совпадал бы
+   с посчитанным, а он здесь главное показание. */
+var SC = 49.5, OX = 62, OY = 306;
+var PLOT = { x0: 40, y0: 50, x1: 610, y1: 330 };
+
+/* Лупа: круглое окно, в котором хорда всегда нарисована длиной LENS.chord.
+   Точка A смещена от центра против хода хорды, чтобы B не вылезала за край. */
+var LENS = { cx: 802, cy: 178, r: 130, ax: 756, ay: 202, chord: 104 };
+
+/* Цвета данных от темы не зависят (правило контракта), но взяты из канона
+   рисунков курса: figa = #0F7A8A касательная, figb = #C2571A хорда. Оттенки
+   сдвинуты к середине, чтобы линии читались и на светлом полотне главы,
+   и на тёмном слайде колоды. */
+var COL_TAN = '#2fa8b8', COL_CHORD = '#e0783a';
+
+function Kasatelnaya(){
+  var st = useRef({ dt: 0.5, anim: false, m: null }).current;
+  if (!st.m) st.m = measure(st.dt);
+
+  var [ui, setUi] = useState({ dt: st.dt, anim: false });
+  var tone = null;
+
+  /* Сжатие идёт равномерно по логарифму: за одну секунду промежуток
+     делится на одно и то же число, поэтому нижние декады не проскакивают
+     мгновенно, как было бы при линейном ходе. */
+  function step(dt){
+    if (st.anim) {
+      st.dt *= Math.pow(DT_MIN / DT_MAX, dt / SQUEEZE);
+      if (st.dt <= DT_MIN) { st.dt = DT_MIN; st.anim = false; }
+      setUi({ dt: st.dt, anim: st.anim });
+    }
+    st.m = measure(st.dt);
+  }
+
+  function setDt(v){
+    /* Крайние позиции ползунка дотягиваются до краёв диапазона руками.
+       Логарифмическая шкала ходит по двумстам позициям, шаг между ними
+       браузер округляет вниз, и до правого края не хватает одной позиции:
+       без этой пары строк заявленный верхний край на ползунке недостижим,
+       а на нижнем вместо 0,002 приезжает 0,002000000000000001. */
+    if (v > DT_MAX * 0.96) v = DT_MAX;
+    if (v < DT_MIN * 1.04) v = DT_MIN;
+    st.dt = C.clamp(v, DT_MIN, DT_MAX);
+    st.anim = false;                    /* рука на ползунке отменяет показ */
+    st.m = measure(st.dt);
+    setUi({ dt: st.dt, anim: false });
+  }
+
+  function squeeze(){
+    if (st.anim) { st.anim = false; }
+    else { st.dt = DT_MAX; st.anim = true; }
+    st.m = measure(st.dt);
+    setUi({ dt: st.dt, anim: st.anim });
+  }
+
+  /* ── примитивы ── */
+
+  function px(x){ return OX + x * SC; }
+  function py(y){ return OY - y * SC; }
+
+  /* Прямая через точку в заданном направлении: рисуется заведомо длинной
+     и обрезается по окну, чтобы не считать пересечения с рамкой руками. */
+  function ray(ctx, x, y, ang, len, col, w){
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = col; ctx.lineWidth = w;
+    ctx.beginPath();
+    ctx.moveTo(x - Math.cos(ang) * len, y + Math.sin(ang) * len);
+    ctx.lineTo(x + Math.cos(ang) * len, y - Math.sin(ang) * len);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* Хорда — вектор Δr, поэтому у неё наконечник. На коротком отрезке
+     наконечник больше самой хорды, и тогда его нет. */
+  function arrow(ctx, x0, y0, x1, y1, col, w){
+    ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    var len = Math.sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+    if (len < 16) return;
+    var a = Math.atan2(y1 - y0, x1 - x0), s = Math.min(12, len * 0.3);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 - s * Math.cos(a - 0.42), y1 - s * Math.sin(a - 0.42));
+    ctx.lineTo(x1 - s * Math.cos(a + 0.42), y1 - s * Math.sin(a + 0.42));
+    ctx.closePath(); ctx.fillStyle = col; ctx.fill();
+  }
+
+  function dot(ctx, x, y, r, col){
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.284);
+    ctx.fillStyle = col; ctx.fill();
+  }
+
+  /* ── левая половина: кривая целиком ── */
+
+  function drawPlot(ctx, m){
+    var ax = px(m.ax), ay = py(m.ay), bx = px(m.bx), by = py(m.by);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(PLOT.x0, PLOT.y0, PLOT.x1 - PLOT.x0, PLOT.y1 - PLOT.y0);
+    ctx.clip();
+
+    /* земля: без неё парабола висит в пустоте и не читается как бросок */
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.28)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(px(0), py(0)); ctx.lineTo(px(XMAX), py(0)); ctx.stroke();
+
+    /* сама траектория от старта до возвращения на нулевую высоту */
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.55)'; ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    for (var i = 0; i <= 200; i++) {
+      var t = TMAX * i / 200, p = pos(t);
+      if (i) ctx.lineTo(px(p.x), py(p.y)); else ctx.moveTo(px(p.x), py(p.y));
+    }
+    ctx.stroke();
+
+    /* секущая через A и B, потом касательная в A поверх неё */
+    ray(ctx, ax, ay, m.dirChord, 900, 'rgba(' + tone.ink + ',.45)', 1.6);
+    ray(ctx, ax, ay, m.dirTan, 900, COL_TAN, 2.6);
+
+    /* Окно лупы: во что смотрит правая половина сцены. Радиус переводится
+       из экранных пикселей лупы в метры и обратно в пиксели левой сцены.
+       При сжатом промежутке от него остаётся точка — и увеличение под
+       лупой говорит, во сколько раз эта точка растянута. */
+    var viewPx = Math.max(4, LENS.r * m.chord / LENS.chord * SC);
+    ctx.save();
+    ctx.setLineDash([5, 6]);
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.5)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(ax, ay, viewPx, 0, 6.284); ctx.stroke();
+    ctx.restore();
+    ctx.restore();
+
+    /* вертикаль от A до земли: она называет момент, в который взята
+       первая точка, а вместе с ним и место на кривой */
+    ctx.save();
+    ctx.setLineDash([3, 6]);
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.45)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax, py(0)); ctx.stroke();
+    ctx.restore();
+    C.label(ctx, ax, py(0) + 22, '0,40 с от старта', 17, 'rgba(' + tone.muted + ',.9)');
+
+    arrow(ctx, ax, ay, bx, by, COL_CHORD, 3.4);
+    dot(ctx, ax, ay, 5, 'rgb(' + tone.ink + ')');
+    dot(ctx, bx, by, 5, 'rgb(' + tone.ink + ')');
+    C.label(ctx, ax - 15, ay + 22, 'A', 20, 'rgb(' + tone.ink + ')');
+    /* Буква B ставится, только пока B видна отдельно от A: при сжатом
+       промежутке точки сливаются, и две буквы легли бы одна на другую. */
+    if (Math.abs(bx - ax) + Math.abs(by - ay) > 18)
+      C.label(ctx, bx + 15, by - 10, 'B', 20, 'rgb(' + tone.ink + ')');
+
+    /* Легенда вместо подписей вдоль линий: секущая с касательной сходятся,
+       и подписи у самих линий наезжали бы друг на друга ровно в тот момент,
+       ради которого демка сделана. */
+    var leg = [
+      { c: COL_TAN, w: 3, t: 'касательная' },
+      { c: COL_CHORD, w: 3.4, t: 'хорда' },
+      { c: 'rgba(' + tone.ink + ',.45)', w: 1.6, t: 'секущая' }
+    ];
+    leg.forEach(function(row, k){
+      var y = 72 + k * 26;
+      ctx.strokeStyle = row.c; ctx.lineWidth = row.w; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(52, y - 6); ctx.lineTo(80, y - 6); ctx.stroke();
+      C.label(ctx, 90, y, row.t, 18, 'rgb(' + tone.muted + ')', 'left');
+    });
+  }
+
+  /* ── правая половина: крупный план у точки A ── */
+
+  function drawLens(ctx, m){
+    var scale = LENS.chord / m.chord;          /* px на метр внутри лупы */
+    var ax = LENS.ax, ay = LENS.ay;
+
+    ctx.save();
+    ctx.beginPath(); ctx.arc(LENS.cx, LENS.cy, LENS.r, 0, 6.284); ctx.clip();
+
+    /* Кривая в лупе: тот же закон, только другой масштаб. Чем сильнее
+       увеличение, тем прямее она выглядит — это и есть касательная.
+       Линия здесь шире, чем на левой сцене: при большом увеличении
+       касательная ложится на кривую, и узкая линия просто пропала бы
+       под ней, как будто её не нарисовали. */
+    var reach = (LENS.r + 60) / scale;         /* сколько метров влезает в окно */
+    /* Метры переводятся в секунды делением на горизонтальную скорость: она
+       постоянна, поэтому перевод точный. Раньше здесь метры шли за секунды
+       напрямую — это работало, пока x численно равнялся t. */
+    var reachT = reach / VX;
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.45)'; ctx.lineWidth = 5;
+    ctx.beginPath();
+    for (var i = 0; i <= 220; i++) {
+      var t = C.clamp(T0 - reachT + 2 * reachT * i / 220, 0, TMAX);
+      var p = pos(t);
+      var sx = ax + (p.x - m.ax) * scale, sy = ay - (p.y - m.ay) * scale;
+      if (i) ctx.lineTo(sx, sy); else ctx.moveTo(sx, sy);
+    }
+    ctx.stroke();
+
+    ray(ctx, ax, ay, m.dirChord, 400, 'rgba(' + tone.ink + ',.45)', 1.6);
+    ray(ctx, ax, ay, m.dirTan, 400, COL_TAN, 2.6);
+
+    /* Угол между ними — клин у самой точки A. Клин схлопывается вместе
+       с углом, и в этом весь показ: длина хорды в лупе не меняется,
+       а меняется только он. Экранные углы взяты с обратным знаком:
+       на канве ось y смотрит вниз. */
+    ctx.fillStyle = 'rgba(' + tone.ink + ',.16)';
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.arc(ax, ay, 86, -m.dirTan, -m.dirChord);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.55)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(ax, ay, 86, -m.dirTan, -m.dirChord); ctx.stroke();
+
+    var bx = ax + Math.cos(m.dirChord) * LENS.chord;
+    var by = ay - Math.sin(m.dirChord) * LENS.chord;
+    arrow(ctx, ax, ay, bx, by, COL_CHORD, 3.4);
+    dot(ctx, ax, ay, 5, 'rgb(' + tone.ink + ')');
+    dot(ctx, bx, by, 5, 'rgb(' + tone.ink + ')');
+    C.label(ctx, ax - 16, ay + 24, 'A', 20, 'rgb(' + tone.ink + ')');
+    C.label(ctx, bx + 18, by - 10, 'B', 20, 'rgb(' + tone.ink + ')');
+    ctx.restore();
+
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.35)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(LENS.cx, LENS.cy, LENS.r, 0, 6.284); ctx.stroke();
+
+    var mag = scale / SC;
+    /* Не «крупный план»: при широком промежутке хорда длиннее того, что
+       влезает в окно, и увеличение выходит меньше единицы. Слово в
+       подписи спорило бы с числом, которое стоит строкой ниже. */
+    C.label(ctx, LENS.cx, 34, 'окно у точки A', 18, 'rgb(' + tone.muted + ')');
+    C.label(ctx, LENS.cx, 342,
+            'увеличение ×' + (mag >= 10 ? String(Math.round(mag)) : num(mag, 1)) +
+            ' · хорда держится одной длины', 17, 'rgba(' + tone.muted + ',.9)');
+  }
+
+  function drawReadouts(ctx, m){
+    var y = 386;
+    C.readout(ctx, 300, y, 'ХОРДА, ДЕЛЁННАЯ НА ВРЕМЯ, м/с', num(m.ratio, 3), COL_CHORD);
+    C.readout(ctx, 640, y, 'СКОРОСТЬ ПО ПРОИЗВОДНОЙ, м/с', num(m.vExact, 3), COL_TAN);
+    C.readout(ctx, 960, y, 'УГОЛ С КАСАТЕЛЬНОЙ',
+              num(m.angle, m.angle < 0.1 ? 3 : 2) + '°', 'rgb(' + tone.ink + ')');
+  }
+
+  function draw(ctx){
+    tone = C.tones(ctx);
+    var m = st.m;
+    drawPlot(ctx, m);
+    drawLens(ctx, m);
+    drawReadouts(ctx, m);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  /* Для автопроверки: __demoState.dt — промежуток, его можно выставить
+     снаружи и продвинуть модель через __demoTick; __demoState.m — все
+     показания, посчитанные из этого dt, ровно те же, что на сцене. */
+  window.__demoState = st;
+
+  var m = st.m;
+  var verdict = m.angle >= 2
+    ? 'Секущая идёт своим наклоном, и отношение до скорости не дотягивает.'
+    : m.angle >= 0.3
+      ? 'Секущая подходит к касательной, отношение подбирается к скорости.'
+      : 'Секущая села на касательную, отношение сошлось со скоростью в третьем знаке. ' +
+        'Хорда исчезла, направление осталось.';
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Slider} label="Промежуток:" log=${true}
+                     min=${DT_MIN} max=${DT_MAX} value=${ui.dt}
+                     onChange=${setDt}
+                     display=${num(ui.dt, ui.dt < 0.1 ? 3 : 2) + ' с'} />
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${squeeze}>
+            ${ui.anim ? 'Стоп' : 'Сжать промежуток'}<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${
+        'Бросок под 45° со скоростью 10 м/с из главы, ' +
+        tex('\\vec r(t) = (v_x t;\\; v_x t - g t^2/2)') +
+        ' при ' + tex('v_x = 7{,}07') + ' м/с; первая точка при ' +
+        tex('t_0 = 0{,}40') + ' с, там ' + tex('|\\vec v| = 7{,}74') + ' м/с. ' + verdict} />
+    </div>`;
+}
+
+C.mount(Kasatelnaya);
+</script>
+</body>
+</html>

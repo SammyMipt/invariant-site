@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Удар в системе центра масс</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-04/">&larr; Неделя 04</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=udar-v-scm"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Держит второй акт недели: блоки `tipy-stolknovenij`, `uprugij-udar-1d`,
+   `sistema-centra-mass`, `predelnyj-ugol`, `porogovaya-energiya`.
+   Написана генеральной сессией 15.09 (билдера оборвал лимит), бриф
+   briefs/demki_nedelya04.md, № 5. Режим порога переписан 21.09 по
+   замечанию автора: параметры реакции настраиваются, и при реакции
+   частицы сливаются в новую, другую частицу.
+
+   МОДЕЛЬ УДАРА. Две гладкие шайбы: налетающая массы m₁ со скоростью v₁
+   вдоль оси x, покоящаяся массы m₂. Центр покоящейся в начале координат,
+   налетающая идёт по прямой y = b, где b есть прицельное расстояние в
+   долях суммы радиусов R, от 0 до 0,99. В момент касания линия центров
+   n̂ = (√(1 − b²), −b). Удар мгновенный и гладкий: касательная к n̂
+   составляющая относительной скорости не меняется, нормальная меняет
+   знак и умножается на коэффициент восстановления e. Скорости после
+   удара собираются из скорости центра масс, которую удар не трогает, и
+   новой относительной скорости:
+       v₁′ = V + m₂/(m₁ + m₂)·v′отн,   v₂′ = V − m₁/(m₁ + m₂)·v′отн,
+   поэтому импульс пары сохраняется по построению и MV²/2 не меняется
+   ни в одном ударе. Меняется только K_отн = μv²отн/2, μ = m₁m₂/(m₁ + m₂).
+
+   УГЛЫ снимаются с векторов после удара: отклонение налетающей и
+   направление отдачи в лабораторной системе, поворот скорости налетающей
+   в системе центра масс. При m₁ > m₂ отклонение не больше arcsin(m₂/m₁).
+
+   ПОРОГ РЕАКЦИИ, отдельный режим со своей функцией porog. Реакция
+   A + B → C: частица A массы m налетает лобово на покоящуюся частицу B
+   массы M с энергией K. Буквы взяты из раздела «Найдём порог реакции»
+   блока porogovaya-energiya, где M есть масса мишени, поэтому сумма масс
+   в этом режиме всюду пишется M + m, и одной буквой M она не обозначается.
+   Счёт идёт через скорости, как в sistema-centra-mass: v = √(2K/m),
+   V_C = mv/(M + m), μ = mM/(M + m), и
+       K = (M + m)V_C²/2 + K_отн,   K_отн = μv²/2 = K·M/(M + m).
+   Первую часть держит импульс, реакция может взять только вторую. При
+   K_отн ≥ Q частицы сливаются в новую частицу C массы M + m: она идёт со
+   скоростью центра масс, в системе центра масс стоит и уносит ровно
+   (M + m)V_C²/2, а избыток K_отн − Q остаётся в ней энергией
+   возбуждения. При K_отн < Q реакции нет, и удар упругий:
+       v_A′ = (m − M)/(M + m)·v,   v_B′ = 2m/(M + m)·v.
+   Условие K_отн ≥ Q то же, что K ≥ K_пор = Q(1 + m/M). Сравнение идёт с
+   допуском 10⁻⁹ от Q: кнопка «на порог» ставит K = Q(1 + m/M), и K_отн,
+   пересчитанная через скорость, может выйти меньше Q в последнем знаке;
+   без допуска реакция на самом пороге то шла бы, то нет.
+
+   Слияние в одну частицу есть модель. У настоящей реакции продуктов бывает
+   несколько, у ¹⁴N(α, p)¹⁷O это протон и ядро кислорода. На пороге они
+   идут вместе, со скоростью центра масс, и выглядят одной частицей; выше
+   порога избыток уходит в их относительное движение, а демка оставляет его
+   в C энергией возбуждения. Масса C равна M + m: прибавку Q/c² механика
+   этого курса не различает.
+
+   ЧИСЛА режима порога условные, без единиц. По умолчанию массы равны,
+   m = M = 1, Q = 2 и K = 3, полтора Q, как в заметках кадра колоды перед
+   выводом порога. Импульс держит половину K, 1,5, реакции доступно 1,5,
+   и реакции нет, хотя K больше Q; порог 4, вдвое больше Q, как в главе
+   при m = M. Ползунки: массы от 0,2 до 5, так что налетающая бывает в 25
+   раз легче мишени и в 25 раз тяжелее; Q от 0,5 до 5; K от 0,1 до 150, и
+   самый высокий порог, 5·(1 + 25) = 130, в шкалу K помещается. Шкалы
+   логарифмические с шагом 0,002 по логарифму, значения округляются до
+   двух значащих цифр: K идёт 3,8; 3,9; 4,0; 4,1, и круглое число
+   достижимо всегда. «На порог» ставит K без округления.
+
+   ПРЕСЕТЫ из главы: машина 1000 кг и грузовик 10 т, сближение 100 км/ч,
+   слипание, в тепло 350,7 кДж, кто бы ни ехал; α-частица на электроне,
+   отношение масс 7294, предельный угол 0,0079°; равные массы, упругий
+   нецентральный удар, угол между скоростями после удара прямой. Энергии
+   «равных масс» и «α на электроне» в условных единицах: массы в массах
+   лёгкой шайбы, v₁ = 1. Четвёртый опыт включает режим порога.
+
+   АДРЕС. ?rezhim=porog открывает демку сразу в режиме порога: он нужен
+   кадру колоды перед выводом порога. Без параметра демка открывается на
+   равных массах. */
+
+var PRESETY = [
+  { imya: 'равные массы', m1: 1, m2: 1, v1: 1, b: 0.5, e: 1, rezh: 'udar', ed: 'усл.' },
+  { imya: 'машина и грузовик', m1: 1000, m2: 10000, v1: 100 / 3.6, b: 0, e: 0, rezh: 'udar', ed: 'кДж' },
+  { imya: 'α на электроне', m1: 7294, m2: 1, v1: 1, b: 0.5, e: 1, rezh: 'udar', ed: 'усл.' },
+  { imya: 'порог реакции', m: 1, M: 1, K: 3, Q: 2, rezh: 'porog', ed: 'усл.' }
+];
+
+/* С какого опыта открываться: ?rezhim=porog сразу даёт порог. */
+var START = 0;
+try {
+  if (new URLSearchParams(location.search).get('rezhim') === 'porog')
+    START = PRESETY.findIndex(function (q) { return q.rezh === 'porog'; });
+} catch (e) {}
+
+function sub(a, b) { return [a[0] - b[0], a[1] - b[1]]; }
+function add(a, b) { return [a[0] + b[0], a[1] + b[1]]; }
+function mul(a, k) { return [a[0] * k, a[1] * k]; }
+function dot(a, b) { return a[0] * b[0] + a[1] * b[1]; }
+function len(a) { return Math.sqrt(dot(a, a)); }
+function mezhduGrad(a, b) {
+  var c = dot(a, b) / (len(a) * len(b));
+  return Math.acos(Math.max(-1, Math.min(1, c))) * 180 / Math.PI;
+}
+
+/* Исход удара. p: m1, m2, v1, b (доля суммы радиусов), e. */
+function iskhod(p) {
+  var m1 = p.m1, m2 = p.m2, M = m1 + m2, mu = m1 * m2 / M;
+  var v1 = [p.v1, 0];
+  var V = mul(v1, m1 / M);                                    /* вторая шайба покоится */
+  var b = p.b;
+  var n = [Math.sqrt(Math.max(0, 1 - b * b)), -b];            /* линия центров от первой ко второй */
+  var vn = dot(v1, n), vt = sub(v1, mul(n, vn));              /* относительная скорость равна v₁ */
+  var vrel = add(vt, mul(n, -p.e * vn));
+  var v1p = add(V, mul(vrel, m2 / M)), v2p = sub(V, mul(vrel, m1 / M));
+  var pDo = mul(v1, m1), pPosle = add(mul(v1p, m1), mul(v2p, m2));
+  var Vp = mul(pPosle, 1 / M);
+  var KrelDo = mu * p.v1 * p.v1 / 2, KrelPosle = mu * dot(vrel, vrel) / 2;
+  var u1 = sub(v1, V), u1p = sub(v1p, V), nol = 1e-9 * p.v1;
+  return {
+    m1: m1, m2: m2, v1: p.v1, b: b, e: p.e,
+    Q: null, reaction: false, Kthreshold: null,               /* поля порога, в ударе пустые: форма состояния из брифа */
+    V: V, v1p: v1p, v2p: v2p,
+    KCM: M * dot(V, V) / 2, KCMafter: M * dot(Vp, Vp) / 2,
+    KrelBefore: KrelDo, KrelAfter: KrelPosle,
+    heat: KrelDo - KrelPosle,
+    K1: m1 * p.v1 * p.v1 / 2,
+    thetaLab1: len(v1p) > nol ? mezhduGrad(v1, v1p) : null,
+    thetaLab2: len(v2p) > nol ? mezhduGrad(v1, v2p) : null,
+    angleBetween: len(v1p) > nol && len(v2p) > nol ? mezhduGrad(v1p, v2p) : null,
+    thetaCM: len(u1p) > nol ? mezhduGrad(u1, u1p) : null,
+    thetaMax: m1 > m2 ? Math.asin(m2 / m1) * 180 / Math.PI : null,
+    momentumError: len(sub(pPosle, pDo)) / len(pDo)
+  };
+}
+
+/* Порог реакции A + B → C, см. шапку. m налетающей, M мишени, K энергия
+   налетающей, Q энергия, которую забирает реакция. Всё через скорости;
+   замкнутые формулы главы, K·M/(M + m) и Q(1 + m/M), с этим счётом
+   сверяются снаружи (отчёт сборки 21.09). */
+var DOPUSK = 1e-9;
+function porog(m, M, K, Q) {
+  var sum = M + m, mu = m * M / sum;
+  var v = Math.sqrt(2 * K / m);                   /* налетающая в лабораторной системе */
+  var VC = m * v / sum;                           /* мишень покоится */
+  var KCM = sum * VC * VC / 2;                    /* держит импульс */
+  var Krel = mu * v * v / 2;                      /* относительная скорость равна v */
+  var poshla = Krel >= Q * (1 - DOPUSK);
+  var Ev = poshla && Krel - Q > DOPUSK * Q ? Krel - Q : 0;
+  var vA = poshla ? null : (m - M) / sum * v;     /* упругий лобовой удар */
+  var vB = poshla ? null : 2 * m / sum * v;
+  var vC = poshla ? VC : null;
+  var pPosle = poshla ? sum * vC : m * vA + M * vB;
+  var Kposle = poshla ? sum * vC * vC / 2 + Q + Ev : m * vA * vA / 2 + M * vB * vB / 2;
+  return {
+    rezh: 'porog', m: m, M: M, K: K, Q: Q, mC: poshla ? sum : null,
+    v: v, VC: VC, mu: mu,
+    KCM: KCM, KrelBefore: Krel, KrelAfter: poshla ? 0 : Krel,
+    Kthreshold: Q * (1 + m / M), share: M / sum,  /* доля K, доступная реакции */
+    reaction: poshla, Qspent: poshla ? Q : 0, excitation: Ev,
+    vA: vA, vB: vB, vC: vC, vCcm: poshla ? vC - VC : null,
+    momentumError: Math.abs(pPosle - m * v) / (m * v),
+    energyError: Math.abs(Kposle - K) / K
+  };
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева шайбы в выбранной системе отсчёта со стрелками скоростей и
+   кольцом центра масс; удар в момент t = 0. Справа окружность скоростей
+   в лабораторной системе: вектор скорости центра масс, окружность
+   радиуса скорости налетающей в системе центра масс вокруг его конца и
+   после удара векторы v₁′ и v₂′. Внизу счёт энергии; то, что после
+   удара, появляется в момент удара.
+
+   В режиме порога справа вместо окружности скоростей стоит счёт энергии
+   столбиками, и подписи под ними складываются в формулу
+   K = (M + m)V_C²/2 + K_отн: оливковый (M + m)V_C²/2, который держит
+   импульс, K_отн цветом акцента с чертой Q, а слева от знака равенства K
+   налетающей, сложенный из тех же двух частей, с чертой порога K_пор.
+   Масштаб у столбиков общий, по большему из K и K_пор; пунктирная рамка
+   над столбиком показывает, сколько не хватает до черты. Счёт идёт в
+   лабораторной системе при любом переключателе: K есть энергия
+   налетающей. После реакции нижняя часть K_отн, равная Q, становится
+   серой, она ушла на образование C; остаток, энергия возбуждения,
+   остаётся цветом K_отн, и тем же цветом светится C, ярче при большем
+   остатке. Столбик K делится так же и показывает баланс главы:
+   K = (M + m)V_C²/2 + Q + остаток. На самом пороге свечения нет. C оливковая, третий цвет канона рядом с
+   оранжевой A и бирюзовой B, и того же цвета столбик (M + m)V_C²/2: вся
+   кинетическая энергия C и есть энергия движения центра масс. Радиус
+   частицы пропорционален кубическому корню из массы, как у шаров одной
+   плотности. Слияние на экране длится T_SL: A и B съезжаются к центру масс
+   и гаснут, C вырастает, а центр масс пары всё это время идёт равномерно.
+   Стрелки скоростей в этом режиме начинаются от края частицы: у тяжёлой C
+   стрелка V_C короче её радиуса и из центра не была бы видна. */
+
+var W = 1000, HGT = 440;
+var SX1 = 640, SY1 = 290;                /* поле сцены: за краем шайбы гаснут */
+var SCX = 330, SCY = 150;                /* место удара */
+var RS = 46;                             /* сумма радиусов на экране, единица b */
+var VSC = 150;                           /* пикселей в секунду у налетающей в лаб. системе */
+var T0 = -1.3, T1 = 1.7;                 /* с, окно проигрыша */
+var DO = [800, 150], DK = 120;           /* диаграмма скоростей: начало и длина v₁ */
+var TAU = 2 * Math.PI;
+var ORAN = '224,138,82', GOLUB = '77,182,198';
+var OLIV = '134,171,46';                 /* новая частица C, figconst канона */
+var R_ED = 22;                           /* px, радиус частицы массы 1 в режиме порога */
+var SCX_P = 290;                         /* место удара в режиме порога: левее, чтобы у B после
+                                            упругого удара равных масс стрелка к концу проигрыша
+                                            не упиралась в край сцены */
+var T_SL = 0.3;                          /* с, слияние на экране */
+var PX_K = 715, PX_CM = 830, PX_REL = 945;   /* столбики счёта: K, (M + m)V_C²/2, K_отн */
+var PB_Y = 268, PB_H = 186, PB_W = 40;   /* их основание, наибольшая высота, ширина */
+
+function num(v, d) {
+  if (v == null) return '—';
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function celoe(v) { return String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+function otnStr(r) { return r >= 100 ? celoe(r) : num(r, r >= 10 ? 1 : 2); }
+function grad(v) { return v == null ? '—' : num(v, v < 1 ? 4 : 1) + '°'; }
+function radiusy(m1, m2) { return m1 > m2 * 1.001 ? [28, 18] : m2 > m1 * 1.001 ? [18, 28] : [23, 23]; }
+
+/* Режим порога: энергии и массы тремя значащими цифрами, от 0,1 до 150. */
+function en(v) { return v == null ? '—' : num(v, v >= 100 ? 0 : v >= 10 ? 1 : 2); }
+/* До n значащих цифр: логарифмический ползунок отдаёт 2,9903, а зал
+   должен видеть 3,0. */
+function znach(v, n) {
+  var k = Math.pow(10, n - 1 - Math.floor(Math.log10(v)));
+  return Math.round(v * k) / k;
+}
+function radius(massa) { return R_ED * Math.cbrt(massa); }
+
+/* Строка с индексами на канве: части [текст, '' | 'sub'], индекс на
+   четверть мельче и ниже строки. Возвращает левый и правый край строки. */
+function stroka(ctx, x, y, chasti, size, color, align) {
+  var kegl = Math.round(size * 0.75);
+  function shrift(c) { return (c[1] ? kegl : size) + 'px "Golos Text", system-ui, sans-serif'; }
+  var shir = chasti.map(function (c) { ctx.font = shrift(c); return ctx.measureText(c[0]).width; });
+  var w = shir.reduce(function (a, b) { return a + b; }, 0);
+  var x0 = align === 'right' ? x - w : align === 'left' ? x : x - w / 2, xi = x0;
+  ctx.fillStyle = color; ctx.textAlign = 'left';
+  chasti.forEach(function (c, i) {
+    ctx.font = shrift(c);
+    ctx.fillText(c[0], xi, c[1] === 'sub' ? y + size * 0.3 : y);
+    xi += shir[i];
+  });
+  ctx.textAlign = 'center';
+  return [x0, x0 + w];
+}
+
+function Udar() {
+  var ref0 = useRef(null);
+  if (!ref0.current) ref0.current = { preset: START, p: Object.assign({}, PRESETY[START]), scm: false, t: T0, run: false, sv: null };
+  var S = ref0.current;
+  var pair = useState(0), bump = function () { pair[1](function (k) { return k + 1; }); };
+
+  function parametry() { return Object.assign({}, S.p); }
+  function porogRezh() { return S.p.rezh === 'porog'; }
+  function pokazaniya() {
+    var r = porogRezh() ? porog(S.p.m, S.p.M, S.p.K, S.p.Q) : iskhod(parametry());
+    r.frame = S.scm ? 'центр масс' : 'лабораторная';
+    r.t = S.t; r.run = S.run; r.preset = PRESETY[S.preset].imya;
+    if (porogRezh()) r.posle = S.t >= 0;
+    S.sv = r; window.__demoState = r;
+  }
+  if (!S.sv) pokazaniya();
+
+  function step(dt) {
+    if (!S.run) return;
+    var bylo = S.t;
+    S.t = Math.min(T1, S.t + dt);
+    if (S.t >= T1) S.run = false;
+    pokazaniya();
+    if (!S.run || (bylo < 0 && S.t >= 0)) bump();
+  }
+
+  function draw(ctx) {
+    if (porogRezh()) { drawPorog(ctx); return; }
+    var tone = C.tones(ctx);
+    var ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var r = S.sv, p = parametry(), ed = PRESETY[S.preset].ed, posle = S.t >= 0;
+    var mut = 'rgba(' + muted + ',.95)';
+    var ks = VSC / p.v1, t = S.t, RR = radiusy(p.m1, p.m2);
+    var dx = Math.sqrt(Math.max(0, 1 - r.b * r.b)) * RS, by = r.b * RS;
+    var Vk = S.scm ? r.V : [0, 0];                    /* скорость системы отсчёта */
+    var p1, p2, w1, w2;
+    if (!posle) { p1 = [-dx + p.v1 * ks * t, by]; p2 = [0, 0]; w1 = [p.v1, 0]; w2 = [0, 0]; }
+    else {
+      p1 = [-dx + r.v1p[0] * ks * t, by + r.v1p[1] * ks * t];
+      p2 = [r.v2p[0] * ks * t, r.v2p[1] * ks * t];
+      w1 = r.v1p; w2 = r.v2p;
+    }
+    function ex(x) { return SCX + x - Vk[0] * ks * t; }
+    function ey(y) { return SCY - y + Vk[1] * ks * t; }
+    function strelka(x, y, v, col) {
+      var vx = (v[0] - Vk[0]) * ks * 0.45, vy = (v[1] - Vk[1]) * ks * 0.45;
+      if (Math.hypot(vx, vy) < 4) return;
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + vx, y - vy); ctx.stroke();
+      var a = Math.atan2(-vy, vx);
+      ctx.beginPath(); ctx.moveTo(x + vx, y - vy);
+      ctx.lineTo(x + vx - 11 * Math.cos(a - 0.4), y - vy - 11 * Math.sin(a - 0.4));
+      ctx.lineTo(x + vx - 11 * Math.cos(a + 0.4), y - vy - 11 * Math.sin(a + 0.4));
+      ctx.closePath(); ctx.fill();
+    }
+
+    /* сцена */
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, SX1, SY1); ctx.clip();
+    if (!S.scm && r.b > 0) {
+      /* прицельное расстояние: линия налёта и ось через покоящуюся шайбу */
+      ctx.save(); ctx.setLineDash([5, 6]);
+      ctx.strokeStyle = 'rgba(' + muted + ',.5)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(30, ey(by)); ctx.lineTo(ex(0), ey(by));
+      ctx.moveTo(30, ey(0)); ctx.lineTo(ex(0), ey(0)); ctx.stroke();
+      ctx.restore();
+      if (by > 14) C.label(ctx, 44, (ey(by) + ey(0)) / 2 + 6, 'b', 17, mut, 'left');
+    }
+    var xc = (p.m1 * p1[0] + p.m2 * p2[0]) / (p.m1 + p.m2), yc = (p.m1 * p1[1] + p.m2 * p2[1]) / (p.m1 + p.m2);
+    ctx.fillStyle = 'rgba(' + ORAN + ',.9)';
+    ctx.beginPath(); ctx.arc(ex(p1[0]), ey(p1[1]), RR[0], 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(' + GOLUB + ',.9)';
+    ctx.beginPath(); ctx.arc(ex(p2[0]), ey(p2[1]), RR[1], 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgb(' + ink + ')'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(ex(xc), ey(yc), 6, 0, TAU); ctx.stroke();
+    strelka(ex(p1[0]), ey(p1[1]), w1, 'rgb(' + ORAN + ')');
+    strelka(ex(p2[0]), ey(p2[1]), w2, 'rgb(' + GOLUB + ')');
+    ctx.restore();
+    C.label(ctx, 30, 30, S.scm ? 'система центра масс' : 'лабораторная система', 18, mut, 'left');
+    var par;
+    if (ed === 'кДж') par = 'm₁ = ' + celoe(p.m1) + ' кг, m₂ = ' + celoe(p.m2) + ' кг';
+    else par = 'm₁/m₂ = ' + otnStr(p.m1 / p.m2);
+    par += ', e = ' + num(p.e, 2) + ', b = ' + num(r.b, 2) + ' R';
+    C.label(ctx, 30, 312, par, 17, mut, 'left');
+
+    /* окружность скоростей, лабораторная система */
+    var k = DK / p.v1;
+    function dxp(v) { return DO[0] + v[0] * k; }
+    function dyp(v) { return DO[1] - v[1] * k; }
+    function vektor(v, col, w) {
+      ctx.strokeStyle = col; ctx.lineWidth = w;
+      ctx.beginPath(); ctx.moveTo(DO[0], DO[1]); ctx.lineTo(dxp(v), dyp(v)); ctx.stroke();
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(dxp(v), dyp(v), 4, 0, TAU); ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(' + ink + ',.4)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(dxp(r.V), dyp(r.V), Math.max(1.5, (p.v1 - r.V[0]) * k), 0, TAU); ctx.stroke();
+    vektor([p.v1, 0], 'rgba(' + ORAN + ',.35)', 2);
+    if (posle) { vektor(r.v2p, 'rgb(' + GOLUB + ')', 2.5); vektor(r.v1p, 'rgb(' + ORAN + ')', 2.5); }
+    vektor(r.V, 'rgb(' + ink + ')', 2);
+    C.label(ctx, 820, 312, 'окружность упругих исходов', 17, mut);
+    var pod;
+    if (posle && r.thetaLab1 != null) pod = 'налетающая отклонилась на ' + grad(r.thetaLab1);
+    else pod = r.thetaMax != null ? 'угол не больше ' + grad(r.thetaMax) : '';
+    C.label(ctx, 820, 336, pod, 17, mut);
+
+    /* счёт энергии */
+    var f = ed === 'кДж' ? 1e-3 : 1, d = ed === 'кДж' ? 1 : 3, u = ed === 'усл.' ? '' : ', ' + ed;
+    function E(v, vsegda) { return posle || vsegda ? num(v * f, d) : '—'; }
+    var y0 = 372;
+    C.readout(ctx, 215, y0, 'MV²/2 до и после' + u, E(r.KCM, true), 'rgb(' + ink + ')');
+    C.readout(ctx, 465, y0, 'K отн до' + u, E(r.KrelBefore, true), 'rgb(' + acc + ')');
+    C.readout(ctx, 715, y0, 'K отн после' + u, E(r.KrelAfter), 'rgb(' + acc + ')');
+    C.readout(ctx, 965, y0, 'во внутр. энергию' + u, E(r.heat), 'rgb(' + ORAN + ')');
+  }
+
+  /* Режим порога: A и B на прямой, после реакции C; справа счёт энергии
+     столбиками, внизу показания. Порядок и цвета объяснены в шапке сцены. */
+  function drawPorog(ctx) {
+    var tone = C.tones(ctx);
+    var ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var r = S.sv, p = S.p, t = S.t, posle = t >= 0;
+    var mut = 'rgba(' + muted + ',.95)';
+    var sum = p.M + p.m, ks = VSC / r.v;
+    var rA = radius(p.m), rB = radius(p.M), rC = radius(sum), d0 = rA + rB;
+    var xc0 = -p.m * d0 / sum, xc = xc0 + r.VC * ks * t;   /* центр масс идёт равномерно */
+    var Vk = S.scm ? r.VC : 0;                              /* скорость системы отсчёта */
+    function ex(x) { return SCX_P + x - Vk * ks * t; }
+
+    /* Где частицы. До удара A летит, B стоит; после упругого удара они
+       расходятся; после реакции за T_SL съезжаются к центру масс и гаснут,
+       а C растёт. Центр масс пары при слиянии остаётся в xc. */
+    var xA, xB, uA = 0, uB = 0, aAB = 1, aC = 0, rCsej = rC;
+    if (!posle) { xA = -d0 + r.v * ks * t; xB = 0; uA = r.v; }
+    else if (!r.reaction) { xA = -d0 + r.vA * ks * t; xB = r.vB * ks * t; uA = r.vA; uB = r.vB; }
+    else {
+      var f = C.ease(Math.min(1, t / T_SL));
+      xA = xc + (-d0 - xc0) * (1 - f); xB = xc + (0 - xc0) * (1 - f);
+      aAB = 1 - f; aC = f; rCsej = C.lerp(Math.max(rA, rB), rC, f);
+    }
+
+    function chastica(x, rad, rgb, a, bukva) {
+      if (a <= 0) return;
+      ctx.fillStyle = 'rgba(' + rgb + ',' + 0.9 * a + ')';
+      ctx.beginPath(); ctx.arc(ex(x), SCY, rad, 0, TAU); ctx.fill();
+      if (a > 0.5) C.label(ctx, ex(x), SCY - rad - 10, bukva, 19, 'rgba(' + rgb + ',' + a + ')');
+    }
+    /* стрелка скорости u (в выбранной системе) от края частицы */
+    function strelka(x, rad, u, rgb, podp) {
+      var L = u * ks * 0.45;
+      if (Math.abs(L) < 4) return;
+      var s = L > 0 ? 1 : -1, x0 = ex(x) + s * rad, x1 = x0 + L, col = 'rgb(' + rgb + ')';
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(x0, SCY); ctx.lineTo(x1 - s * 8, SCY); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x1, SCY); ctx.lineTo(x1 - s * 11, SCY - 5); ctx.lineTo(x1 - s * 11, SCY + 5);
+      ctx.closePath(); ctx.fill();
+      if (podp) stroka(ctx, (x0 + x1) / 2, SCY - 12, podp, 20, col, 'center');
+    }
+
+    /* сцена */
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, SX1, SY1); ctx.clip();
+    if (aC > 0 && r.excitation > 0) {
+      /* свечение C: избыток K_отн − Q, доля от K_отн под корнем, чтобы и
+         малый избыток был виден, а на самом пороге свечения не было */
+      var fe = Math.sqrt(r.excitation / r.KrelBefore);
+      C.glow(ctx, ex(xc), SCY, rCsej * (1.4 + 1.5 * fe) * (1 + 0.05 * Math.sin(TAU * 2 * t)), acc, 0.95 * fe * aC);
+    }
+    chastica(xA, rA, ORAN, aAB, 'A');
+    chastica(xB, rB, GOLUB, aAB, 'B');
+    chastica(xc, rCsej, OLIV, aC, 'C');
+    ctx.strokeStyle = 'rgb(' + ink + ')'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(ex(xc), SCY, 6, 0, TAU); ctx.stroke();
+    var lab = !S.scm;
+    if (!posle || !r.reaction) {
+      strelka(xA, rA, uA - Vk, ORAN, lab && !posle ? [['v', '']] : null);
+      strelka(xB, rB, uB - Vk, GOLUB, null);
+    } else if (aC >= 1) strelka(xc, rC, r.vC - Vk, OLIV, lab ? [['V', ''], ['C', 'sub']] : null);
+    ctx.restore();
+
+    C.label(ctx, 30, 30, S.scm ? 'система центра масс' : 'лабораторная система', 18, mut, 'left');
+    C.label(ctx, 985, 30, 'реакция A + B → C', 18, mut, 'right');
+    /* кто есть кто: цвет, буква, масса */
+    var lx = 30;
+    [[ORAN, 'A: m = ' + en(p.m)], [GOLUB, 'B: M = ' + en(p.M)], [OLIV, 'C: M + m = ' + en(sum)]].forEach(function (L) {
+      ctx.fillStyle = 'rgb(' + L[0] + ')';
+      ctx.beginPath(); ctx.arc(lx + 7, 306, 7, 0, TAU); ctx.fill();
+      C.label(ctx, lx + 21, 312, L[1], 17, mut, 'left');
+      lx += 21 + ctx.measureText(L[1]).width + 28;
+    });
+
+    /* счёт энергии столбиками, масштаб общий */
+    var sE = PB_H / Math.max(r.K, r.Kthreshold);
+    function yE(E) { return PB_Y - E * sE; }
+    function stolbik(x, E0, E1, fill) {
+      if (E1 <= E0) return;
+      ctx.fillStyle = fill; ctx.fillRect(x - PB_W / 2, yE(E1), PB_W, (E1 - E0) * sE);
+    }
+    function nehvataet(x, E0, E1) {
+      if (E1 <= E0) return;
+      ctx.save(); ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = 'rgba(' + muted + ',.85)'; ctx.lineWidth = 1.3;
+      ctx.strokeRect(x - PB_W / 2 + 0.7, yE(E1), PB_W - 1.4, (E1 - E0) * sE);
+      ctx.restore();
+    }
+    function cherta(x, E, chasti, sleva) {
+      var y = yE(E);
+      ctx.save(); ctx.setLineDash([7, 4]);
+      ctx.strokeStyle = 'rgb(' + ink + ')'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x - PB_W / 2 - 8, y); ctx.lineTo(x + PB_W / 2 + 8, y); ctx.stroke();
+      ctx.restore();
+      stroka(ctx, sleva ? x - PB_W / 2 - 13 : x + PB_W / 2 + 13, y + 6, chasti, 20, 'rgb(' + ink + ')',
+             sleva ? 'right' : 'left');
+    }
+    /* K_отн от основания E0: до удара целиком её цветом, после реакции
+       снизу серая Q, ушедшая на образование C, сверху остаток в C */
+    function otnositelnaya(x, E0) {
+      var Qs = posle && r.reaction ? Math.min(r.Q, r.KrelBefore) : 0;
+      stolbik(x, E0, E0 + Qs, 'rgba(' + muted + ',.5)');
+      stolbik(x, E0 + Qs, E0 + r.KrelBefore, 'rgba(' + acc + ',.85)');
+    }
+    ctx.strokeStyle = 'rgba(' + ink + ',.45)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(PX_K - 36, PB_Y); ctx.lineTo(PX_REL + 36, PB_Y); ctx.stroke();
+    /* K составной: те же две части, что стоят справа от знака равенства */
+    stolbik(PX_K, 0, r.KCM, 'rgba(' + OLIV + ',.85)');
+    otnositelnaya(PX_K, r.KCM);
+    nehvataet(PX_K, r.K, r.Kthreshold);
+    stolbik(PX_CM, 0, r.KCM, 'rgba(' + OLIV + ',.85)');
+    otnositelnaya(PX_REL, 0);
+    nehvataet(PX_REL, r.KrelBefore, r.Q);
+    cherta(PX_K, r.Kthreshold, [['K', ''], ['пор', 'sub']], true);
+    cherta(PX_REL, r.Q, [['Q', '']], false);
+    /* подписи столбиков складываются в формулу главы */
+    var yF = PB_Y + 32;
+    var gK = stroka(ctx, PX_K, yF, [['K', '']], 20, 'rgb(' + ink + ')', 'center');
+    var gCM = stroka(ctx, PX_CM, yF, [['(M + m)V', ''], ['C', 'sub'], ['²/2', '']], 20, 'rgb(' + OLIV + ')', 'center');
+    var gRel = stroka(ctx, PX_REL, yF, [['K', ''], ['отн', 'sub']], 20, 'rgb(' + acc + ')', 'center');
+    C.label(ctx, (gK[1] + gCM[0]) / 2, yF, '=', 20, mut);
+    C.label(ctx, (gCM[1] + gRel[0]) / 2, yF, '+', 20, mut);
+
+    /* показания */
+    var y0 = 372;
+    C.readout(ctx, 215, y0, 'порог', en(r.Kthreshold), 'rgb(' + ink + ')');
+    C.readout(ctx, 465, y0, 'держит импульс', en(r.KCM), 'rgb(' + OLIV + ')');
+    C.readout(ctx, 715, y0, 'доступно реакции', en(r.KrelBefore), 'rgb(' + acc + ')');
+    C.readout(ctx, 965, y0, 'возбуждение C', posle && r.reaction ? en(r.excitation) : '—', 'rgb(' + acc + ')');
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Модель наружу. Удар: __demoRun({ m1, m2, v1, b, e }). Порог:
+     __demoRun({ rezh: 'porog', m, M, K, Q }) или __demoModel.porog(m, M, K, Q)
+     отдают V_C, K_отн, K_пор, пошла ли реакция и энергию возбуждения. */
+  window.__demoModel = { iskhod: iskhod, porog: porog, PRESETY: PRESETY };
+  window.__demoRun = function (q) {
+    if (q && q.rezh === 'porog') return porog(q.m, q.M, q.K, q.Q);
+    return iskhod(Object.assign({ v1: 1, b: 0, e: 1, rezh: 'udar' }, q));
+  };
+
+  function zanovo() { S.t = T0; S.run = false; pokazaniya(); bump(); }
+  function preset(i) { S.preset = i; S.p = Object.assign({}, PRESETY[i]); S.izmeneno = false; zanovo(); }
+  function pomenyat(key, v) { S.p[key] = v; S.izmeneno = true; zanovo(); }
+  function otnoshenie(x) {
+    if (Math.abs(Math.log10(x)) < 0.005) x = 1;
+    S.p.m1 = x * S.p.m2; S.izmeneno = true; zanovo();
+  }
+  function kto() { var a = S.p.m1; S.p.m1 = S.p.m2; S.p.m2 = a; zanovo(); }
+  /* «на порог»: K ровно Q(1 + m/M), без округления ползунка */
+  function naPorog() { S.p.K = S.p.Q * (1 + S.p.m / S.p.M); S.izmeneno = true; zanovo(); }
+  function pusk() {
+    if (S.t >= T1) S.t = T0;
+    S.run = !S.run; pokazaniya(); bump();
+  }
+  function sistema(scm) { S.scm = scm; pokazaniya(); bump(); }
+
+  function slova() {
+    if (porogRezh()) return slovaPorog();
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var r = S.sv, p = parametry(), i = S.preset, ed = PRESETY[i].ed;
+    function E(v) { return ed === 'кДж' ? num(v / 1000, 1) + ' кДж' : num(v, 3); }
+    if (S.t < 0) {
+      if (S.izmeneno) return 'Налетающая шайба идёт на покоящуюся: m₁/m₂ = ' +
+        otnStr(p.m1 / p.m2) + ', b = ' + num(p.b, 2) + ' R, e = ' + num(p.e, 2) + '. Кольцо отмечает центр масс. ' +
+        '«Пуск» проигрывает удар.';
+      return [
+        'Две одинаковые шайбы, удар нецентральный.',
+        'Машина 1000 кг и грузовик 10 т сближаются со скоростью 100 км/ч.',
+        'α-частица тяжелее электрона в 7294 раза.'
+      ][i] + ' Кольцо отмечает центр масс. «Пуск» проигрывает удар.';
+    }
+    if (p.e === 0 && r.b === 0) return 'Шайбы слиплись: в системе центра масс они остановились, и вся энергия ' +
+      'относительного движения, ' + A(E(r.heat)) + ', ушла во внутреннюю энергию шайб. Энергия движения центра масс осталась прежней, ' +
+      A(E(r.KCM)) + '.' + (i === 1 ? ' Поменяйте, кто едет: она станет другой, а потеря останется той же.' : '');
+    if (p.e < 1) return 'Удар неупругий: энергия движения центра масс осталась прежней, ' + A(E(r.KCM)) +
+      ', а из энергии относительного движения ' + A(E(r.KrelBefore)) + ' во внутреннюю энергию шайб ушло ' + A(E(r.heat)) + '.';
+    var s = 'Удар упругий: энергия относительного движения не изменилась, в системе центра масс скорости ' +
+      'только повернулись, на ' + A(grad(r.thetaCM)) + '.';
+    if (r.thetaLab1 == null) s += ' Налетающая остановилась и отдала скорость целиком.';
+    else if (r.thetaMax != null) s += ' Налетающая в лабораторной системе отклонилась на ' + A(grad(r.thetaLab1)) +
+      '; при таком отношении масс больше ' + A(grad(r.thetaMax)) + ' не бывает.';
+    else if (Math.abs(p.m1 - p.m2) < 1e-9 * p.m1 && r.angleBetween != null) s += ' Угол между скоростями после удара ' +
+      A(grad(r.angleBetween)) + '.';
+    else s += ' Налетающая отклонилась на ' + A(grad(r.thetaLab1)) + '.';
+    return s;
+  }
+
+  /* Подпись порога: сколько держит импульс, сколько доступно реакции,
+     пошла ли она и что осталось. Числа те же, что на столбиках. */
+  function slovaPorog() {
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var r = S.sv, Kc = A(en(r.KCM)), Kr = en(r.KrelBefore), Qs = A('Q = ' + en(r.Q));
+    if (S.t < 0) return 'A налетает на покоящуюся B с энергией ' + A('K = ' + en(r.K)) + '. Из неё ' + Kc +
+      ' держит импульс, это энергия движения центра масс, и удар её не тронет. Реакции доступна только энергия ' +
+      'относительного движения, ' + A(Kr) + ', а чтобы A и B слились в новую частицу C, нужно ' + Qs +
+      '. «Пуск» проигрывает удар.';
+    if (!r.reaction) return (Kr === en(0) ? 'Реакции почти ничего не доступно, а нужно ' + Qs
+      : 'Реакции доступно ' + (Kr === en(r.Q) ? 'чуть меньше, чем ' + Qs : 'только ' + A(Kr) + ', а нужно ' + Qs)) +
+      ', поэтому A и B не сливаются и расходятся упруго. Из ' + A('K = ' + en(r.K)) +
+      ' импульс держит ' + Kc + ', и эту энергию удар взять не может. Порог налетающей ' +
+      A('Q(1 + m/M) = ' + en(r.Kthreshold)) + '.';
+    var gde = S.scm ? 'В системе центра масс C стоит, а в лабораторной едет с его скоростью'
+                    : 'C едет со скоростью центра масс';
+    /* при округлении до сотых K_отн и Q могут совпасть и над порогом, и под ним */
+    var s = 'A и B слились в новую частицу C массы ' + A('M + m = ' + en(r.mC)) + ', потому что реакции доступно ' +
+      (r.excitation === 0 ? 'ровно ' + Qs
+       : Kr === en(r.Q) ? 'чуть больше, чем ' + Qs
+       : A(Kr) + ', больше, чем ' + Qs) +
+      '. ' + gde + ' и уносит ' + Kc + ', их держит импульс.';
+    if (r.excitation === 0) s += ' На возбуждение C не осталось ничего. Это порог.';
+    else if (r.excitation < 0.005) s += ' Избыток, меньше 0,01, остался в C энергией возбуждения. Это почти порог.';
+    else s += ' Избыток ' + A(en(r.excitation)) + ' остался в C энергией возбуждения.';
+    return s;
+  }
+
+  var p = S.p, porogR = porogRezh();
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${S.run ? 'Пауза' : 'Пуск'}<//>
+        <//>
+        <${C.Group} label="Опыт:">
+          ${PRESETY.map(function (q, i) {
+            return html`<${C.Btn} active=${S.preset === i} onClick=${function () { preset(i); }}>${q.imya}<//>`;
+          })}
+        <//>
+        <${C.Group} label="Система:">
+          <${C.Btn} active=${!S.scm} onClick=${function () { sistema(false); }}>лабораторная<//>
+          <${C.Btn} active=${S.scm} onClick=${function () { sistema(true); }}>центра масс<//>
+        <//>
+        ${porogR
+          ? html`<${C.Slider} label="Налетающая:" min=${0.2} max=${5} step=${0.002} log=${true}
+                              value=${p.m} onChange=${function (v) { pomenyat('m', znach(v, 2)); }}
+                              display=${'m = ' + en(p.m)} />
+                 <${C.Slider} label="Мишень:" min=${0.2} max=${5} step=${0.002} log=${true}
+                              value=${p.M} onChange=${function (v) { pomenyat('M', znach(v, 2)); }}
+                              display=${'M = ' + en(p.M)} />
+                 <${C.Slider} label="Реакция:" min=${0.5} max=${5} step=${0.002} log=${true}
+                              value=${p.Q} onChange=${function (v) { pomenyat('Q', znach(v, 2)); }}
+                              display=${'Q = ' + en(p.Q)} />
+                 <${C.Slider} label="Энергия:" min=${0.1} max=${150} step=${0.002} log=${true}
+                              value=${p.K} onChange=${function (v) { pomenyat('K', znach(v, 2)); }}
+                              display=${'K = ' + en(p.K)} />
+                 <${C.Group}><${C.Btn} onClick=${naPorog}>на порог<//><//>`
+          : html`<${C.Slider} label="Массы:" min=${0.01} max=${10000} step=${0.02} log=${true}
+                              value=${p.m1 / p.m2} onChange=${otnoshenie} display=${'m₁/m₂ = ' + otnStr(p.m1 / p.m2)} />
+                 <${C.Slider} label="Прицельное расстояние:" min=${0} max=${0.99} step=${0.01}
+                              value=${p.b} onChange=${function (v) { pomenyat('b', v); }}
+                              display=${'b = ' + num(p.b, 2) + ' R'} />
+                 <${C.Slider} label="Упругость:" min=${0} max=${1} step=${0.05}
+                              value=${p.e} onChange=${function (v) { pomenyat('e', v); }}
+                              display=${'e = ' + num(p.e, 2)} />`}
+        ${S.preset === 1 ? html`<${C.Group}><${C.Btn} onClick=${kto}>поменять, кто едет<//><//>` : null}
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(Udar);
+</script>
+</body>
+</html>

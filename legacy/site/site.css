@@ -1,0 +1,454 @@
+/* Страницы платформы: светлая читальная тема на токенах.
+   Минимальная до дизайн-прохода: семантика и аккуратная типографика,
+   никакой полировки. Все цвета — только через переменные. */
+
+:root {
+  --paper: #fbfaf7;
+  --card: #ffffff;
+  --ink: #20262b;
+  --muted: #5e6a72;
+  --accent: #0f7a8a;
+  --accent-ink: #0b5d6a;
+  --line: #e4e1d8;
+  --chip: #eef0ea;
+  --warn: #b4530a;
+
+  /* токены графики: их же читают инлайновые SVG рисунков ядра */
+  --fig-a: #0f7a8a;
+  --fig-b: #c2571a;
+  --fig-unit: #c95f6a;
+  --fig-const: #8fae2e;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 17px/1.65 Georgia, 'Times New Roman', serif;
+}
+
+/* ── каркас страницы ─────────────────────────────────────────── */
+
+.page {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2.2rem 1.2rem 4rem;
+}
+
+.page-head { margin-bottom: 2.2rem; }
+
+.kicker {
+  font: 600 12px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  margin: 0 0 .6rem;
+}
+
+h1 {
+  font: 700 34px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: -.01em;
+  margin: 0 0 .8rem;
+}
+
+.lead-topics {
+  color: var(--muted);
+  font-size: 15.5px;
+  margin: 0;
+}
+
+h2 {
+  font: 700 24px/1.25 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  margin: 2.6rem 0 1rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--line);
+}
+
+a { color: var(--accent-ink); }
+
+/* ── блоки ядра ──────────────────────────────────────────────── */
+
+.block { margin: 0 0 1.4rem; }
+
+.block-title {
+  font: 700 19px/1.3 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  margin: 1.6rem 0 .5rem;
+}
+
+.blk-sub {
+  font: 600 16.5px/1.3 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  margin: 1.3rem 0 .4rem;
+}
+
+.block p { margin: 0 0 .9rem; }
+
+.blk-kicker {
+  display: inline-block;
+  font: 700 11px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  background: var(--chip);
+  border-radius: 3px;
+  padding: 4px 7px;
+  margin: 0 0 .4rem;
+}
+
+/* вопрос и задача — врезки */
+.block-type-вопрос, .block-type-задача {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 1rem 1.2rem .6rem;
+}
+.block-type-вопрос .block-title, .block-type-задача .block-title { margin-top: .2rem; }
+
+/* формулы */
+.blk-math {
+  margin: 1rem 0 1.2rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.blk-math .katex-display { margin: 0; }
+
+/* рисунки */
+.blk-fig {
+  margin: 1.6rem 0 1.8rem;
+  text-align: center;
+}
+.blk-fig .fig-inline { display: flex; justify-content: center; }
+.blk-fig svg { max-width: min(30rem, 100%); height: auto; }
+.blk-fig img { max-width: 100%; height: auto; }
+.blk-fig figcaption {
+  font: 400 14.5px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--muted);
+  max-width: 32rem;
+  margin: .6rem auto 0;
+}
+.blk-fig figcaption p { margin: 0 0 .3rem; }
+
+/* карточка демки */
+.blk-demo-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1rem 1.2rem 1.1rem;
+}
+.blk-demo-card .block-title { margin: .2rem 0 .5rem; }
+.blk-demo-card p { font-size: 15.5px; color: var(--muted); }
+.demo-link {
+  display: inline-block;
+  font: 600 14px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 5px;
+  padding: 9px 14px;
+  text-decoration: none;
+}
+.demo-link:hover { background: var(--accent-ink); }
+
+/* решение под ролью преподавателя */
+.blk-gated {
+  border-top: 1px dashed var(--line);
+  margin-top: 1rem;
+  padding-top: .8rem;
+}
+.blk-gated-label {
+  font: 700 12px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--warn);
+  margin-bottom: .5rem;
+}
+.blk-gated-badge {
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: .06em;
+}
+.blk-gated-stub {
+  border-top: 1px dashed var(--line);
+  margin-top: 1rem;
+  padding-top: .8rem;
+  font: 400 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--muted);
+}
+
+.blk-ref { color: var(--accent-ink); text-decoration-style: dotted; }
+.blk-missing { color: var(--warn); font-family: system-ui, sans-serif; }
+
+/* ── переключатель ролей ─────────────────────────────────────── */
+
+.role-bar {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  flex-wrap: wrap;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  margin: 0 0 1.6rem;
+}
+.role-bar-label { font-size: 13px; color: var(--muted); }
+.role-pills {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  padding: 3px;
+}
+.role-pill {
+  border: 0;
+  background: transparent;
+  font: 600 13.5px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 7px 13px;
+  cursor: pointer;
+}
+.role-pill.is-on { background: var(--accent); color: #fff; }
+.role-note {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ── карточки материалов на странице недели ──────────────────── */
+
+.mat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: .9rem;
+  margin: 1rem 0 0;
+}
+.mat-card {
+  display: block;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem 1.1rem 1.05rem;
+  text-decoration: none;
+  color: inherit;
+}
+.mat-card:hover { border-color: var(--accent); }
+.mat-card .mat-kind {
+  font: 700 11px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  margin-bottom: .45rem;
+}
+.mat-card .mat-title {
+  font: 600 16.5px/1.3 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  margin-bottom: .3rem;
+}
+.mat-card .mat-note {
+  font: 400 13.5px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--muted);
+}
+
+.dead-note {
+  font: 400 15px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--muted);
+}
+
+/* ── низ главы: PDF и навигация ──────────────────────────────── */
+
+.chapter-foot {
+  margin-top: 3rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+.pdf-btn {
+  display: inline-block;
+  font: 600 14.5px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 6px;
+  padding: 11px 16px;
+  text-decoration: none;
+}
+.pdf-btn:hover { background: var(--accent-ink); }
+.foot-note { font-size: 13px; color: var(--muted); }
+
+.back-link {
+  font: 600 13.5px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  text-decoration: none;
+}
+
+@media (max-width: 640px) {
+  h1 { font-size: 27px; }
+  body { font-size: 16px; }
+}
+
+/* ── сквозная шапка: сессия LMS на каждой странице ───────────── */
+
+.topbar {
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  font: 400 13.5px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+.topbar-inner {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: .45rem 1.2rem;
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+}
+.topbar-home {
+  font-weight: 700;
+  color: var(--ink);
+  text-decoration: none;
+}
+.topbar-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: .7rem;
+}
+.topbar-user { color: var(--muted); }
+.topbar-btn {
+  font: 600 13px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--accent-ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 10px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.topbar-btn:hover { border-color: var(--accent); }
+.topbar-logout { color: var(--muted); }
+
+/* карта курса растянута на весь экран — шапке нужна вся ширина */
+.map-body .topbar-inner { max-width: none; }
+
+/* ── страница входа ──────────────────────────────────────────── */
+
+.login-page { max-width: 30rem; }
+.login-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1.4rem 1.5rem 1.5rem;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+.login-hint {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+.login-input {
+  display: block;
+  width: 100%;
+  font: 400 16px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 .9rem;
+}
+.login-input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+.login-remember {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  font-size: 13.5px;
+  color: var(--muted);
+  margin: 0 0 1rem;
+  cursor: pointer;
+}
+.login-btn {
+  display: block;
+  width: 100%;
+  font: 600 15px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 16px;
+  cursor: pointer;
+}
+.login-btn:hover { background: var(--accent-ink); }
+.login-row {
+  display: flex;
+  justify-content: space-between;
+  margin: .9rem 0 0;
+}
+.login-minor {
+  font: 400 13px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--accent-ink);
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.login-minor:disabled { color: var(--muted); cursor: default; }
+.login-error {
+  font-size: 14px;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  padding: .6rem .8rem;
+  margin: 0 0 1rem;
+}
+.login-foot { margin-top: 1.6rem; }
+
+/* ── полоса роли и «Моя неделя» на странице недели ───────────── */
+
+.role-login {
+  display: inline-block;
+  font: 600 13.5px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--accent-ink);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 7px 12px;
+  text-decoration: none;
+}
+.role-login:hover { border-color: var(--accent); }
+
+.myweek-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 1rem 1.2rem;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 15px;
+}
+.myweek-card p { margin: 0 0 .55rem; }
+.myweek-card p:last-child { margin-bottom: 0; }
+.myweek-files {
+  margin: 0 0 .55rem;
+  padding-left: 1.2rem;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.myweek-actions { padding-top: .35rem; }
+
+/* Стенд: вход без кода. Приглушён нарочно — служебная дверь, а не
+   равноправный способ войти. */
+.login-dev__hint {
+  margin: 18px 0 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line, #e4e1d8);
+  font-size: 13px;
+  color: var(--muted, #5e6a72);
+}
+.login-btn--dev {
+  background: none;
+  border: 1px solid var(--line, #e4e1d8);
+  color: var(--muted, #5e6a72);
+}
+.login-btn--dev:hover {
+  border-color: var(--accent, #0f7a8a);
+  color: var(--accent-ink, #0f7a8a);
+}

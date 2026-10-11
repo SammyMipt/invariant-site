@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Три тела с возмущением</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-03/">&larr; Неделя 03</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=tri-tela"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `zadacha-treh-tel`: два экземпляра одной системы трёх тел,
+   в одном из них начальное положение одного тела сдвинуто на величину,
+   которую не различит ни один прибор. Первое время расчёты идут вместе,
+   потом расстояние между ними растёт как экспонента, и от начального
+   сходства не остаётся ничего. Демка показывает ровно это и ничего сверх:
+   ни показателя Ляпунова по имени, ни теории.
+
+   ЕДИНИЦЫ. Безразмерные: G = 1, три массы по 1. Уравнения движения
+
+       r_i'' = Σ_{j≠i} (r_j − r_i) / |r_j − r_i|³,
+
+   движение плоское, центр масс в начале координат, суммарный импульс ноль.
+
+   НАЧАЛЬНЫЕ УСЛОВИЯ. Треугольник Лагранжа: три тела в вершинах
+   равностороннего треугольника со стороной a = 1,5, вращающегося как целое
+   с угловой скоростью ω = √(3/a³) = 0,943 (период 6,66). Это то самое
+   частное решение, которое глава называет вслух, и для равных масс оно
+   неустойчиво: по критерию Рауса 27(m₁m₂ + m₂m₃ + m₃m₁)/M² = 9 > 1, малое
+   отклонение растёт как exp(λt) с λ = ω/√2 = 0,667, то есть в e раз за
+   1,5 единицы времени и в десять раз за 3,45. Энергия E = −1,5/a = −1
+   ровно, отношение кинетической к модулю потенциальной 1/2. У второй
+   копии сдвиг идёт поперёк силы, и её энергия отличается от −1 только во
+   втором порядке по ε: при ε = 10⁻³ это −0,9999998, и семь знаков
+   показаний это различие честно показывают, дрейфом оно не является.
+
+   ПОЧЕМУ ТАКОЙ СТАРТ, А НЕ СЛУЧАЙНАЯ ТРОЙКА. Перебраны тысячи случайных
+   связанных троек (скрипты подбора в отчёте): у типичной тройки сближения
+   начинаются в первые единицы времени, а после первого же тесного пролёта
+   рост расстояния между копиями идёт лесенкой, и время расхождения от
+   lg ε зависит немонотонно (у одного кандидата 21,5 при ε = 10⁻⁵ и 20,3
+   при 10⁻⁶). Старт с треугольника даёт всё, что просит бриф, по
+   построению: первые десять единиц копии вращаются жёстко и сближений
+   нет, инкремент один и тот же всё время роста, поэтому логарифм
+   расстояния идёт прямой (наклон 0,2895 декады на единицу времени,
+   λ = 0,667, R² = 1,0000 на участке от 10 εR до 0,1 R), а время
+   расхождения линейно по lg ε. Измерено прогоном по семи декадам:
+
+       ε = 10⁻³  10⁻⁴  10⁻⁵  10⁻⁶  10⁻⁷  10⁻⁸  10⁻⁹
+       t = 11,9  15,9  18,8  22,6  25,7  29,3  32,6
+
+       t_div = 1,8 + 3,43·lg(1/ε), R² = 0,999; по λ ожидается ln10/λ = 3,45.
+
+   Приращения на декаду колеблются между 2,9 и 4,0 с периодом обращения:
+   растущее направление поворачивается вместе с треугольником, и его
+   проекция на положения дышит. Свободное слагаемое 1,8 уходит на то,
+   чтобы сдвиг одного тела развернулся вдоль растущего направления.
+   После расхождения вторая копия — обычная тройка: тесные пролёты
+   (ближайший 0,097) и перестройка в пару плюс третье тело, которое уходит
+   из кадра. Первая копия держит треугольник, пока её не сдвинет
+   конечная точность самого счёта; эта линия тоже выведена на график,
+   см. ТОЧНОСТЬ СЧЁТА.
+
+   СДВИГ ВТОРОЙ КОПИИ. Тело 1 (верхнее) смещено по x на ε·R, где
+   R = a = 1,5 — размер системы, наибольшее расстояние между телами в
+   начале. Ползунок даёт ε от 10⁻³ до 10⁻⁹.
+
+   РАССТОЯНИЕ МЕЖДУ КОПИЯМИ. d = √Σ_i |r_i^A − r_i^B|², по положениям всех
+   трёх тел. Таймер срабатывает, когда d ≥ R: копии разошлись на размер
+   системы. Дальше d насыщается: две связанные тройки размера R не могут
+   разойтись сильнее чем на несколько R.
+
+   ИНТЕГРАТОР. Рунге–Кутта четвёртого порядка, базовый шаг H0 = 0,005,
+   при сближении шаг ужимается до ETA·r_min^{3/2}: это около двухсот шагов
+   на время свободного падения ближайшей пары, что бы ни творилось. Обе
+   копии считаются одной функцией и ОДНОЙ последовательностью шагов (шаг
+   выбирается по меньшему из r_min двух копий): различие в счёте не может
+   быть источником расхождения. Проверка честности: при шаге вдвое и
+   вчетверо меньше времена расхождения совпадают до сотых для всех ε от
+   10⁻³ до 10⁻⁹ (худшее: 32,65 против 32,64). Энергия каждой копии за 60
+   единиц времени дрейфует не больше чем на 6·10⁻⁹ от своего значения,
+   суммарный импульс держится на уровне 10⁻¹⁴ (линейный инвариант, РК4
+   хранит его с точностью до округления). Последовательность шагов не
+   зависит от частоты кадров: кадр лишь выдаёт бюджет модельного времени,
+   а шаги идут своим чередом, поэтому в браузере и в прогоне без браузера
+   получаются одни и те же числа. Шагов пары на кадр при 60 кадрах в
+   секунду: обычно 5–6, в тесном пролёте второй копии до 151.
+
+   ТОЧНОСТЬ СЧЁТА. Первая копия стартует с точного решения, и её
+   расстояние от него (треугольник, повёрнутый на ωt) можно посчитать.
+   В нём две части. Ошибка усечения РК4 сдвигает тела по фазе, одинаково
+   для всех трёх: она не ломает симметрию, не растёт и держится около
+   10⁻¹⁰ (при h/2 около 10⁻¹¹). Симметрию ломает только округление в
+   последнем знаке, и его доля растёт с тем же λ: на графике это тонкая
+   линия, входящая снизу около t ≈ 21 и доходящая до размера системы
+   около t ≈ 54, после чего первая копия тоже перестраивается. На 0,1 R
+   она уходит при t = 51 (при h/2 — 49): момент зависит от шага, и это
+   правильно, здесь расходится именно счёт, о чём глава и говорит словами
+   «конечная точность чисел».
+
+   ЗАПАСНОЙ ВАРИАНТ. SDVIG_BAZY ≠ 0 сдвигает и первую копию от точного
+   решения (тело 1, по y, на SDVIG_BAZY·R): база тогда сама сходит с
+   треугольника и становится типичной хаотической тройкой. При 10⁻³ она
+   уходит на 0,1 R к t = 8,8, сближений в первые десять единиц нет
+   (ближайшая пара 0,86 R), прогон даёт t_div = 12,6 / 25,6 / 55,0 для
+   ε = 10⁻³ / 10⁻⁶ / 10⁻⁹, но по декадам времена идут лесенкой (2,3; 6,9;
+   3,7; 12,2; 10,8; 6,5), а тело первой копии выходит из кадра при t ≈ 35.
+   Оставлено на случай, если автор предпочтёт типичную базу точному
+   решению. */
+
+var A_STORONA = 1.5;                                   /* сторона треугольника */
+var OMEGA = Math.sqrt(3 / (A_STORONA * A_STORONA * A_STORONA));
+var RAD = A_STORONA / Math.sqrt(3);                    /* радиус описанной окружности, 0,866 */
+var R_SYS = A_STORONA;                                 /* размер системы */
+var LAMBDA = OMEGA / Math.SQRT2;                       /* инкремент неустойчивости треугольника */
+var SDVIG_BAZY = 0;                                    /* сдвиг первой копии от точного решения, в R */
+var H0 = 0.005, ETA = 0.005;                           /* базовый шаг и множитель подшагов */
+var T_MAX = 60;                                        /* длина записи */
+
+/* Состояние копии: [x1, y1, x2, y2, x3, y3, vx1, vy1, vx2, vy2, vx3, vy3].
+   Тело 1 стоит вверху (угол 90°), остальные через 120°; скорости v = ω × r. */
+function nachalo(sdvigX, sdvigY) {
+  var y = new Float64Array(12);
+  for (var i = 0; i < 3; i++) {
+    var ang = Math.PI / 2 + 2 * Math.PI * i / 3;
+    y[2 * i] = RAD * Math.cos(ang);
+    y[2 * i + 1] = RAD * Math.sin(ang);
+    y[6 + 2 * i] = -OMEGA * y[2 * i + 1];
+    y[7 + 2 * i] = OMEGA * y[2 * i];
+  }
+  y[0] += (sdvigX || 0) * R_SYS;
+  y[1] += (sdvigY || 0) * R_SYS;
+  return y;
+}
+function kopiyaA() { return nachalo(0, SDVIG_BAZY); }
+function kopiyaB(eps) { return nachalo(eps, SDVIG_BAZY); }
+
+/* Точное решение в момент t: положения трёх тел того же треугольника,
+   повёрнутого на ωt. Нужно только для линии точности счёта. */
+function tochnoe(t) {
+  var r = new Float64Array(6);
+  for (var i = 0; i < 3; i++) {
+    var ang = Math.PI / 2 + 2 * Math.PI * i / 3 + OMEGA * t;
+    r[2 * i] = RAD * Math.cos(ang);
+    r[2 * i + 1] = RAD * Math.sin(ang);
+  }
+  return r;
+}
+
+/* Правая часть: dr/dt = v, dv/dt = сумма притяжений. Массы единичные,
+   поэтому сила пары входит в оба тела с противоположным знаком без
+   множителей. Буферы общие: шаг не должен плодить массивы. */
+var K1 = new Float64Array(12), K2 = new Float64Array(12), K3 = new Float64Array(12),
+    K4 = new Float64Array(12), YT = new Float64Array(12);
+function proizvodnaya(y, d) {
+  var i, j;
+  for (i = 0; i < 6; i++) { d[i] = y[6 + i]; d[6 + i] = 0; }
+  for (i = 0; i < 3; i++) for (j = i + 1; j < 3; j++) {
+    var dx = y[2 * j] - y[2 * i], dy = y[2 * j + 1] - y[2 * i + 1];
+    var r2 = dx * dx + dy * dy, k = 1 / (r2 * Math.sqrt(r2));
+    d[6 + 2 * i] += dx * k; d[7 + 2 * i] += dy * k;
+    d[6 + 2 * j] -= dx * k; d[7 + 2 * j] -= dy * k;
+  }
+}
+function rk4(y, h) {
+  var i;
+  proizvodnaya(y, K1);
+  for (i = 0; i < 12; i++) YT[i] = y[i] + h / 2 * K1[i];
+  proizvodnaya(YT, K2);
+  for (i = 0; i < 12; i++) YT[i] = y[i] + h / 2 * K2[i];
+  proizvodnaya(YT, K3);
+  for (i = 0; i < 12; i++) YT[i] = y[i] + h * K3[i];
+  proizvodnaya(YT, K4);
+  for (i = 0; i < 12; i++) y[i] += h / 6 * (K1[i] + 2 * K2[i] + 2 * K3[i] + K4[i]);
+}
+
+function rmin(y) {
+  var m = Infinity;
+  for (var i = 0; i < 3; i++) for (var j = i + 1; j < 3; j++)
+    m = Math.min(m, Math.hypot(y[2 * j] - y[2 * i], y[2 * j + 1] - y[2 * i + 1]));
+  return m;
+}
+function energiya(y) {
+  var K = 0, U = 0, i, j;
+  for (i = 0; i < 3; i++) K += 0.5 * (y[6 + 2 * i] * y[6 + 2 * i] + y[7 + 2 * i] * y[7 + 2 * i]);
+  for (i = 0; i < 3; i++) for (j = i + 1; j < 3; j++)
+    U -= 1 / Math.hypot(y[2 * j] - y[2 * i], y[2 * j + 1] - y[2 * i + 1]);
+  return K + U;
+}
+function impuls(y) {
+  var px = 0, py = 0;
+  for (var i = 0; i < 3; i++) { px += y[6 + 2 * i]; py += y[7 + 2 * i]; }
+  return Math.hypot(px, py);
+}
+/* Расстояние между двумя состояниями по положениям всех тел */
+function rasstoyanie(a, b) {
+  var s = 0;
+  for (var i = 0; i < 6; i++) s += (a[i] - b[i]) * (a[i] - b[i]);
+  return Math.sqrt(s);
+}
+
+/* Один шаг пары: общий dt по меньшему из сближений в двух копиях.
+   k — множитель шага для проверки честности (1, 1/2, 1/4). */
+function shagPary(A, B, k) {
+  var rm = Math.min(rmin(A), rmin(B));
+  var dt = Math.min(H0 * k, ETA * k * Math.pow(rm, 1.5));
+  rk4(A, dt); rk4(B, dt);
+  return dt;
+}
+
+/* Прогон без глаз: пара с данным ε до tMax. Возвращает время расхождения,
+   дрейф энергии и импульса, точки lg d(t) через 0,1 и время, когда первая
+   копия ушла от точного решения на 0,1 R. Этой функцией демка проверяется
+   из node и из консоли (window.__demoProgon). */
+function progon(eps, tMax, k) {
+  k = k || 1;
+  var A = kopiyaA(), B = kopiyaB(eps);
+  var E0a = energiya(A), E0b = energiya(B);
+  var t = 0, tDiv = null, tBaza = null, dE = 0, dP = 0, pts = [], zapis = 0, shagov = 0;
+  while (t < tMax) {
+    t += shagPary(A, B, k); shagov++;
+    var d = rasstoyanie(A, B);
+    if (tDiv === null && d >= R_SYS) tDiv = t;
+    if (tBaza === null && rasstoyanie(A, tochnoe(t)) >= 0.1 * R_SYS) tBaza = t;
+    if (t >= zapis) {
+      pts.push([t, Math.log10(d)]); zapis += 0.1;
+      dE = Math.max(dE, Math.abs((energiya(A) - E0a) / E0a), Math.abs((energiya(B) - E0b) / E0b));
+      dP = Math.max(dP, impuls(A), impuls(B));
+    }
+  }
+  return { eps: eps, k: k, tDiv: tDiv, tBaza: tBaza, dE: dE, dP: dP, shagov: shagov, pts: pts };
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева квадрат сцены: обе копии в одном кадре, первая — залитые кружки,
+   вторая — кольца того же радиуса. Пока копии совпадают, кольцо сидит на
+   кружке и читается одним значком; когда расходятся, кольца сползают с
+   кружков. Пунктирная окружность — орбита точного решения.
+
+   Справа график lg d от времени: ожидается прямая до самого размера
+   системы (пунктирная горизонталь). Диапазон по вертикали не зависит от ε:
+   при разных ε линии стартуют с разной высоты и идут с одним наклоном, и
+   это видно только на общей шкале. Под графиком показания и контроль
+   сохранения.
+
+   Темп: TEMP единиц модельного времени в секунду. Кадр выдаёт бюджет
+   времени, шаги идут своей последовательностью (см. ИНТЕГРАТОР); при
+   тесном пролёте, когда шагов на бюджет нужно больше MAX_SHAGOV, кадр
+   продвигает модель на сколько успел, и показ притормаживает, а не
+   грубеет. */
+
+var W = 1000, HGT = 460;
+var TEMP = 1.6;                                        /* единиц времени в секунду */
+var MAX_SHAGOV = 4000;                                 /* шагов пары на кадр, потолок */
+var SX0 = 10, SY0 = 10, SIDE = 440;                    /* квадрат сцены */
+var SCX = SX0 + SIDE / 2, SCY = SY0 + SIDE / 2;
+var PX = 90;                                           /* пикселей на единицу длины */
+var GX0 = 560, GX1 = 962, GY0 = 46, GY1 = 234;         /* поле графика */
+/* Диапазон lg d. Низ выбран так, чтобы старт при ε = 10⁻⁹ (lg 1,5·10⁻⁹ =
+   −8,8) был виден, а пол ошибки усечения у линии точности счёта (около
+   10⁻¹⁰, см. физику) остался под графиком: иначе линия входила бы полкой. */
+var LG_LO = -9.3, LG_HI = 0.9;
+var SLED_T = 3, SLED_DT = 0.05;                        /* след: длина в единицах времени и шаг записи */
+var GRAF_DT = 0.1;
+
+/* Цвета данных, от темы не зависят: бирюза и охра рисунков главы, лайм для
+   расстояния между копиями. */
+var CA = '77,182,198', CB = '224,138,82', CD = '134,171,46';
+
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* Число в виде мантисса·10^показатель: mant знаков после запятой; при
+   нулевом показателе степень не пишется. Шрифт передаётся строкой без
+   кегля, кегль — числом: показатель набирается мельче и выше. */
+function stepen(ctx, x, y, v, mant, size, font, color, align) {
+  var txt, exp = null;
+  if (v === 0) txt = '0';
+  else {
+    var e = Math.floor(Math.log10(Math.abs(v))), m = v / Math.pow(10, e);
+    if (Math.abs(m).toFixed(mant) === (10).toFixed(mant)) { m /= 10; e += 1; }
+    if (e === 0) txt = num(m, mant);
+    else {
+      /* единичная мантисса без знаков не пишется: 10⁻³, а не 1·10⁻³ */
+      txt = (mant === 0 && Math.abs(m).toFixed(0) === '1' ? (m < 0 ? '−' : '') : num(m, mant) + '·') + '10';
+      exp = String(e).replace('-', '−');
+    }
+  }
+  ctx.font = font.replace('#', size);
+  var w = ctx.measureText(txt).width, we = 0;
+  if (exp !== null) { ctx.font = font.replace('#', Math.round(size * 0.62)); we = ctx.measureText(exp).width; }
+  var x0 = align === 'right' ? x - w - we : align === 'left' ? x : x - (w + we) / 2;
+  ctx.textAlign = 'left'; ctx.fillStyle = color;
+  ctx.font = font.replace('#', size);
+  ctx.fillText(txt, x0, y);
+  if (exp !== null) {
+    ctx.font = font.replace('#', Math.round(size * 0.62));
+    ctx.fillText(exp, x0 + w, y - size * 0.42);
+  }
+  ctx.textAlign = 'center';
+}
+var MONO = '600 #px "JetBrains Mono", ui-monospace, monospace';
+var SANS = '#px "Golos Text", system-ui, sans-serif';
+
+/* Показание с показателем степени: та же пара шрифтов, что у C.readout */
+function readoutStepen(ctx, x, y, capt, v, mant, color) {
+  ctx.textAlign = 'right';
+  ctx.font = MONO.replace('#', 15); ctx.fillStyle = '#8c93ac';
+  ctx.fillText(capt, x, y);
+  stepen(ctx, x, y + 38, v, mant, 32, MONO, color, 'right');
+}
+
+function xt(t) { return GX0 + t / T_MAX * (GX1 - GX0); }
+function ylg(lg) { return GY1 - (C.clamp(lg, LG_LO, LG_HI) - LG_LO) / (LG_HI - LG_LO) * (GY1 - GY0); }
+function ex(x) { return SCX + x * PX; }
+function ey(y) { return SCY - y * PX; }
+
+function TriTela() {
+  var st = useRef({ eps: 1e-6, run: false, faza: 'start' }).current;
+  var pair = useState({ eps: 1e-6, run: false, faza: 'start', tDiv: null });
+  var ui = pair[0], setUi = pair[1];
+
+  function sbros() {
+    st.A = kopiyaA(); st.B = kopiyaB(st.eps);
+    st.t = 0; st.dolg = 0; st.tDiv = null; st.tBaza = null; st.faza = 'start';
+    st.E0 = [energiya(st.A), energiya(st.B)];
+    st.graf = []; st.grafZapis = 0;
+    st.sled = [[], [], [], [], [], []]; st.sledZapis = 0;
+    st.shagov = 0;
+    zapisat();
+    pokazaniya();
+  }
+  function zapisat() {
+    var i;
+    for (i = 0; i < 6; i++) st.sled[i].push([st.A[i], st.B[i]]);
+    var maxSled = Math.round(SLED_T / SLED_DT) + 1;
+    for (i = 0; i < 6; i++) if (st.sled[i].length > maxSled) st.sled[i].shift();
+    var d = rasstoyanie(st.A, st.B), dA = rasstoyanie(st.A, tochnoe(st.t));
+    st.graf.push([st.t, Math.log10(d), Math.log10(dA)]);
+  }
+
+  /* Показания пишутся из шага, не из рендера: автопроверка двигает модель
+     через __demoTick без рендера компонента. */
+  function pokazaniya() {
+    var Ea = energiya(st.A), Eb = energiya(st.B);
+    st.d = rasstoyanie(st.A, st.B);
+    st.dA = rasstoyanie(st.A, tochnoe(st.t));
+    window.__demoState = {
+      t: st.t, eps: st.eps, R: R_SYS, lambda: LAMBDA, h: H0,
+      d: st.d, lgd: Math.log10(st.d), dA: st.dA, tDiv: st.tDiv, tBaza: st.tBaza,
+      E: [Ea, Eb], E0: st.E0.slice(),
+      dE: [Math.abs((Ea - st.E0[0]) / st.E0[0]), Math.abs((Eb - st.E0[1]) / st.E0[1])],
+      P: [impuls(st.A), impuls(st.B)],
+      run: st.run, faza: st.faza, shagov: st.shagov
+    };
+  }
+  if (!st.A) sbros();
+  window.__demoProgon = progon;
+
+  function sobytie(faza) {
+    st.faza = faza;
+    setUi({ eps: st.eps, run: st.run, faza: faza, tDiv: st.tDiv });
+  }
+
+  function step(dt) {
+    if (!st.run || st.t >= T_MAX) return;
+    st.dolg += TEMP * dt;
+    var n = 0;
+    while (st.dolg > 0 && n < MAX_SHAGOV && st.t < T_MAX) {
+      var h = shagPary(st.A, st.B, 1);
+      st.t += h; st.dolg -= h; n++;
+      if (st.t >= st.sledZapis + SLED_DT) { st.sledZapis = st.t; zapisat(); }
+      if (st.tDiv === null && rasstoyanie(st.A, st.B) >= R_SYS) { st.tDiv = st.t; sobytie('razoshlis'); }
+      if (st.tBaza === null && rasstoyanie(st.A, tochnoe(st.t)) >= 0.1 * R_SYS) {
+        st.tBaza = st.t;
+        if (st.faza === 'razoshlis') sobytie('baza');
+      }
+    }
+    st.shagov = n;
+    if (n >= MAX_SHAGOV) st.dolg = 0;
+    if (st.t >= T_MAX) { st.run = false; sobytie('konec'); }
+    pokazaniya();
+  }
+
+  /* ── кадр ── */
+
+  function telo(ctx, x, y, kopiya) {
+    var px = ex(x), py = ey(y);
+    if (px < SX0 - 12 || px > SX0 + SIDE + 12 || py < SY0 - 12 || py > SY0 + SIDE + 12) return;
+    ctx.beginPath(); ctx.arc(px, py, 8, 0, 6.2832);
+    if (kopiya === 0) { ctx.fillStyle = 'rgb(' + CA + ')'; ctx.fill(); }
+    else { ctx.strokeStyle = 'rgb(' + CB + ')'; ctx.lineWidth = 2.8; ctx.stroke(); }
+  }
+
+  function sledy(ctx) {
+    var n = st.sled[0].length;
+    if (n < 2) return;
+    [0, 1].forEach(function (kop) {
+      ctx.strokeStyle = 'rgb(' + (kop ? CB : CA) + ')';
+      ctx.lineWidth = kop ? 1.6 : 2.4; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      for (var b = 0; b < 3; b++) {
+        var sx = st.sled[2 * b], sy = st.sled[2 * b + 1];
+        /* след гаснет к хвосту: рисуется кусками с убывающей прозрачностью */
+        for (var i = 1; i < n; i++) {
+          ctx.globalAlpha = 0.12 + 0.6 * i / n;
+          ctx.beginPath();
+          ctx.moveTo(ex(sx[i - 1][kop]), ey(sy[i - 1][kop]));
+          ctx.lineTo(ex(sx[i][kop]), ey(sy[i][kop]));
+          ctx.stroke();
+        }
+      }
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function scena(ctx, tone) {
+    var ink = tone.ink, muted = tone.muted;
+    ctx.strokeStyle = 'rgba(' + ink + ',.2)'; ctx.lineWidth = 1.2;
+    C.roundRect(ctx, SX0, SY0, SIDE, SIDE, 6); ctx.stroke();
+    ctx.save();
+    ctx.beginPath(); ctx.rect(SX0, SY0, SIDE, SIDE); ctx.clip();
+
+    /* орбита точного решения: окружность радиуса RAD */
+    ctx.setLineDash([5, 7]);
+    ctx.strokeStyle = 'rgba(' + muted + ',.45)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(SCX, SCY, RAD * PX, 0, 6.2832); ctx.stroke();
+    ctx.setLineDash([]);
+    /* центр масс */
+    ctx.fillStyle = 'rgba(' + muted + ',.7)';
+    ctx.beginPath(); ctx.arc(SCX, SCY, 2.5, 0, 6.2832); ctx.fill();
+
+    sledy(ctx);
+    for (var b = 0; b < 3; b++) telo(ctx, st.A[2 * b], st.A[2 * b + 1], 0);
+    for (b = 0; b < 3; b++) telo(ctx, st.B[2 * b], st.B[2 * b + 1], 1);
+
+    /* легенда: значки те же, что у тел */
+    ctx.beginPath(); ctx.arc(SX0 + 22, SY0 + 22, 6, 0, 6.2832);
+    ctx.fillStyle = 'rgb(' + CA + ')'; ctx.fill();
+    C.label(ctx, SX0 + 36, SY0 + 28, 'первая копия', 17, 'rgb(' + CA + ')', 'left');
+    ctx.beginPath(); ctx.arc(SX0 + 22, SY0 + 48, 6, 0, 6.2832);
+    ctx.strokeStyle = 'rgb(' + CB + ')'; ctx.lineWidth = 2.2; ctx.stroke();
+    C.label(ctx, SX0 + 36, SY0 + 54, 'вторая копия: одно тело сдвинуто на ε', 17, 'rgb(' + CB + ')', 'left');
+    ctx.restore();
+  }
+
+  function grafik(ctx, tone) {
+    var ink = tone.ink, muted = tone.muted, i;
+    var os = 'rgba(' + ink + ',.34)', mut = 'rgba(' + muted + ',.95)';
+
+    ctx.strokeStyle = os; ctx.lineWidth = 1.6; ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(GX0, GY0 - 4); ctx.lineTo(GX0, GY1); ctx.lineTo(GX1 + 4, GY1);
+    ctx.stroke();
+    /* риски времени */
+    for (i = 0; i <= T_MAX; i += 10) {
+      var x = xt(i);
+      ctx.beginPath(); ctx.moveTo(x, GY1); ctx.lineTo(x, GY1 + 5); ctx.stroke();
+      C.label(ctx, x, GY1 + 22, String(i), 15, mut);
+    }
+    /* риски по вертикали: каждая декада, подпись через три */
+    for (i = -9; i <= 0; i++) {
+      var y = ylg(i), big = i % 3 === 0;
+      ctx.beginPath(); ctx.moveTo(GX0 - (big ? 6 : 3), y); ctx.lineTo(GX0, y); ctx.stroke();
+      if (big) stepen(ctx, GX0 - 11, y + 5, Math.pow(10, i), 0, 15, SANS, mut, 'right');
+    }
+    C.label(ctx, GX0 + 2, GY0 - 14, 'расстояние между копиями от времени', 17, mut, 'left');
+
+    /* размер системы */
+    var yR = ylg(Math.log10(R_SYS));
+    ctx.save();
+    ctx.setLineDash([6, 6]);
+    ctx.strokeStyle = 'rgba(' + ink + ',.4)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(GX0, yR); ctx.lineTo(GX1, yR); ctx.stroke();
+    ctx.restore();
+    /* подпись слева: там верх поля всегда пуст, кривые приходят туда
+       только справа, после расхождения */
+    C.label(ctx, GX0 + 6, yR - 6, 'размер системы', 15, mut, 'left');
+
+    var g = st.graf, n = g.length;
+    /* тонкая линия: первая копия от точного решения */
+    ctx.save();
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = 'rgba(' + CA + ',.85)'; ctx.lineWidth = 1.6; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    var est = false;
+    for (i = 0; i < n; i++) {
+      if (g[i][2] < LG_LO) { est = false; continue; }
+      if (!est) { ctx.moveTo(xt(g[i][0]), ylg(g[i][2])); est = true; }
+      else ctx.lineTo(xt(g[i][0]), ylg(g[i][2]));
+    }
+    ctx.stroke();
+    ctx.restore();
+    /* расстояние между копиями */
+    ctx.strokeStyle = 'rgb(' + CD + ')'; ctx.lineWidth = 2.6; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (i = 0; i < n; i++) {
+      if (i) ctx.lineTo(xt(g[i][0]), ylg(g[i][1])); else ctx.moveTo(xt(g[i][0]), ylg(g[i][1]));
+    }
+    ctx.stroke();
+    if (n) {
+      ctx.fillStyle = 'rgb(' + CD + ')';
+      ctx.beginPath(); ctx.arc(xt(g[n - 1][0]), ylg(g[n - 1][1]), 4, 0, 6.2832); ctx.fill();
+    }
+    /* отметка расхождения */
+    if (st.tDiv !== null) {
+      var xd = xt(st.tDiv);
+      ctx.save();
+      ctx.setLineDash([4, 5]);
+      ctx.strokeStyle = 'rgba(' + CD + ',.8)'; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(xd, GY1); ctx.lineTo(xd, yR); ctx.stroke();
+      ctx.restore();
+    }
+
+    /* легенда графика */
+    var ly = GY1 + 44;
+    ctx.strokeStyle = 'rgb(' + CD + ')'; ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.moveTo(GX0, ly - 5); ctx.lineTo(GX0 + 22, ly - 5); ctx.stroke();
+    C.label(ctx, GX0 + 30, ly, 'между копиями', 15, mut, 'left');
+    ctx.save();
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = 'rgba(' + CA + ',.85)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(GX0 + 158, ly - 5); ctx.lineTo(GX0 + 180, ly - 5); ctx.stroke();
+    ctx.restore();
+    C.label(ctx, GX0 + 188, ly, 'первая копия от точного решения', 15, mut, 'left');
+  }
+
+  function pokaz(ctx, tone) {
+    var mut = 'rgba(' + tone.muted + ',.95)', ink = 'rgb(' + tone.ink + ')';
+    var y = 300;
+    C.readout(ctx, 650, y, 'ВРЕМЯ', num(st.t, 1), ink);
+    readoutStepen(ctx, 838, y, 'МЕЖДУ КОПИЯМИ', st.d, 1, 'rgb(' + CD + ')');
+    C.readout(ctx, 962, y, 'РАЗОШЛИСЬ ЗА', st.tDiv === null ? '—' : num(st.tDiv, 1),
+              st.tDiv === null ? mut : ink);
+
+    /* контроль сохранения: энергия и импульс каждой копии */
+    var Ea = energiya(st.A), Eb = energiya(st.B);
+    ctx.textAlign = 'left';
+    ctx.font = MONO.replace('#', 13); ctx.fillStyle = '#8c93ac';
+    ctx.fillText('ЭНЕРГИЯ', 560, 390);
+    ctx.fillText('ИМПУЛЬС', 560, 418);
+    ctx.font = MONO.replace('#', 17);
+    ctx.fillStyle = 'rgb(' + CA + ')'; ctx.fillText(num(Ea, 7), 660, 390);
+    ctx.fillStyle = 'rgb(' + CB + ')'; ctx.fillText(num(Eb, 7), 810, 390);
+    stepen(ctx, 660, 418, impuls(st.A), 0, 17, MONO, 'rgb(' + CA + ')', 'left');
+    stepen(ctx, 810, 418, impuls(st.B), 0, 17, MONO, 'rgb(' + CB + ')', 'left');
+    ctx.textAlign = 'center';
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    scena(ctx, tone);
+    grafik(ctx, tone);
+    pokaz(ctx, tone);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  function pusk() {
+    if (st.t >= T_MAX) return;
+    st.run = !st.run;
+    if (st.faza === 'start') st.faza = 'idet';
+    setUi({ eps: st.eps, run: st.run, faza: st.faza, tDiv: st.tDiv });
+  }
+  function sbrosKnopka() {
+    st.run = false; sbros();
+    setUi({ eps: st.eps, run: false, faza: 'start', tDiv: null });
+  }
+  /* Ползунок логарифмический с шагом в декаду; степень десяти берётся из
+     строки, а не из Math.pow, чтобы ε было ровно 10⁻⁶, а не соседним числом. */
+  function menyat(v) {
+    st.eps = parseFloat('1e' + Math.round(Math.log10(v)));
+    sbros();
+    setUi({ eps: st.eps, run: st.run, faza: 'start', tDiv: null });
+  }
+  function epsTekst(eps) {
+    var k = Math.round(Math.log10(eps));
+    return 'ε = 10' + String(k).replace('-', '⁻').replace(/\d/g, function (c) { return '⁰¹²³⁴⁵⁶⁷⁸⁹'[+c]; });
+  }
+
+  function slova() {
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var e = epsTekst(ui.eps).replace('ε = ', '');
+    if (ui.faza === 'start')
+      return 'Две копии одной системы: три равные массы в вершинах треугольника, который ' +
+        'вращается как целое. У второй копии одно тело сдвинуто на ' + A(e) +
+        ' размера системы. Нажмите «Пуск»: сначала копии неразличимы, потом расходятся.';
+    if (ui.faza === 'razoshlis')
+      return 'Расстояние между копиями достигло размера системы за t = ' + A(num(ui.tDiv, 1)) +
+        '. Уравнение одно, шаги счёта одни и те же, различие было только в начальном ' +
+        'положении одного тела, на ' + A(e) + '. Дальше это два разных движения.';
+    if (ui.faza === 'baza')
+      return 'Сошла с треугольника и первая копия: её сдвинула конечная точность самого счёта, ' +
+        'ошибка в шестнадцатом знаке. Та же экспонента, только стартовавшая ниже. Вторая копия ' +
+        'разошлась с первой за t = ' + A(num(ui.tDiv, 1)) + '.';
+    if (ui.faza === 'konec')
+      return 'Запись окончена, t = ' + T_MAX + '. Копии разошлись за t = ' +
+        A(ui.tDiv === null ? '—' : num(ui.tDiv, 1)) + '. «Сброс» возвращает начальные условия, ' +
+        'ползунок меняет сдвиг.';
+    return 'Копии идут вместе, а расстояние между ними растёт как экспонента: на графике ' +
+      'прямая. При сдвиге в тысячу раз меньше прямая стартует на три декады ниже и идёт ' +
+      'с тем же наклоном.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbrosKnopka}>Сброс<//>
+        <//>
+        <${C.Slider} label="Сдвиг:" log=${true} min=${1e-9} max=${1e-3} step=${1}
+                     value=${ui.eps} onChange=${menyat}
+                     display=${epsTekst(ui.eps)} />
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(TriTela);
+</script>
+</body>
+</html>

@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Горка против потенциала</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-04/">&larr; Неделя 04</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=gorka-potencial"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `sila-i-potencialnaya-energiya`, плановый анти-миф карты
+   `c-mif-gorka-kak-potencial` (решение автора по рамке, п. 9). Глава
+   рисует потенциальную энергию рельефом, по которому катится шарик. Для
+   тела на настоящей горке эта картинка точна по длине дуги и приближённа
+   по горизонтальной координате; демка гонит оба движения рядом.
+
+   ПРОФИЛЬ. Чаша y = V(x) = h·x²/L², L = 1 м, глубину h задаёт ползунок от
+   0,05 до 1,5 м, g = 9,81 м/с². Оба тела отпускают из покоя с края, x₀ = L.
+
+   ГОРКА. Тело скользит без трения, связь держит его на профиле: скорость
+   вдоль профиля ẋ·√(1 + V′²), кинетическая энергия ½m(1 + V′²)ẋ²,
+   потенциальная mgV. Уравнение Лагранжа по x:
+
+       ẍ = −(g·V′ + V′·V″·ẋ²)/(1 + V′²).
+
+   Множитель наклона 1/(1 + V′²) и член с кривизной V″ и есть то, чего у
+   точки в потенциале нет.
+
+   ПОТЕНЦИАЛ. Точка на горизонтальной оси в потенциале U = mgV(x):
+
+       ẍ = −g·V′(x) = −(2gh/L²)·x.
+
+   Это осциллятор, и его период 2πL/√(2gh) от размаха не зависит: при
+   h = 0,05 м 6,344 с, при 1,5 м 1,158 с.
+
+   ПО ДЛИНЕ ДУГИ. Длина дуги от дна s(x) = ∫√(1 + V′²)dx у параболы
+   берётся в замкнутом виде, обратная x(s) находится Ньютоном; высота как
+   функция дуги H(s) = V(x(s)). Второе тело идёт в потенциале mgH(s):
+
+       s̈ = −g·dH/ds = −g·V′/√(1 + V′²),
+
+   и его положение переводится в x. Тело на горке в координате s имеет
+   кинетическую энергию ½mṡ² и ту же потенциальную mgH(s), то есть то же
+   уравнение, и тела совпадают. Горка при этом по-прежнему считается по x,
+   второе тело по s: совпадение сверяет две записи одного движения, а не
+   одну формулу с самой собой.
+
+   ТОЧКИ ПОВОРОТА ОБЩИЕ. В точке поворота скорость нулевая, и полная
+   энергия у обоих тел вся потенциальная: mgV(x) = mgh, откуда x = ±L при
+   любой крутизне. Законы движения при этом разные: кинетическая энергия у
+   тела на горке ½m(1 + V′²)ẋ², у точки ½mẋ².
+
+   СЧЁТ. Рунге–Кутта четвёртого порядка; шаг кадра режется на равные
+   подшаги не длиннее 1/4800 с, одна схема и один шаг на все три уравнения.
+   Энергия каждого тела контролируется: её наибольший относительный уход от
+   mgh лежит в __demoState. За десять периодов он не больше 2·10⁻¹² при
+   h = 1,5 м и 4·10⁻¹⁴ при 0,05 м (требование брифа 10⁻⁵); с вдвое
+   крупным и вдвое мелким шагом периоды совпадают в шести знаках.
+
+   ЧТО МЕРЯЕТСЯ. Периоды и точки поворота снимаются с модели. Скорость
+   меняет знак внутри подшага; момент берётся линейной вставкой (около
+   разворота скорость консервативного движения нечётна по времени, и
+   вставка точна до третьего порядка), место разворота разложением второго
+   порядка от начала подшага. Период есть время между разворотами через
+   один; пока разворот всего один, это удвоенное время от отпускания до
+   него. Формулы в показания не идут.
+
+   СВЕРКА. Период горки в квадратуре: T = (4L/√(2gh))·∫₀^{π/2} √(1 +
+   k²sin²θ) dθ, k = 2h/L. При h = 0,05 м это 6,360 с, отношение к периоду
+   точки 1,0025; при 1,5 м 2,576 с и 2,224. Модель совпадает с квадратурой
+   до 10⁻¹¹ с. По этой же квадратуре выставлена шкала времени самописца. */
+
+/* ── чистая физика ──────────────────────────────────────────────
+   Отсюда и до пометки «конец чистой физики» код не знает о браузере и
+   целиком копируется в node для прогона без глаз; так сняты числа шапки
+   и таблица отчёта сборки. */
+
+var L = 1;                   /* м, полуширина чаши: край, с которого отпускают */
+var G = 9.81;                /* м/с² */
+var MASSA = 1;               /* кг: из уравнений масса выпадает, энергия печатается для килограмма */
+var H_MIN = 0.05, H_MAX = 1.5, H_SHAG = 0.05, H_NACH = 0.5;   /* м, глубина чаши */
+var SHAG = 1 / 4800;         /* с, самый длинный подшаг схемы */
+var ZAP = 1 / 120;           /* с, как часто самописец пишет x(t) */
+
+/* Профиль V = a·x², a = h/L², и его производные */
+function profil(h) { return { h: h, a: h / (L * L) }; }
+function V(p, x) { return p.a * x * x; }
+function dV(p, x) { return 2 * p.a * x; }
+function d2V(p) { return 2 * p.a; }
+
+/* Период точки в потенциале: осциллятор с ω² = 2gh/L². К нему же
+   стремится период горки при малых уклонах. */
+function periodMalyhUklonov(h) { return 2 * Math.PI * L / Math.sqrt(2 * G * h); }
+
+/* Длина дуги параболы от дна до x: ∫√(1 + 4a²x²)dx в замкнутом виде при
+   u = 2ax. Нечётна по x, как и положено координате вдоль профиля. */
+function duga(p, x) {
+  var u = 2 * p.a * x;
+  return (u * Math.sqrt(1 + u * u) + Math.asinh(u)) / (4 * p.a);
+}
+
+/* Обратная функция x(s) Ньютоном: ds/dx = √(1 + V′²). Начальное
+   приближение — x с прошлого подшага, двух-трёх итераций хватает до 10⁻¹⁴ м. */
+function xPoDuge(p, s, x) {
+  for (var i = 0; i < 40; i++) {
+    var d = dV(p, x), dx = (duga(p, x) - s) / Math.sqrt(1 + d * d);
+    x -= dx;
+    if (Math.abs(dx) < 1e-14) break;
+  }
+  return x;
+}
+
+/* Ускорение по своей координате q при скорости u. Вид тела: gorka —
+   уравнение горки по x; potencial — точка по x в потенциале mgV(x);
+   duga — точка по длине дуги в потенциале mgH(s). */
+function uskorenie(b, p, q, u) {
+  var d;
+  if (b.vid === 'gorka') { d = dV(p, q); return -(G * d + d * d2V(p) * u * u) / (1 + d * d); }
+  if (b.vid === 'potencial') return -G * dV(p, q);
+  d = dV(p, xPoDuge(p, q, b.x));
+  return -G * d / Math.sqrt(1 + d * d);
+}
+
+/* Полная энергия. У точки на дуге b.x уже переведён из s, и ½ṡ²
+   записывается тем же видом, что ½ẋ² у точки по x. */
+function energiya(b, p) {
+  var d = dV(p, b.x);
+  var k = b.vid === 'gorka' ? 0.5 * (1 + d * d) * b.u * b.u : 0.5 * b.u * b.u;
+  return MASSA * (k + G * V(p, b.x));
+}
+
+/* Тело на краю, в покое. q и u — своя координата и её скорость (x и ẋ
+   или s и ṡ), x — горизонтальное положение. razv — моменты последних
+   разворотов; отпускание из покоя считается нулевым. povorot — места
+   последних разворотов [слева, справа]. */
+function novoeTelo(vid, p) {
+  var b = { vid: vid, q: vid === 'duga' ? duga(p, L) : L, u: 0, x: L, t: 0,
+            E0: 0, E: 0, ukhod: 0, razv: [0], period: null, povorot: [null, null], nRazv: 0 };
+  b.E0 = b.E = energiya(b, p);
+  return b;
+}
+
+/* Подшаг Рунге–Кутты для q̈ = f(q, u) и засечка разворота. У горки
+   ускорение зависит от скорости, поэтому схема общего вида, а не форма
+   Нюстрёма. Разворот: скорость сменила знак внутри подшага. */
+function shagTela(b, p, h) {
+  var q0 = b.q, u0 = b.u, t0 = b.t;
+  var a1 = uskorenie(b, p, q0, u0);
+  var u2 = u0 + h / 2 * a1, a2 = uskorenie(b, p, q0 + h / 2 * u0, u2);
+  var u3 = u0 + h / 2 * a2, a3 = uskorenie(b, p, q0 + h / 2 * u2, u3);
+  var u4 = u0 + h * a3,     a4 = uskorenie(b, p, q0 + h * u3, u4);
+  b.q = q0 + h / 6 * (u0 + 2 * u2 + 2 * u3 + u4);
+  b.u = u0 + h / 6 * (a1 + 2 * a2 + 2 * a3 + a4);
+  b.t = t0 + h;
+  b.x = b.vid === 'duga' ? xPoDuge(p, b.q, b.x) : b.q;
+  b.E = energiya(b, p);
+  var dE = Math.abs(b.E - b.E0) / b.E0;
+  if (dE > b.ukhod) b.ukhod = dE;
+  if ((u0 < 0 && b.u >= 0) || (u0 > 0 && b.u <= 0)) {
+    var tau = h * u0 / (u0 - b.u);                 /* сколько подшага прошло до разворота */
+    var qc = q0 + u0 * tau + 0.5 * a1 * tau * tau;
+    b.razv.push(t0 + tau);
+    if (b.razv.length > 3) b.razv.shift();
+    var n = b.razv.length;
+    b.period = n >= 3 ? b.razv[n - 1] - b.razv[n - 3] : 2 * (b.razv[1] - b.razv[0]);
+    /* шло влево и развернулось: левая точка поворота; шло вправо: правая */
+    b.povorot[u0 < 0 ? 0 : 1] = b.vid === 'duga' ? xPoDuge(p, qc, b.x) : qc;
+    b.nRazv++;
+  }
+}
+
+/* Опыт: горка и второе тело, в потенциале по x или по длине дуги.
+   zapis — самописец [t, x горки, x второго]; razryv — наибольшее
+   расхождение их положений за опыт. */
+function novyjOpyt(h, poDuge) {
+  var p = profil(h);
+  return { p: p, h: h, poDuge: !!poDuge, t: 0,
+           gorka: novoeTelo('gorka', p), vtoroe: novoeTelo(poDuge ? 'duga' : 'potencial', p),
+           razryv: 0, zapis: [[0, L, L]], sledZap: ZAP };
+}
+
+/* Продвинуть опыт на dt: dt режется на k равных подшагов не длиннее SHAG,
+   оба тела идут одними и теми же подшагами. */
+function prodvinut(o, dt) {
+  var k = Math.max(1, Math.ceil(dt / SHAG - 1e-9)), h = dt / k;
+  for (var i = 0; i < k; i++) {
+    shagTela(o.gorka, o.p, h);
+    shagTela(o.vtoroe, o.p, h);
+    o.t = o.gorka.t;
+    var r = Math.abs(o.gorka.x - o.vtoroe.x);
+    if (r > o.razryv) o.razryv = r;
+    if (o.t >= o.sledZap - 1e-12) { o.zapis.push([o.t, o.gorka.x, o.vtoroe.x]); o.sledZap += ZAP; }
+  }
+}
+
+/* Ожидание для сверки и шкалы времени: период точки и период горки в
+   квадратуре. Подынтегральное выражение гладкое и периодическое, поэтому
+   формула трапеций сходится быстрее любой степени шага: 128 узлов дают
+   машинную точность. В показания эти числа не идут. */
+function ozhidanie(h) {
+  var k = 2 * h / L, n = 128, s = 0;
+  for (var i = 0; i <= n; i++) {
+    var sn = Math.sin(i / n * Math.PI / 2);
+    s += (i === 0 || i === n ? 0.5 : 1) * Math.sqrt(1 + k * k * sn * sn);
+  }
+  return { potencial: periodMalyhUklonov(h),
+           gorka: 4 * L / Math.sqrt(2 * G * h) * s * (Math.PI / 2) / n };
+}
+
+/* Прогон без кадров: те же подшаги кадрами по 1/60 с, пока не пройдёт n
+   периодов горки (она медленнее точки при любой глубине). */
+function progon(h, poDuge, n) {
+  var o = novyjOpyt(h, poDuge), tEnd = (n || 10) * ozhidanie(h).gorka;
+  while (o.t < tEnd - 1e-12) {
+    prodvinut(o, Math.min(1 / 60, tEnd - o.t));
+    if (o.zapis.length > 4000) o.zapis.splice(0, 2000);
+  }
+  return o;
+}
+
+/* Сводка опыта для сверки: снятое с модели рядом с ожидаемым. */
+function svodka(o) {
+  var T = ozhidanie(o.h), g = o.gorka, v = o.vtoroe;
+  return { h: o.h, arcMode: o.poDuge, t: o.t,
+           periodSlope: g.period, periodPot: v.period,
+           ratio: g.period && v.period ? g.period / v.period : null,
+           periodSlopeQuadrature: T.gorka, periodSmallSlope: T.potencial,
+           turnSlope: g.povorot.slice(), turnPot: v.povorot.slice(),
+           turnsSlope: g.nRazv, turnsPot: v.nRazv,
+           energyDriftSlope: g.ukhod, energyDriftPot: v.ukhod, gapMax: o.razryv };
+}
+/* ── конец чистой физики ── */
+
+/* Русская запятая и настоящий минус; остатки счёта в последних знаках
+   печатались бы как «−0,000», а ноль есть ноль. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function znak(v, d) {
+  var s = num(v, d);
+  return (v > 0 && s !== num(0, d)) ? '+' + s : s;
+}
+/* Уклон профиля у края, в градусах: arctg V′(L) = arctg(2h/L) */
+function ugolKraya(h) { return Math.atan(2 * h / L) * 180 / Math.PI; }
+function gradusy(u) { return num(u, u < 10 ? 1 : 0) + '°'; }
+
+/* Расхождение положений словами: в режиме дуги оно на уровне округления */
+function razryvTekst(m) {
+  if (m < 1e-9) return 'меньше чем на нанометр';
+  if (m < 1e-6) return 'не больше чем на ' + num(m * 1e9, 1) + ' нм';
+  if (m < 1e-3) return 'не больше чем на ' + num(m * 1e6, 1) + ' мкм';
+  return 'не больше чем на ' + num(m * 1e3, 1) + ' мм';
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева чаша в масштабе, 175 px на метр по обеим осям: пологая чаша
+   выглядит пологой, крутая крутой, и уклон читается глазом. Тело на горке
+   рисуется сплошной бусиной, точка в потенциале кольцом на той же кривой:
+   кривая здесь сразу профиль горки и график U/mg. Совпав, кольцо обнимает
+   бусину. Пунктир на высоте края есть уровень полной энергии: где он
+   встречает кривую, оба тела разворачиваются. Под чашей линейка по x и
+   проекции обоих тел на неё.
+
+   Справа самописец x(t): время вправо, окно в два с половиной периода
+   горки (по квадратуре), дальше лента едет. Пунктиры на ±1 м продолжают
+   уровень энергии: обе кривые разворачиваются на них. Ниже показания:
+   периоды, их отношение, период малых уклонов, точки поворота. */
+
+var W = 1000, HGT = 450;
+var SC = 175;                         /* px на метр, одинаково по обеим осям чаши */
+var X0 = 235, Y0 = 322;               /* экранное место дна чаши */
+var Y_TOP = 46;                       /* выше профиль не рисуется: там легенда */
+var YR = 354;                         /* линейка по x */
+var GX0 = 606, GX1 = 975;             /* самописец: поле по времени */
+var GY0 = 66, GY1 = 226;              /* x = +L и x = −L */
+var GYM = (GY0 + GY1) / 2;
+var RXC = 975;                        /* правый край показаний */
+var OKNO = 2.5;                       /* окно самописца, в периодах горки */
+var MONO = '"JetBrains Mono", ui-monospace, monospace';
+var TAU2 = 6.2832;
+
+/* Цвета данных от темы не зависят: бирюза и охра из палитры рисунков
+   главы. Горка бирюзовая, точка в потенциале охряная. */
+var CV_G = '77,182,198';
+var CV_P = '224,138,82';
+
+/* Показания живут в одном объекте весь сеанс и правятся на месте:
+   автопроверка читает его после __demoTick, когда рендера не было.
+   Поля брифа: h, arcMode, t, xSlope, xPot (м), periodSlope, periodPot (с,
+   null до первого разворота), turnSlope и turnPot ([слева, справа], м,
+   null до разворота на этой стороне), energySlope и energyPot (Дж, тело
+   массой 1 кг). Сверх брифа: vSlope и vPot (ẋ, м/с), sPot (длина дуги у
+   второго тела в режиме дуги), ratio, periodSmallSlope (2πL/√(2gh)),
+   energy0 = mgh, energyDriftSlope и energyDriftPot (наибольший
+   относительный уход энергии за опыт), gapMax (наибольшее |xSlope − xPot|
+   за опыт), turnsSlope и turnsPot (сколько было разворотов), run, faza. */
+var pokaz = {};
+window.__demoState = pokaz;
+
+function Gorka() {
+  /* До «Пуска» опыт стоит: оба тела на краю. Так же ведут себя демки
+     третьей недели (решение автора 11.09). */
+  var ref0 = useRef(null);
+  if (!ref0.current) {
+    ref0.current = { h: H_NACH, poDuge: false, run: false, o: null, okno: 0, faza: 'start' };
+    zaryadit(ref0.current);
+  }
+  var S = ref0.current;
+  /* Пара берётся из одного вызова useState: два отдельных дают два
+     независимых состояния, и рейка перестаёт отзываться на ползунок. */
+  var pair = useState({ run: false, h: H_NACH, poDuge: false, faza: 'start' });
+  var ui = pair[0], setUi = pair[1];
+
+  /* Новый опыт из текущих ручек: модель и шкала самописца. */
+  function zaryadit(s) {
+    s.o = novyjOpyt(s.h, s.poDuge);
+    s.okno = OKNO * ozhidanie(s.h).gorka;
+    snyat(s);
+    s.faza = pokaz.faza;
+  }
+
+  /* Фазы: start — стоим до «Пуска»; zhdem — тела отпущены, периоды
+     сняты ещё не у обоих; izmereno — сняты у обоих. */
+  function faza(s) {
+    var o = s.o;
+    if (!s.run && o.t === 0) return 'start';
+    if (o.gorka.period === null || o.vtoroe.period === null) return 'zhdem';
+    return 'izmereno';
+  }
+
+  function snyat(s) {
+    var o = s.o, g = o.gorka, v = o.vtoroe, d = dV(o.p, v.x);
+    pokaz.h = s.h; pokaz.arcMode = s.poDuge; pokaz.run = s.run; pokaz.faza = faza(s);
+    pokaz.t = o.t;
+    pokaz.xSlope = g.x; pokaz.xPot = v.x;
+    pokaz.vSlope = g.u;
+    pokaz.vPot = v.vid === 'duga' ? v.u / Math.sqrt(1 + d * d) : v.u;
+    pokaz.sPot = v.vid === 'duga' ? v.q : null;
+    pokaz.periodSlope = g.period; pokaz.periodPot = v.period;
+    pokaz.ratio = g.period && v.period ? g.period / v.period : null;
+    pokaz.periodSmallSlope = periodMalyhUklonov(s.h);
+    pokaz.turnSlope = g.povorot.slice(); pokaz.turnPot = v.povorot.slice();
+    pokaz.turnsSlope = g.nRazv; pokaz.turnsPot = v.nRazv;
+    pokaz.energySlope = g.E; pokaz.energyPot = v.E; pokaz.energy0 = g.E0;
+    pokaz.energyDriftSlope = g.ukhod; pokaz.energyDriftPot = v.ukhod;
+    pokaz.gapMax = o.razryv;
+  }
+
+  /* Самописцу нужна только лента в окне: старое срезается пачкой. */
+  function obrezat(o, okno) {
+    var z = o.zapis, gran = o.t - okno - 1, i = 0;
+    while (i < z.length && z[i][0] < gran) i++;
+    if (i > 240) z.splice(0, i);
+  }
+
+  function step(dt) {
+    if (!S.run) return;
+    prodvinut(S.o, dt);
+    obrezat(S.o, S.okno);
+    snyat(S);
+    var f = pokaz.faza;
+    if (f !== S.faza) {
+      S.faza = f;
+      setUi(function (u) { return Object.assign({}, u, { faza: f }); });
+    }
+  }
+
+  /* ── примитивы ── */
+
+  function busina(ctx, x, y, r, rgb) {
+    ctx.fillStyle = 'rgba(' + rgb + ',.95)';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU2); ctx.fill();
+  }
+  function kolco(ctx, x, y, r, rgb, w) {
+    ctx.strokeStyle = 'rgb(' + rgb + ')'; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU2); ctx.stroke();
+  }
+  /* Засечка на линейке: треугольник остриём вниз, к делениям */
+  function treugolnik(ctx, x, y, rgb, sploshnoj) {
+    ctx.beginPath();
+    ctx.moveTo(x, y); ctx.lineTo(x - 6, y - 11); ctx.lineTo(x + 6, y - 11); ctx.closePath();
+    if (sploshnoj) { ctx.fillStyle = 'rgba(' + rgb + ',.95)'; ctx.fill(); }
+    else { ctx.strokeStyle = 'rgb(' + rgb + ')'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke(); }
+  }
+  function mono(ctx, x, y, text, size, color, align) {
+    ctx.font = '500 ' + size + 'px ' + MONO;
+    ctx.fillStyle = color; ctx.textAlign = align || 'left';
+    ctx.fillText(text, x, y);
+    return ctx.measureText(text).width;
+  }
+  function povorotTekst(pv) {
+    return (pv[0] === null ? '—' : znak(pv[0], 3)) + ' и ' + (pv[1] === null ? '—' : znak(pv[1], 3));
+  }
+
+  /* ── кадр ── */
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted, acc = tone.accent;
+    var o = S.o, p = o.p, h = p.h;
+    var mut = 'rgba(' + muted + ',.95)';
+    var x1 = o.gorka.x, x2 = o.vtoroe.x;
+    var i, x, w;
+
+    function ex(xx) { return X0 + xx * SC; }
+    function ey(yy) { return Y0 - yy * SC; }
+
+    /* ── легенда: те же бусина и кольцо, что на кривой ── */
+    busina(ctx, 66, 24, 7, CV_G);
+    C.label(ctx, 80, 30, 'по горке без трения', 17, 'rgb(' + CV_G + ')', 'left');
+    kolco(ctx, 264, 24, 7, CV_P, 2.4);
+    C.label(ctx, 278, 30, o.poDuge ? 'в потенциале по длине дуги' : 'в потенциале по горизонтали',
+            17, 'rgb(' + CV_P + ')', 'left');
+
+    /* ── чаша: тело под профилем и сам профиль. Край чуть дальше точки
+       отпускания, но не выше легенды: при h = 1,5 м это 1,025 м. ── */
+    var xe = Math.min(1.06 * L, L * Math.sqrt((Y0 - Y_TOP) / (SC * h))), N = 160;
+    function profilPut() {
+      ctx.beginPath();
+      for (i = 0; i <= N; i++) {
+        x = -xe + 2 * xe * i / N;
+        if (i) ctx.lineTo(ex(x), ey(V(p, x))); else ctx.moveTo(ex(x), ey(V(p, x)));
+      }
+    }
+    profilPut();
+    ctx.lineTo(ex(xe), Y0 + 14); ctx.lineTo(ex(-xe), Y0 + 14); ctx.closePath();
+    ctx.fillStyle = 'rgba(' + ink + ',.06)'; ctx.fill();
+    profilPut();
+    ctx.strokeStyle = 'rgba(' + ink + ',.75)'; ctx.lineWidth = 3;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.stroke();
+
+    /* ── уровень полной энергии: E/mg = h, высота края ── */
+    var yE = ey(h);
+    ctx.save();
+    ctx.setLineDash([6, 5]);
+    ctx.strokeStyle = 'rgba(' + acc + ',.8)'; ctx.lineWidth = 1.6; ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(ex(-L) - 16, yE); ctx.lineTo(ex(L) + 16, yE); ctx.stroke();
+    ctx.restore();
+    C.label(ctx, ex(L) + 22, yE + 6, 'уровень энергии', 17, 'rgb(' + acc + ')', 'left');
+
+    /* ── проекции тел на линейку ── */
+    ctx.save();
+    ctx.setLineDash([3, 5]); ctx.lineWidth = 1.4; ctx.lineCap = 'butt';
+    ctx.strokeStyle = 'rgba(' + CV_G + ',.55)';
+    ctx.beginPath(); ctx.moveTo(ex(x1), ey(V(p, x1)) + 11); ctx.lineTo(ex(x1), YR - 13); ctx.stroke();
+    ctx.strokeStyle = 'rgba(' + CV_P + ',.55)';
+    ctx.beginPath(); ctx.moveTo(ex(x2), ey(V(p, x2)) + 15); ctx.lineTo(ex(x2), YR - 13); ctx.stroke();
+    ctx.restore();
+
+    /* ── линейка: деления через четверть метра, подписи через полметра ── */
+    ctx.strokeStyle = 'rgba(' + muted + ',.7)'; ctx.lineWidth = 1.6; ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(ex(-1.1 * L), YR); ctx.lineTo(ex(1.1 * L), YR);
+    for (i = -4; i <= 4; i++) {
+      x = ex(i / 4 * L);
+      ctx.moveTo(x, YR); ctx.lineTo(x, YR + (i % 2 ? 6 : 11));
+    }
+    ctx.stroke();
+    [-1, -0.5, 0, 0.5, 1].forEach(function (v) {
+      C.label(ctx, ex(v * L), YR + 32, num(v, v % 1 ? 1 : 0), 17, mut);
+    });
+    C.label(ctx, ex(1.1 * L) + 8, YR + 32, 'м', 17, mut, 'left');
+    treugolnik(ctx, ex(x1), YR - 3, CV_G, true);
+    treugolnik(ctx, ex(x2), YR - 3, CV_P, false);
+
+    /* ── тела: бусина, поверх неё кольцо ── */
+    busina(ctx, ex(x1), ey(V(p, x1)), 10, CV_G);
+    kolco(ctx, ex(x2), ey(V(p, x2)), 14, CV_P, 3.2);
+
+    C.label(ctx, 60, 418, 'чаша в масштабе: глубина ' + num(h, 2) + ' м, уклон у края ' +
+            gradusy(ugolKraya(h)), 17, mut, 'left');
+
+    /* ── самописец x(t): до конца окна лента стоит, потом едет ── */
+    var T = S.okno, t = o.t, t0 = Math.max(0, t - T);
+    function gx(tt) { return GX0 + (tt - t0) / T * (GX1 - GX0); }
+    function gy(xx) { return GYM - xx / L * (GY1 - GY0) / 2; }
+
+    C.label(ctx, GX0, GY0 - 26, 'положение, м', 17, mut, 'left');
+    C.label(ctx, GX1, GY0 - 26, 'время, с', 17, mut, 'right');
+
+    ctx.save();
+    ctx.setLineDash([6, 5]); ctx.lineCap = 'butt';
+    ctx.strokeStyle = 'rgba(' + acc + ',.6)'; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(GX0, gy(L)); ctx.lineTo(GX1, gy(L));
+    ctx.moveTo(GX0, gy(-L)); ctx.lineTo(GX1, gy(-L));
+    ctx.stroke();
+    ctx.restore();
+    ctx.lineCap = 'butt';
+    ctx.strokeStyle = 'rgba(' + ink + ',.3)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(GX0, gy(0)); ctx.lineTo(GX1, gy(0)); ctx.stroke();
+    ctx.strokeStyle = 'rgba(' + ink + ',.07)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(GX0, gy(0.5 * L)); ctx.lineTo(GX1, gy(0.5 * L));
+    ctx.moveTo(GX0, gy(-0.5 * L)); ctx.lineTo(GX1, gy(-0.5 * L));
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(GX0, GY0 - 8); ctx.lineTo(GX0, GY1 + 8); ctx.stroke();
+    [1, 0, -1].forEach(function (v) {
+      C.label(ctx, GX0 - 10, gy(v * L) + 6, num(v, 0), 17, mut, 'right');
+    });
+
+    /* Деления времени: самый мелкий шаг из ряда, при котором их не
+       больше восьми. Подпись у самой оси не ставится, пока лента едет. */
+    var dtk = [0.5, 1, 2, 5, 10].filter(function (d) { return T / d <= 8; })[0];
+    for (var k = Math.ceil(t0 / dtk - 1e-9); k * dtk <= t0 + T + 1e-9; k++) {
+      var tk = k * dtk;
+      x = gx(tk);
+      ctx.strokeStyle = 'rgba(' + ink + ',.07)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, GY0); ctx.lineTo(x, GY1); ctx.stroke();
+      ctx.strokeStyle = 'rgba(' + muted + ',.6)'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(x, GY1 + 8); ctx.lineTo(x, GY1 + 14); ctx.stroke();
+      if (k === 0 || x > GX0 + 16) C.label(ctx, x, GY1 + 34, num(tk, dtk < 1 ? 1 : 0), 17, mut);
+    }
+
+    /* Следы: бирюза толстая, охра тонкая поверх. В режиме дуги тонкая
+       линия лежит ровно внутри толстой. */
+    ctx.save();
+    ctx.beginPath(); ctx.rect(GX0, GY0 - 16, GX1 - GX0 + 10, GY1 - GY0 + 32); ctx.clip();
+    var z = o.zapis, j0 = 0;
+    while (j0 < z.length - 1 && z[j0 + 1][0] < t0) j0++;
+    [[1, 'rgba(' + CV_G + ',.9)', 4, x1], [2, 'rgb(' + CV_P + ')', 1.8, x2]].forEach(function (s) {
+      ctx.strokeStyle = s[1]; ctx.lineWidth = s[2];
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (var j = j0; j < z.length; j++) {
+        if (j === j0) ctx.moveTo(gx(z[j][0]), gy(z[j][s[0]]));
+        else ctx.lineTo(gx(z[j][0]), gy(z[j][s[0]]));
+      }
+      ctx.lineTo(gx(t), gy(s[3]));
+      ctx.stroke();
+    });
+    ctx.restore();
+    busina(ctx, gx(t), gy(x1), 5.5, CV_G);
+    kolco(ctx, gx(t), gy(x2), 7.5, CV_P, 2.2);
+
+    /* ── показания ── */
+    var pg = pokaz.periodSlope, pp = pokaz.periodPot, tire = '—';
+    /* Столбцы разнесены так, чтобы подписи не читались одной фразой:
+       «ПО ГОРКЕ» и «В ПОТЕНЦИАЛЕ» при зазоре в дюжину пикселей сливались. */
+    C.label(ctx, RXC, 288, 'период, с', 17, mut, 'right');
+    C.readout(ctx, 710, 312, 'по горке', pg ? num(pg, 3) : tire, 'rgb(' + CV_G + ')');
+    C.readout(ctx, 845, 312, 'в потенциале', pp ? num(pp, 3) : tire, 'rgb(' + CV_P + ')');
+    C.readout(ctx, RXC, 312, 'отношение', pg && pp ? num(pg / pp, 3) : tire, 'rgb(' + acc + ')');
+
+    C.readout(ctx, 710, 392, 'при малых уклонах, с', num(pokaz.periodSmallSlope, 3), 'rgb(' + ink + ')');
+    C.label(ctx, RXC, 392, 'точки поворота, м', 17, mut, 'right');
+    w = mono(ctx, RXC, 417, povorotTekst(pokaz.turnSlope), 18, 'rgb(' + CV_G + ')', 'right');
+    busina(ctx, RXC - w - 14, 411, 5.5, CV_G);
+    w = mono(ctx, RXC, 441, povorotTekst(pokaz.turnPot), 18, 'rgb(' + CV_P + ')', 'right');
+    kolco(ctx, RXC - w - 14, 435, 6, CV_P, 2);
+    ctx.textAlign = 'center';
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Чистые функции модели наружу: по ним автопроверка гоняет схему без
+     кадров. __demoCheck(1.5, false, 10) — сводка десяти периодов горки при
+     h = 1,5 м: периоды с модели рядом с квадратурой, точки поворота, уход
+     энергии, расхождение положений. Живую сцену не трогает. */
+  window.__demoModel = { profil: profil, V: V, dV: dV, duga: duga, xPoDuge: xPoDuge,
+                         novyjOpyt: novyjOpyt, prodvinut: prodvinut, progon: progon,
+                         svodka: svodka, ozhidanie: ozhidanie,
+                         periodMalyhUklonov: periodMalyhUklonov, SHAG: SHAG, L: L, G: G };
+  window.__demoCheck = function (h, arc, n) {
+    return svodka(progon(h == null ? S.h : h, arc == null ? S.poDuge : !!arc, n || 10));
+  };
+
+  /* Ручки меняют опыт: новая модель, оба тела на краю до «Пуска».
+     Обновление через функцию, а не через замыкание: ползунок сыплет
+     события чаще, чем React успевает перерисовать рейку. */
+  function obnovit(patch) {
+    Object.assign(S, patch); S.run = false; zaryadit(S);
+    setUi({ run: false, h: S.h, poDuge: S.poDuge, faza: S.faza });
+  }
+  function pusk() {
+    S.run = !S.run; snyat(S); S.faza = pokaz.faza;
+    setUi({ run: S.run, h: S.h, poDuge: S.poDuge, faza: S.faza });
+  }
+  function zadatH(v) { obnovit({ h: Math.round(v * 20) / 20 }); }
+  function zadatRezhim(d) { if (d !== S.poDuge) obnovit({ poDuge: d }); }
+
+  /* Для автопроверки: те же ручки без мыши. __demoSet({ h: 1.5, arcMode:
+     true, run: true }) ставит опыт на старт с этими ручками и, если run,
+     отпускает тела; дальше __demoTick двигает время. */
+  window.__demoSet = function (q) {
+    q = q || {};
+    var patch = {};
+    if (q.h != null) patch.h = Math.min(H_MAX, Math.max(H_MIN, Math.round(q.h * 20) / 20));
+    if (q.arcMode != null) patch.poDuge = !!q.arcMode;
+    obnovit(patch);
+    if (q.run) pusk();
+    return pokaz;
+  };
+
+  /* Строка показаний пересказывает кадр словами; числа в неё подставляются
+     те же, что напечатаны на сцене. */
+  function slova(u) {
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var ug = gradusy(ugolKraya(u.h));
+    if (u.faza === 'start') {
+      if (!u.poDuge)
+        return 'Чаша глубиной ' + A(num(u.h, 2) + ' м') + ', уклон у края ' + ug + '. С края ' +
+          'отпускают два тела: одно скользит по горке без трения, другое движется по горизонтали ' +
+          'в потенциале той же формы, как шарик на графике потенциальной энергии. «Пуск» ' +
+          'отпускает оба.';
+      return 'Второе тело движется в том же потенциале, записанном как функция длины дуги вдоль ' +
+        'профиля, и его положение пересчитывается в горизонтальную координату. Чаша глубиной ' +
+        A(num(u.h, 2) + ' м') + '. «Пуск» отпускает оба.';
+    }
+    if (u.faza === 'zhdem')
+      return 'В точке поворота скорость нулевая и вся энергия потенциальная, поэтому оба тела ' +
+        'развернутся на уровне края. Периоды снимаются по развороту скорости.';
+    var pg = pokaz.periodSlope, pp = pokaz.periodPot, r = pg / pp;
+    if (u.poDuge)
+      return 'По длине дуги оба периода ' + A(num(pg, 3) + ' с') + ', положения тел расходятся ' +
+        razryvTekst(pokaz.gapMax) + ': вдоль профиля горка и есть одномерный потенциал. Горка ' +
+        'при этом считается по горизонтали, второе тело по дуге.';
+    if (r < 1.01)
+      return 'Уклон у края ' + ug + ': по горке период ' + A(num(pg, 3) + ' с') + ', в потенциале ' +
+        A(num(pp, 3) + ' с') + ', разница ' + num((r - 1) * 100, 2) + ' %. На пологой горке ' +
+        'картинка шарика на графике энергии почти точна. Прибавьте глубины, и тела разойдутся.';
+    return 'Уклон у края ' + ug + ': по горке период ' + A(num(pg, 3) + ' с') + ', в потенциале ' +
+      A(num(pp, 3) + ' с') + ', горка медленнее в ' + A(num(r, 2)) + ' раза. Точки поворота ' +
+      'общие, законы движения разные: у тела на горке по горизонтали есть множитель наклона и ' +
+      'член с кривизной, а точка в потенциале держит период малых уклонов при любой глубине. ' +
+      'Переключите потенциал на длину дуги.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${function () { obnovit({}); }}>Сброс<//>
+        <//>
+        <${C.Slider} label="Глубина чаши:" min=${H_MIN} max=${H_MAX} step=${H_SHAG}
+                     value=${ui.h} onChange=${zadatH}
+                     display=${num(ui.h, 2) + ' м · у края ' + gradusy(ugolKraya(ui.h))} />
+        <${C.Group} label="Потенциал:">
+          <${C.Btn} active=${!ui.poDuge} onClick=${function () { zadatRezhim(false); }}>По горизонтали<//>
+          <${C.Btn} active=${ui.poDuge} onClick=${function () { zadatRezhim(true); }}>По длине дуги<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova(ui)} />
+    </div>`;
+}
+
+C.mount(Gorka);
+</script>
+</body>
+</html>

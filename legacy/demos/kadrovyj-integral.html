@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Кадровый интеграл</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+<style>
+/* Единственный местный стиль. Общий .ax в demo.css гаснет за 0,8 с — это
+   темп «подобия», где обе системы осей живут на одной картинке и одна
+   перетекает в другую. Здесь запись переключается целиком и мгновенно,
+   и подписи не должны отставать от столбиков на восьмую долю секунды. */
+.stage-wrap .ax { transition: opacity .18s; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/nedelya-02/">&larr; Неделя 02</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=kadrovyj-integral"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Интеграл объясняется через видео со спидометра, разрезанное на кадры.
+   (Ход взят из разведки чужих лекций; фамилия источника здесь не стоит
+   нарочно — демка уезжает в публичную сборку, а гейт атрибуции её ловит.
+   Кто и где, записано в briefs/lekciya02_mfti_prochteniya.md.) Внутри одного кадра стрелка стоит, весь кадр записан одним
+   числом, и перемещение за кадр есть это число на длительность кадра. За
+   всю запись набирается сумма столбиков
+
+       S(N) = Σ v(t_i + h/2) · h,    h = T/N,    t_i = i·h,
+
+   то есть формула средних прямоугольников. Скорость берётся ровно в
+   середине кусочка — так же, как в главе integrirovanie-skorosti и в
+   рисунках stolbiki_summa и stolbiki_znak, откуда взяты все числа.
+
+   Точное значение считается первообразной, а не мелким дроблением:
+   для v = t² это F = t³/3, для v_x = 3 − 2t это F = 3t − t². Путь берётся
+   по участкам между нулями скорости, каждый по модулю, поэтому у второй
+   записи он выходит ровно 4,5 м при перемещении ровно 0.
+
+   ЧИСЛА ИЗ ГЛАВЫ. Первая запись, v = t² на промежутке от 0 до 2 с: два
+   кадра дают 2,5 м, четыре — 2,625 м, восемь — 2,65625 м, шестнадцать —
+   2,664 м, точное значение 8/3 ≈ 2,667 м. Ошибка средних прямоугольников
+   равна (b−a)·h²·v''/24, для v = t² это h²/6, и при каждом удвоении числа
+   кадров она падает вчетверо: 0,167; 0,042; 0,010; 0,003 м.
+
+   Вторая запись, v_x = 3 − 2t на промежутке от 0 до 3 с: шесть кадров по
+   0,5 с дают скорости +2,5; +1,5; +0,5; −0,5; −1,5; −2,5 м/с и площади
+   +1,25; +0,75; +0,25; −0,25; −0,75; −1,25 м. Сумма со знаком равна нулю
+   при любом числе кадров: середины кусочков лежат симметрично относительно
+   1,5 с, а скорость относительно этой точки нечётна. Путь равен 4,5 м
+   только при чётном числе кадров, когда 1,5 с попадает на границу кадра;
+   при нечётном середина среднего кадра садится ровно в 1,5 с, ловит
+   нулевую скорость, и путь недобирает. Это не изъян демки, а поведение
+   средних прямоугольников на модуле, и в строке показаний оно названо. */
+
+var W = 1000, HGT = 440;
+var P = { x0: 380, x1: 928, y0: 40, y1: 316 };   /* поле графика */
+var G = { cx: 176, cy: 178, r: 112 };            /* циферблат спидометра */
+var ROWY = 372;                                  /* строка показаний под графиком; правые края колонок — в записи */
+var SPAN = 4.5;                                  /* за столько секунд запись прокручивается целиком */
+
+/* Русский разделитель: рядом с показаниями стоят подписи с запятыми,
+   и точка посреди них читается как чужая. Минус набирается знаком минуса,
+   а не дефисом. Крохи вроде 4·10⁻¹⁶, которые остаются от суммирования,
+   печатаются нулём, а не «−0,000». */
+function num(v, d) {
+  if (Math.abs(v) < 1e-9) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* Числа на шкале прибора: минус набирается настоящим знаком, а не дефисом */
+function dialNum(v) {
+  return (v < 0 ? '\u2212' : '') + Math.abs(v);
+}
+/* \u0426\u0432\u0435\u0442 \u0441\u0442\u043e\u043b\u0431\u0438\u043a\u0430 \u0437\u0430\u0434\u0430\u043d \u0448\u0435\u0441\u0442\u043d\u0430\u0434\u0446\u0430\u0442\u0435\u0440\u0438\u0447\u043d\u043e\u0439 \u0441\u0442\u0440\u043e\u043a\u043e\u0439, \u0430 \u0437\u0430\u043b\u0438\u0432\u043a\u0430 \u0431\u0435\u0440\u0451\u0442\u0441\u044f \u0441
+   \u043f\u0440\u043e\u0437\u0440\u0430\u0447\u043d\u043e\u0441\u0442\u044c\u044e: rgba \u043d\u0443\u0436\u043d\u044b \u0442\u0440\u0438 \u0447\u0438\u0441\u043b\u0430. */
+function hexRgb(hex) {
+  var n = parseInt(hex.slice(1), 16);
+  return (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255);
+}
+
+var SCEN = [
+  {
+    id: 'razgon', label: 'Разгон',
+    T: 2,
+    v: function (t) { return t * t; },
+    F: function (t) { return t * t * t / 3; },
+    zeros: [],                                   /* нули скорости внутри промежутка */
+    vLo: -0.30, vHi: 4.45,                       /* рамка графика по вертикали */
+    axisBottom: 0,                               /* докуда вниз идёт ось скорости */
+    dial: { lo: 0, hi: 4 },
+    colPos: '#7aa6ff', colNeg: '#7aa6ff',
+    dig: 3, cols: [566, 747, 928],
+    tickBelow: true,
+    tT: [[1, '1'], [2, '2']],
+    tV: [[2, '2'], [4, '4']],
+    vTex: 'v',
+    fx: 1.72, fy: 4.15, fcls: 'ax-right', formula: 'v = t^2'
+  },
+  {
+    id: 'znak', label: 'Туда и обратно',
+    T: 3,
+    v: function (t) { return 3 - 2 * t; },
+    F: function (t) { return 3 * t - t * t; },
+    zeros: [1.5],
+    vLo: -3.5, vHi: 3.5,
+    axisBottom: -3.2,
+    dial: { lo: -3, hi: 3 },
+    colPos: '#5ce0a0', colNeg: '#ff7a66',
+    /* Два знака после запятой: столько же в рисунке главы (2,25 и 4,5) */
+    dig: 2, cols: [478, 628, 778, 928],
+    tickBelow: false,                            /* столбики уходят вниз, подписи времени встают над осью */
+    tT: [[1.5, '1{,}5', 12, 'ax-left'], [3, '3', -10]],
+    tV: [[2, '2'], [-2, '-2']],
+    vTex: 'v_x',
+    fx: 0.78, fy: 2.75, fcls: 'ax-left', formula: 'v_x = 3 - 2t'
+  }
+];
+
+function xt(s, t) { return P.x0 + t / s.T * (P.x1 - P.x0); }
+function yv(s, v) { return P.y1 - (v - s.vLo) / (s.vHi - s.vLo) * (P.y1 - P.y0); }
+
+/* Сумма столбиков и точные значения. Столбики честно складываются в цикле,
+   а не берутся из формулы суммы ряда: демка обязана считать то же, что
+   считает зал по картинке. */
+function tally(s, n) {
+  var h = s.T / n, sum = 0, path = 0, plus = 0, minus = 0;
+  for (var i = 0; i < n; i++) {
+    var area = s.v(h * (i + 0.5)) * h;
+    sum += area;
+    path += Math.abs(area);
+    if (area < 0) minus += area; else plus += area;
+  }
+  return { h: h, sum: sum, path: path, plus: plus, minus: minus,
+           exact: exactMove(s), exactPath: exactPath(s) };
+}
+function exactMove(s) { return s.F(s.T) - s.F(0); }
+/* Путь есть интеграл модуля скорости. Модуль ломает первообразную в нулях
+   скорости, поэтому промежуток режется по ним и каждый кусок берётся
+   по модулю: для v_x = 3 − 2t это 2,25 + 2,25 = 4,5 м. */
+function exactPath(s) {
+  var pts = [0].concat(s.zeros, [s.T]), p = 0;
+  for (var i = 1; i < pts.length; i++) p += Math.abs(s.F(pts[i]) - s.F(pts[i - 1]));
+  return p;
+}
+
+/* Буквы величин и формулы канва не рисует: по правилу курса они набираются
+   KaTeX и живут DOM-слоем поверх (см. .stage-wrap в demo.css). Канве
+   остаются оси-линии, риски, кривая, столбики и прибор. */
+function kx(tex) {
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+
+function axLabels(s) {
+  var yz = yv(s, 0), out = [];
+  s.tT.forEach(function (tk) {
+    out.push({ x: xt(s, tk[0]) + (tk[2] || 0), y: yz + (s.tickBelow ? 26 : -20),
+               tex: tk[1], cls: tk[3] || '' });
+  });
+  s.tV.forEach(function (tk) {
+    out.push({ x: P.x0 - 14, y: yv(s, tk[0]), tex: tk[1], cls: 'ax-right' });
+  });
+  out.push({ x: P.x1 + 26, y: yz, tex: 't,\\ \\text{с}', cls: 'ax-left' });
+  out.push({ x: P.x0 + 14, y: P.y0 - 16, tex: s.vTex + ',\\ \\text{м/с}', cls: 'ax-left' });
+  out.push({ x: xt(s, s.fx), y: yv(s, s.fy), tex: s.formula, cls: s.fcls });
+  return out;
+}
+
+function KadrovyjIntegral() {
+  var st = useRef({ si: 0, scen: 'razgon', n: 8, time: 0, running: true }).current;
+  var [ui, setUi] = useState({ si: 0, n: 8, running: true });
+
+  var s = SCEN[ui.si];
+  var r = tally(s, ui.n);
+
+  /* Показания демки: то, что она утверждает. Отсюда их читает автопроверка,
+     __demoTick продвигает время записи. */
+  st.si = ui.si;
+  st.scen = s.id;
+  st.n = ui.n;
+  st.frame = r.h;                 /* длительность кадра, с */
+  st.fps = ui.n / s.T;            /* частота съёмки, кадров в секунду */
+  st.sum = r.sum;                 /* сумма столбиков со знаком, м */
+  st.exact = r.exact;             /* точное перемещение по первообразной, м */
+  st.diff = r.exact - r.sum;
+  st.path = r.path;               /* сумма модулей столбиков, м */
+  st.exactPath = r.exactPath;
+  st.plus = r.plus;               /* столбики над осью, м */
+  st.minus = r.minus;             /* столбики под осью, м */
+  window.__demoState = st;
+
+  var tone = null;
+
+  function step(dt) {
+    if (!st.running) return;
+    st.time += dt * SCEN[st.si].T / SPAN;
+    if (st.time >= SCEN[st.si].T) st.time -= SCEN[st.si].T;
+  }
+
+  function frameIndex() {
+    return C.clamp(Math.floor(st.time / r.h), 0, ui.n - 1);
+  }
+
+  /* ── прибор ─────────────────────────────────────────────────
+     Шкала развёрнута на 240° и симметрична относительно вертикали.
+     Две стрелки: тонкая идёт непрерывно за скоростью, толстая держит
+     показание кадра. Вилка между ними и есть ошибка одного столбика,
+     и она схлопывается, когда кадры учащаются. */
+
+  function ang(v) {
+    var d = s.dial;
+    return (150 + 240 * (C.clamp(v, d.lo, d.hi) - d.lo) / (d.hi - d.lo)) * Math.PI / 180;
+  }
+
+  /* Стрелка с коротким хвостом за осью, как у настоящего прибора */
+  function needle(ctx, a, len, w, col) {
+    ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(G.cx - Math.cos(a) * 15, G.cy - Math.sin(a) * 15);
+    ctx.lineTo(G.cx + Math.cos(a) * len, G.cy + Math.sin(a) * len);
+    ctx.stroke();
+  }
+
+  function drawDial(ctx, vFrame, vTrue, col) {
+    var d = s.dial;
+
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.22)';
+    ctx.lineWidth = 3; ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.arc(G.cx, G.cy, G.r, ang(d.lo), ang(d.hi)); ctx.stroke();
+
+    for (var v = d.lo; v <= d.hi + 1e-9; v += 0.5) {
+      var big = Math.abs(v - Math.round(v)) < 1e-9;
+      var a = ang(v), cs = Math.cos(a), sn = Math.sin(a), len = big ? 15 : 9;
+      ctx.strokeStyle = 'rgba(' + tone.ink + ',' + (big ? 0.5 : 0.28) + ')';
+      ctx.lineWidth = big ? 2.4 : 1.4;
+      ctx.beginPath();
+      ctx.moveTo(G.cx + cs * G.r, G.cy + sn * G.r);
+      ctx.lineTo(G.cx + cs * (G.r - len), G.cy + sn * (G.r - len));
+      ctx.stroke();
+      if (big) C.label(ctx, G.cx + cs * (G.r - 32), G.cy + sn * (G.r - 32) + 6,
+                       dialNum(v), 18, 'rgba(' + tone.ink + ',.72)');
+    }
+
+    C.label(ctx, G.cx, G.cy + 78, 'м/с', 17, 'rgba(' + tone.muted + ',.85)');
+
+    needle(ctx, ang(vTrue), G.r - 16, 2.4, 'rgba(' + tone.ink + ',.52)');
+    needle(ctx, ang(vFrame), G.r - 34, 6, col);
+    ctx.beginPath(); ctx.arc(G.cx, G.cy, 7, 0, 6.284);
+    ctx.fillStyle = 'rgb(' + tone.ink + ')'; ctx.fill();
+
+    C.label(ctx, G.cx, G.cy + G.r + 26, 'в кадре ' + num(vFrame, 2) + ' м/с', 21, col);
+    C.label(ctx, G.cx, G.cy + G.r + 52, 'стрелка ' + num(vTrue, 2) + ' м/с', 19,
+            'rgb(' + tone.muted + ')');
+    C.label(ctx, G.cx, G.cy + G.r + 80,
+            num(st.fps, st.fps < 10 ? 1 : 0) + ' к/с · кадр ' + num(r.h, 3) + ' с',
+            17, 'rgba(' + tone.muted + ',.8)');
+  }
+
+  /* ── график ─────────────────────────────────────────────────
+     Оси и кривая чернилами темы, как в исходном рисунке главы, где они
+     чёрные. Столбики цветные: цвет несёт знак площади и от темы не
+     зависит. */
+
+  function drawAxes(ctx) {
+    var yz = yv(s, 0);
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.34)';
+    ctx.lineWidth = 1.6; ctx.lineCap = 'butt';
+
+    ctx.beginPath(); ctx.moveTo(P.x0, yz); ctx.lineTo(P.x1 + 16, yz); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(P.x1 + 16 - 9, yz - 5); ctx.lineTo(P.x1 + 16, yz);
+    ctx.lineTo(P.x1 + 16 - 9, yz + 5); ctx.stroke();
+
+    var yTop = P.y0 - 4;
+    ctx.beginPath(); ctx.moveTo(P.x0, yv(s, s.axisBottom)); ctx.lineTo(P.x0, yTop); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(P.x0 - 5, yTop + 9); ctx.lineTo(P.x0, yTop);
+    ctx.lineTo(P.x0 + 5, yTop + 9); ctx.stroke();
+
+    s.tT.forEach(function (tk) {
+      var x = xt(s, tk[0]);
+      ctx.beginPath(); ctx.moveTo(x, yz - 5); ctx.lineTo(x, yz + 5); ctx.stroke();
+    });
+    s.tV.forEach(function (tk) {
+      var y = yv(s, tk[0]);
+      ctx.beginPath(); ctx.moveTo(P.x0 - 5, y); ctx.lineTo(P.x0 + 5, y); ctx.stroke();
+    });
+  }
+
+  function drawBars(ctx) {
+    var yz = yv(s, 0), cur = frameIndex();
+    for (var i = 0; i < ui.n; i++) {
+      var t0 = i * r.h;
+      var vv = s.v(t0 + r.h / 2);
+      var x = xt(s, t0), w = xt(s, t0 + r.h) - x, y = yv(s, vv);
+      var col = vv < 0 ? s.colNeg : s.colPos;
+      var live = i === cur;
+      ctx.fillStyle = 'rgba(' + hexRgb(col) + ',' + (live ? 0.34 : 0.13) + ')';
+      ctx.fillRect(x, Math.min(y, yz), w, Math.abs(y - yz));
+      ctx.strokeStyle = col;
+      ctx.lineWidth = live ? 2.6 : 1.4;
+      ctx.strokeRect(x, Math.min(y, yz), w, Math.abs(y - yz));
+    }
+  }
+
+  function drawCurve(ctx) {
+    ctx.strokeStyle = 'rgb(' + tone.ink + ')';
+    ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (var i = 0; i <= 240; i++) {
+      var t = s.T * i / 240, x = xt(s, t), y = yv(s, s.v(t));
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  /* Где сейчас идёт запись: риска по времени и точка на кривой — та самая
+     скорость, которую показывает тонкая стрелка прибора. */
+  function drawNow(ctx) {
+    var x = xt(s, st.time), y = yv(s, s.v(st.time)), yz = yv(s, 0);
+    ctx.save();
+    ctx.setLineDash([4, 6]);
+    ctx.strokeStyle = 'rgba(' + tone.ink + ',.4)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(x, yz); ctx.lineTo(x, y); ctx.stroke();
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(x, y, 5, 0, 6.284);
+    ctx.fillStyle = 'rgb(' + tone.ink + ')'; ctx.fill();
+  }
+
+  function toneCol(key) {
+    if (key === 'pos') return s.colPos;
+    if (key === 'neg') return s.colNeg;
+    if (key === 'ink') return 'rgb(' + tone.ink + ')';
+    return 'rgb(' + tone.muted + ')';
+  }
+
+  /* Показания. У первой записи сумма стоит против точной площади, у второй
+     столбики разделены на «вперёд» и «назад» — ровно те четыре числа, что
+     подписаны на рисунке главы: +2,25; −2,25; перемещение 0; путь 4,5. */
+  function tallyRow() {
+    if (s.id === 'razgon') return [
+      ['СУММА СТОЛБИКОВ', r.sum, 'pos'],
+      ['ТОЧНАЯ ПЛОЩАДЬ', r.exact, 'ink'],
+      ['РАЗНИЦА', r.exact - r.sum, 'muted']
+    ];
+    return [
+      ['ВПЕРЁД', r.plus, 'pos'],
+      ['НАЗАД', r.minus, 'neg'],
+      ['ПЕРЕМЕЩЕНИЕ', r.sum, 'ink'],
+      ['ПУТЬ', r.path, 'ink']
+    ];
+  }
+
+  function drawTally(ctx) {
+    tallyRow().forEach(function (row, i) {
+      C.readout(ctx, s.cols[i], ROWY, row[0], num(row[1], s.dig) + ' м', toneCol(row[2]));
+    });
+  }
+
+  function draw(ctx) {
+    tone = C.tones(ctx);
+    var vFrame = s.v(frameIndex() * r.h + r.h / 2);
+    var vTrue = s.v(st.time);
+    var col = vFrame < 0 ? s.colNeg : s.colPos;
+    st.vFrame = vFrame;
+    st.vTrue = vTrue;
+
+    drawDial(ctx, vFrame, vTrue, col);
+    drawAxes(ctx);
+    drawBars(ctx);
+    drawCurve(ctx);
+    drawNow(ctx);
+    drawTally(ctx);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  function pick(i) {
+    st.si = i; st.time = 0;
+    setUi({ si: i, n: ui.n, running: ui.running });
+  }
+  function setN(v) { setUi({ si: ui.si, n: Math.round(v), running: ui.running }); }
+  function toggle() {
+    st.running = !st.running;
+    setUi({ si: ui.si, n: ui.n, running: st.running });
+  }
+
+  var say;
+  if (s.id === 'razgon') {
+    say = 'Высота столбика — показание спидометра в середине кадра, ширина — длительность кадра.' +
+      (ui.n <= 3
+        ? ' Кадров мало, стрелка внутри кадра уезжает далеко, и сумма промахивается мимо площади.'
+        : ' Стрелка внутри кадра почти не двигается, и сумма садится на площадь. При каждом' +
+          ' удвоении числа кадров разница падает вчетверо.');
+  } else {
+    say = 'После <span class="accent">1,5 с</span> скорость отрицательна, столбики уходят под ось' +
+      ' и входят в сумму со знаком минус. Перемещение гасится в ноль, а путь складывает те же' +
+      ' столбики по модулю и равен <span class="accent">4,5 м</span>.' +
+      (ui.n % 2 ? ' Кадров нечётное число, середина среднего попала ровно в 1,5 с, где скорость' +
+                  ' нулевая, и путь недобирает.' : '');
+  }
+
+  function spanAt(sp, i) {
+    return html`<span key=${i} class=${sp.cls || null}
+      style=${{ left: (sp.x / W * 100) + '%', top: (sp.y / HGT * 100) + '%' }}
+      dangerouslySetInnerHTML=${{ __html: kx(sp.tex) }}></span>`;
+  }
+  /* Слои подписей строятся один раз на запись и переключаются классом is-on:
+     позиции латех-спанов заданы процентами от логического кадра канвы,
+     поэтому у обёртки зафиксирован её аспект. */
+  var AXL = useRef(null);
+  if (!AXL.current) AXL.current = SCEN.map(axLabels);
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Запись:">
+          ${SCEN.map(function (sc, i) { return html`
+            <${C.Btn} key=${sc.id} active=${ui.si === i} onClick=${function () { pick(i); }}>${sc.label}<//>`; })}
+        <//>
+        <${C.Slider} label="Частота съёмки:" min=${1} max=${48} step=${1}
+                     value=${ui.n} onChange=${setN}
+                     display=${ui.n + ' ' + C.plural(ui.n, 'кадр', 'кадра', 'кадров')} />
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${toggle}>${ui.running ? 'Пауза' : 'Пуск'}<//>
+        <//>
+      </div>
+      ${/* Сцена держит пропорцию и обязана влезать в колонку. Прежние
+            aspectRatio плюс flex: 0 0 auto считали высоту только от ширины,
+            и во врезке колоды сцена вылезала за кадр: полоса прокрутки на
+            шесть пикселей у поворота осей, сорок у кадрового интеграла,
+            шестьдесят шесть у ускорения в повороте (замеры 08.09).
+            Теперь ведёт высота, ширина выводится из неё: упирается в
+            высоту — сцена уходит в поля по бокам, упирается в ширину —
+            ведёт себя как раньше. */''}
+      <div class="stage-wrap"
+           style=${{ aspectRatio: W + ' / ' + HGT, flex: '0 1 auto', minHeight: 0,
+                     height: '100%', width: 'auto', maxWidth: '100%',
+                     alignSelf: 'center' }}>
+        <canvas class="stage" ref=${ref}></canvas>
+        ${SCEN.map(function (sc, i) {
+          return html`<div key=${sc.id} class=${'ax' + (ui.si === i ? ' is-on' : '')}>
+            ${AXL.current[i].map(spanAt)}
+          </div>`;
+        })}
+      </div>
+      <${C.Status} html=${say} />
+    </div>`;
+}
+
+C.mount(KadrovyjIntegral);
+</script>
+</body>
+</html>

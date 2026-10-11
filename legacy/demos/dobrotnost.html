@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Добротность: колебания против секунд</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-07/">&larr; Неделя 07</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/demo-osc.js"></script>
+<script src="../shared/analytics.js?demo=dobrotnost"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html, O = window.DemoOsc;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блоки главы `dekrement-i-dobrotnost` и `chislo-kolebanij` (бриф
+   briefs/demki_nedelya07.md, № 4; карточка 5 описи
+   lekciya07_demki_minuty.md §1.3; рамка §4, шаг «Декремент и
+   добротность», правка 7.3). Второй пункт тезиса: затухание мерят числом
+   колебаний системы. Затухание по правилу методов (решения автора, п. 2)
+   пишется динамическим методом, ẍ + 2γẋ + ω₀²x = 0; энергия входит только
+   мерой потерь.
+
+   В СВОИХ ПЕРИОДАХ. Время каждого осциллятора меряется его периодом
+   затухающих колебаний T = 2π/ω, координата начальным отклонением. Тогда
+   γ переходит в декремент d = γT, ω₀ в √(4π² + d²), и уравнение
+   ẍ + 2dẋ + (4π² + d²)x = 0 помнит только d. Отсюда вся демка: в своих
+   колебаниях два осциллятора с одним d неотличимы, какие бы ни были у них
+   секунды; секунды возвращает множитель T.
+
+   РЕЖИМЫ. «Пара главы»: осцилляторы слайда 7 старой колоды 09 и блока
+   главы, T₁ = 10 нс, γ₁ = 10⁵ с⁻¹ (d = 0,001, Q ≈ 3142, 1/γ = 10 мкс) и
+   T₂ = 1 мс, γ₂ = 10² с⁻¹ (d = 0,1, Q ≈ 31,4, 1/γ = 10 мс). В колебаниях
+   первый живёт тысячу периодов до падения амплитуды в e раз, второй
+   десять; по секундомеру первый гаснет за 10 мкс, второй за 10 мс, в
+   тысячу раз медленнее. «Одна добротность»: те же периоды и d = 0,01 у
+   обоих (бриф: «с одной добротностью и разными частотами»); в колебаниях
+   строки совпадают, по секундомеру первый гаснет за 1 мкс, второй за
+   100 мс. «Одна система»: ползунок декремента и рядом π/d, ω₀/2γ и
+   отношение энергии к потере за период; при d = 0,01 это 314,16, 314,16 и
+   50,50, а 2πW/ΔW = 317,30.
+
+   СЧЁТ. Точный шаг e^{Ah} из shared/demo-osc.js (propagator), шаг 1/100
+   периода; если столбец развёртки уже сотой доли периода (окно в
+   несколько периодов), шаг берётся вдвое меньше столбца, чтобы в каждом
+   было не меньше двух отсчётов. Шаг точен при любой длине, от неё зависит
+   только выборка. Старт из покоя с x = 1. Максимумы x ищутся по смене
+   знака скорости сверху вниз (crossing(−1) с производной скорости
+   −ω₀²x − 2γv), значение в максимуме кубикой Эрмита по x и v. Энергия в
+   максимуме W = ½ω₀²x², скорость там ноль; потеря за период
+   ΔW = W₀ − W₁. Вторая дорога для потери: мощность трения, dE/dt = −2γv²,
+   проинтегрированная по первому периоду формулой Симпсона по тем же 100
+   шагам. Число колебаний до падения в e раз N снимается с ln x в
+   максимумах линейной вставкой между соседними, d по двум первым
+   максимумам: d = ln(x₀/x₁).
+
+   Строка развёртки копит в каждом столбце наименьшее и наибольшее x, как
+   осциллограф: при тысячах периодов на окно рисуется полоса, при
+   нескольких кривая. Столбики энергии стоят в максимумах; если они чаще
+   четырёх пикселей, сливаются в заливку. Счёт строки останавливается,
+   когда амплитуда √(x² + v²/ω₀²) падает ниже 10⁻⁶ начальной: на строке
+   высотой 84 пикселя это меньше десятитысячной пикселя, дальше рисуется
+   ноль. Без этого у первого осциллятора в окне 30 мс пришлось бы считать
+   3·10⁸ шагов.
+
+   ПРОВЕРКА (09.10, hcheck на порту 49874: чтение __demoState после
+   __demoSet и __demoTick; та же физика в node с demo-osc.js; отчёт
+   briefs/demki_nedelya07_dobrotnost_REPORT.md). Против замкнутых формул
+   d = γT, N = 1/d, W/ΔW = 1/(1 − e^{−2d}) со следа совпадает до 3·10⁻¹²
+   при d от 0,001 до 2; период между максимумами 1,0000 периода; потеря
+   по мощности трения против разности энергий в максимумах до 5·10⁻⁷
+   (при d = 2; 10⁻¹¹ при d = 0,01). Пара главы: d = 0,001000 и 0,1000,
+   N = 1000 и 10, 1/γ = 10 мкс и 10 мс, Q = 3141,6 и 31,416,
+   ω₀/2γ = 3141,6 и 31,420. Одна добротность: N = 100 у обоих, 1 мкс и
+   100 мс. Одна система, d = 0,01: π/d = 314,16, ω₀/2γ = 314,16,
+   W/ΔW = 50,50, 2πW/ΔW = 317,31; d = 0,5: 6,28, 6,30, 1,58, 9,94 (глава:
+   6,3 и 9,9); при ω₀/2γ = 2 π/d = 1,94 и 2πW/ΔW = 6,54, при 10 9,99 и
+   13,46 (опись). Подложенный дефект ловится: трение в шаге на процент
+   больше даёт d = 0,01010 и π/d = 311,05 против ω₀/2γ = 314,16, частота
+   на 0,1 % больше даёт период 0,9990. */
+
+/* ── чистая физика ──────────────────────────────────────────────
+   Отсюда до пометки «конец чистой физики» код не знает о браузере и
+   прогоняется в node вместе с demo-osc.js. */
+
+var TWO_PI = 2 * Math.PI;
+var SHAG = 0.01;          /* шаг, доля периода */
+var POROG = 1e-6;         /* амплитуда, ниже которой строку не считаем */
+var NC = 900;             /* столбцов развёртки */
+var SWEEP = 5;            /* секунд на проход курсора */
+/* Шагов строки за один кадр. Первому осциллятору в окне 0,1–0,3 с до
+   остановки нужно 1,4·10⁶ шагов; с этим пределом строка догоняет курсор
+   за четыре кадра, и кадр не стоит дольше 10–15 мс. */
+var LIMIT = 4e5;
+
+/* Пары: T в секундах, γ в с⁻¹; d = γT. */
+var PARY = {
+  para:  [{ T: 1e-8, gamma: 1e5 }, { T: 1e-3, gamma: 1e2 }],
+  odnaQ: [{ T: 1e-8, gamma: 1e6 }, { T: 1e-3, gamma: 1e1 }]
+};
+/* Окна развёртки: в колебаниях и в секундах. */
+var OKNA = {
+  kol: [1, 3, 10, 30, 100, 300, 1000, 3000],
+  sek: [1e-8, 3e-8, 1e-7, 3e-7, 1e-6, 3e-6, 1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1]
+};
+var NACH = {
+  para:    { kol: 30, sek: 3e-5 },
+  odnaQ:   { kol: 300, sek: 3e-6 },
+  sistema: { kol: 30 }
+};
+/* Декременты ползунка «одной системы»: Q = π/d от 3142 до 1,57; 0,001 и
+   0,1 у пары главы, 0,01 у главы и брифа, 0,3 у рисунка главы, 0,5 у
+   строки главы о расхождении определений. */
+var DS = [0.001, 0.002, 0.003, 0.005, 0.01, 0.02, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 1.5, 2];
+
+function oscillyator(d, T) {
+  return { d: d, T: T, g: d, w0: Math.sqrt(TWO_PI * TWO_PI + d * d) };
+}
+function uskor(o, x, v) { return -o.w0 * o.w0 * x - 2 * o.g * v; }
+
+/* Измерение со следа: старт из покоя, шаг 1/100 периода, до первого
+   максимума ниже e⁻¹ начального. */
+function izmerit(o) {
+  var P = O.propagator(o.w0, o.g, SHAG);
+  var s = { t: 0, x: 1, v: 0 }, kr = O.crossing(-1), maks = [{ u: 0, x: 1 }];
+  kr.mark(0, -1);
+  var simp = 0, k = 0, ePor = Math.exp(-1);
+  while (k < 2e7) {
+    var t0 = s.t, x0 = s.x, v0 = s.v, a0 = uskor(o, x0, v0);
+    P.step(s); k++;
+    s.t = k * SHAG;       /* время счётом шагов: сумма сотых за 10⁵ шагов уплывает */
+    /* Симпсон по первому периоду: веса 1, 4, 2, …, 4, 1; f₀ = 0, v₀ = 0 */
+    if (k <= 100) simp += (k === 100 ? 1 : k % 2 ? 4 : 2) * 2 * o.g * s.v * s.v;
+    var tc = kr.feed(t0, v0, s.t, s.v, a0, uskor(o, s.x, s.v));
+    if (tc != null) {
+      maks.push({ u: tc, x: O.hermite(t0, x0, v0, s.t, s.x, s.v, tc) });
+      if (maks[maks.length - 1].x < ePor) break;
+    }
+  }
+  simp *= SHAG / 3;
+  var x0m = maks[0].x, x1m = maks[1].x, w2 = 0.5 * o.w0 * o.w0;
+  var d = Math.log(x0m / x1m);
+  var W0 = w2 * x0m * x0m, W1 = w2 * x1m * x1m, dW = W0 - W1;
+  var Ne = null;
+  for (var i = 0; i + 1 < maks.length; i++) {
+    var l0 = Math.log(maks[i].x), l1 = Math.log(maks[i + 1].x);
+    if (l0 >= -1 && l1 < -1) { Ne = maks[i].u + (-1 - l0) / (l1 - l0) * (maks[i + 1].u - maks[i].u); break; }
+  }
+  return {
+    d: d, Tm: maks[1].u - maks[0].u, Ne: Ne,
+    Q: Math.PI / d,                       /* рабочее определение главы */
+    q0: o.w0 / (2 * o.g),                 /* ω₀/2γ из параметров уравнения */
+    qw: Math.sqrt(o.w0 * o.w0 - o.g * o.g) / (2 * o.g),   /* ω/2γ */
+    W0: W0, W1: W1, dW: dW, WdW: W0 / dW, Qe: TWO_PI * W0 / dW,
+    dWint: simp, dWrel: (simp - dW) / dW,
+    shagov: k, nMaks: maks.length
+  };
+}
+
+/* Строка развёртки: окно U в периодах этого осциллятора. */
+function novayaStroka(o, U) {
+  var dU = U / NC, h = Math.min(SHAG, dU / 2);
+  var r = {
+    o: o, U: U, dU: dU, h: h, P: O.propagator(o.w0, o.g, h),
+    s: { t: 0, x: 1, v: 0 }, kr: O.crossing(-1),
+    est: new Uint8Array(NC), mn: new Float64Array(NC), mx: new Float64Array(NC),
+    uMn: new Float64Array(NC), uMx: new Float64Array(NC),
+    perv: new Float64Array(NC), posl: new Float64Array(NC),
+    W: new Float64Array(NC).fill(-1),
+    maks: [{ u: 0, x: 1 }], nMaks: 1, mertv: null, shagov: 0, k: 0
+  };
+  zapisat(r, 0, 1);
+  r.W[0] = 1;
+  r.kr.mark(0, -1);
+  return r;
+}
+function stolbec(r, u) { return Math.max(0, Math.min(NC - 1, Math.floor(u / r.dU))); }
+function zapisat(r, u, x) {
+  var c = stolbec(r, u);
+  if (!r.est[c]) {
+    r.est[c] = 1; r.mn[c] = r.mx[c] = r.perv[c] = r.posl[c] = x; r.uMn[c] = r.uMx[c] = u;
+    return;
+  }
+  if (x < r.mn[c]) { r.mn[c] = x; r.uMn[c] = u; }
+  if (x > r.mx[c]) { r.mx[c] = x; r.uMx[c] = u; }
+  r.posl[c] = x;
+}
+/* Довести строку до времени uCel (в её периодах). */
+function dvigat(r, uCel) {
+  var o = r.o, s = r.s, n = 0, w02 = o.w0 * o.w0, por2 = POROG * POROG;
+  while (r.mertv == null && s.t + r.h <= uCel + 1e-12 * r.U && n < LIMIT) {
+    var t0 = s.t, x0 = s.x, v0 = s.v, a0 = uskor(o, x0, v0);
+    r.P.step(s); n++;
+    s.t = ++r.k * r.h;
+    zapisat(r, s.t, s.x);
+    var tc = r.kr.feed(t0, v0, s.t, s.v, a0, uskor(o, s.x, s.v));
+    if (tc != null) {
+      var xm = O.hermite(t0, x0, v0, s.t, s.x, s.v, tc), c = stolbec(r, tc);
+      if (xm * xm > r.W[c]) r.W[c] = xm * xm;
+      if (r.maks.length < 64) r.maks.push({ u: tc, x: xm });
+      r.nMaks++;
+    }
+    if (s.x * s.x + s.v * s.v / w02 < por2) r.mertv = s.t;
+  }
+  r.shagov += n;
+  return n;
+}
+
+/* Опыт целиком: режим, ось, окно, декремент «одной системы». */
+function sobrat(rezhim, os, okno, d) {
+  var oscs;
+  if (rezhim === 'sistema') { oscs = [oscillyator(d, null)]; os = 'kol'; }
+  else oscs = PARY[rezhim].map(function (p) { return oscillyator(p.gamma * p.T, p.T); });
+  if (okno == null) okno = NACH[rezhim][os];
+  return {
+    rezhim: rezhim, os: os, okno: okno, d: d, s: 0, oscs: oscs,
+    izm: oscs.map(izmerit),
+    rows: oscs.map(function (o) { return novayaStroka(o, os === 'kol' ? okno : okno / o.T); })
+  };
+}
+function prodvinut(M) {
+  M.rows.forEach(function (r) { dvigat(r, M.s * r.U); });
+}
+
+/* Показания для автопроверки. Верхние поля d, Q, … относятся к первой
+   строке (в «одной системе» она единственная), обе строки в rows. */
+function svodka(M) {
+  var rows = M.oscs.map(function (o, i) {
+    var z = M.izm[i], r = M.rows[i];
+    var uK = M.os === 'kol' ? M.s * M.okno : (o.T ? M.s * M.okno / o.T : null);
+    return {
+      T: o.T, gamma: o.T ? o.g / o.T : null, omega0: o.T ? o.w0 / o.T : null, dGiven: o.d,
+      d: z.d, periodMeasured: z.Tm, Ne: z.Ne, tauE: o.T ? z.Ne * o.T : null,
+      Q: z.Q, piOverD: z.Q, omega0Over2g: z.q0, omegaOver2g: z.qw,
+      energyRatio: z.WdW, energyQ: z.Qe, lossFromMaxima: z.dW, lossIntegral: z.dWint, lossRel: z.dWrel,
+      windowPeriods: r.U, step: r.h, cursorPeriods: uK, cursorSeconds: o.T && uK != null ? uK * o.T : null,
+      computedTo: r.s.t, maxima: r.nMaks, dead: r.mertv, steps: r.shagov,
+      firstMaxima: r.maks.slice(0, 4).map(function (m) { return { u: m.u, x: m.x, W: m.x * m.x }; })
+    };
+  });
+  var r0 = rows[0];
+  return {
+    mode: M.rezhim, axis: M.os, window: M.okno, sweep: M.s, rows: rows,
+    d: r0.d, Q: r0.Q, piOverD: r0.piOverD, omega0Over2g: r0.omega0Over2g,
+    energyRatio: r0.energyRatio, energyQ: r0.energyQ, maxima: r0.maxima
+  };
+}
+/* ── конец чистой физики ── */
+
+/* Русская запятая и настоящий минус. */
+function num(v, d) {
+  if (v == null || !isFinite(v)) return '—';
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function obrez(s) {
+  if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  return s.replace('.', ',');
+}
+function gruppa(n) {
+  var s = String(n);
+  return n >= 10000 ? s.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') : s;
+}
+/* Число колебаний: целые без дробной части, малые с двумя знаками. */
+function fmtKol(n) {
+  if (n == null || !isFinite(n)) return '—';
+  if (n >= 1000) return gruppa(Math.round(n));
+  var s = n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n >= 1 ? n.toFixed(2) : n === 0 ? '0' : n.toPrecision(2);
+  return obrez(s);
+}
+function slovoKol(str) {
+  if (str.indexOf(',') >= 0) return 'колебания';
+  return C.plural(parseInt(str.replace(/\D/g, ''), 10), 'колебание', 'колебания', 'колебаний');
+}
+function kolSlovo(n) { var s = fmtKol(n); return s + ' ' + slovoKol(s); }
+var ED = [{ k: 1e-9, u: 'нс' }, { k: 1e-6, u: 'мкс' }, { k: 1e-3, u: 'мс' }, { k: 1, u: 'с' }];
+function edinica(t) {
+  var a = Math.abs(t) * (1 + 1e-9);
+  return a < 1e-6 ? ED[0] : a < 1e-3 ? ED[1] : a < 1 ? ED[2] : ED[3];
+}
+function fmtT(t) {
+  if (t == null || !isFinite(t)) return '—';
+  var e = edinica(t), v = t / e.k;
+  return obrez(v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + ' ' + e.u;
+}
+var SUP = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻' };
+/* 10⁵ вместо 100000, если это степень десяти */
+function stepen(v) {
+  var p = Math.round(Math.log10(v));
+  if (Math.abs(v / Math.pow(10, p) - 1) < 1e-9) return p === 1 ? '10' : '10' + String(p).split('').map(function (c) { return SUP[c]; }).join('');
+  return obrez(v.toPrecision(3));
+}
+function fmtQ(q) { return num(q, q >= 100 ? 0 : q >= 10 ? 1 : 2); }
+function fmtQ2(q) { return num(q, q >= 1000 ? 1 : 2); }
+function fmtD(d) { return num(d, Math.max(0, 3 - Math.floor(Math.log10(d * (1 + 5e-5))))); }
+function dKratko(d) { return obrez(String(parseFloat(d.toPrecision(6)))); }
+function fmtOkno(os, w) { return os === 'kol' ? kolSlovo(w) : fmtT(w); }
+function nice(x) {
+  var p = Math.pow(10, Math.floor(Math.log10(x))), m = x / p;
+  return (m < 1.5 ? 1 : m < 3 ? 2 : m < 7 ? 5 : 10) * p;
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   «Пара»: две строки, сверху первый осциллятор, снизу второй. В строке
+   развёртка x, под ней столбики энергии в максимумах, над ней параметры и
+   число колебаний до падения в e раз, под ней показания второго часового
+   на курсоре: в колебаниях его секунды, в секундах его колебания. Ось
+   общая. «Одна система»: одна строка крупнее, под ней четыре показания. */
+
+var W = 1000, HGT = 462;
+var X0 = 75, X1 = 975;
+var CV = ['77,182,198', '224,138,82'];   /* строки; оранжевым и потеря ΔW */
+
+var pokaz = {};
+window.__demoState = pokaz;
+
+function Dobrotnost() {
+  var ref0 = useRef(null);
+  if (!ref0.current) ref0.current = { M: sobrat('para', 'kol', null, 0.01) };
+  var S = ref0.current;
+  var pair = useState(0), setVer = pair[1];
+  function obnovit() { setVer(function (n) { return n + 1; }); }
+  function snyat() { Object.assign(pokaz, svodka(S.M)); }
+  if (pokaz.mode == null) snyat();
+
+  function step(dt) {
+    var M = S.M;
+    M.s = Math.min(1, M.s + dt / SWEEP);
+    prodvinut(M);
+    snyat();
+  }
+
+  /* ── примитивы ── */
+
+  function punktir(ctx, x0, y0, x1, y1, color, w) {
+    ctx.save(); ctx.setLineDash([5, 5]); ctx.strokeStyle = color; ctx.lineWidth = w || 1.4;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.restore();
+  }
+  function Xc(c) { return X0 + (c + 0.5) * (X1 - X0) / NC; }
+
+  /* Развёртка как на осциллографе: в столбце первый отсчёт, наименьший и
+     наибольший в порядке времени, последний. */
+  function risStroku(ctx, r, yC, A, rgb, sCur, ink) {
+    function Y(x) { return yC - x * A; }
+    ctx.strokeStyle = 'rgba(' + ink + ',.22)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(X0, yC); ctx.lineTo(X1, yC); ctx.stroke();
+    ctx.save();
+    ctx.beginPath(); ctx.rect(X0 - 2, yC - A - 6, X1 - X0 + 4, 2 * A + 12); ctx.clip();
+    ctx.strokeStyle = 'rgb(' + rgb + ')'; ctx.lineWidth = 1.6; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    var cMax = stolbec(r, r.s.t), nach = true;
+    for (var c = 0; c <= cMax; c++) {
+      if (!r.est[c]) continue;
+      var x = Xc(c), a = r.uMn[c] <= r.uMx[c] ? r.mn[c] : r.mx[c], b = r.uMn[c] <= r.uMx[c] ? r.mx[c] : r.mn[c];
+      if (nach) { ctx.moveTo(x, Y(r.perv[c])); nach = false; } else ctx.lineTo(x, Y(r.perv[c]));
+      ctx.lineTo(x, Y(a)); ctx.lineTo(x, Y(b)); ctx.lineTo(x, Y(r.posl[c]));
+    }
+    /* после остановки счёта амплитуда меньше 10⁻⁶: до курсора ноль */
+    if (r.mertv != null) ctx.lineTo(X0 + sCur * (X1 - X0), yC);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function risEnergiyu(ctx, r, yB, BH, rgb, ink) {
+    var pc = (X1 - X0) / NC, shag = pc / r.dU;          /* пикселей между максимумами */
+    var shir = shag >= 4 ? Math.min(10, Math.max(2, 0.45 * shag)) : pc + 0.3;
+    ctx.strokeStyle = 'rgba(' + ink + ',.22)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(X0, yB + 0.5); ctx.lineTo(X1, yB + 0.5); ctx.stroke();
+    ctx.fillStyle = 'rgba(' + rgb + ',' + (shag >= 4 ? '.85' : '.6') + ')';
+    var cMax = stolbec(r, r.s.t);
+    for (var c = 0; c <= cMax; c++) {
+      var w = r.W[c];
+      if (w < 0) continue;
+      var hgt = w * BH;
+      if (hgt < 0.05) continue;
+      ctx.fillRect(Xc(c) - shir / 2, yB - hgt, shir, hgt);
+    }
+    return shag;
+  }
+
+  /* Падение амплитуды в e раз, снятое со следа; появляется, когда курсор
+     его прошёл. */
+  function metkaE(ctx, r, Ne, sCur, yTop, yBot, rgb) {
+    if (Ne == null || Ne > r.U || sCur * r.U < Ne) return;
+    var x = X0 + Ne / r.U * (X1 - X0);
+    punktir(ctx, x, yTop, x, yBot, 'rgba(' + rgb + ',.9)', 1.6);
+    var vpravo = x < X1 - 110;
+    C.label(ctx, vpravo ? x + 7 : x - 7, yTop + 14, 'в e раз', 17, 'rgb(' + rgb + ')', vpravo ? 'left' : 'right');
+  }
+
+  function risOs(ctx, M, yA, mut) {
+    var Wn, ed;
+    if (M.os === 'kol') { Wn = M.okno; ed = 'колебаний'; }
+    else { var e = edinica(M.okno); Wn = M.okno / e.k; ed = e.u; }
+    var st = nice(Wn / 5), mutS = 'rgba(' + mut + ',.95)';
+    ctx.strokeStyle = 'rgba(' + mut + ',.7)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(X0, yA); ctx.lineTo(X1, yA);
+    var n = Math.round(Wn / st);
+    for (var i = 0; i <= n; i++) { var x = X0 + i * st / Wn * (X1 - X0); ctx.moveTo(x, yA); ctx.lineTo(x, yA + 7); }
+    ctx.stroke();
+    /* последняя метка с единицей прижата вправо; соседние, которые она
+       накрыла бы, пропускаются */
+    var tn = obrez(String(parseFloat((n * st).toPrecision(6))));
+    var posl = tn + ' ' + (M.os === 'kol' ? slovoKol(tn) : ed);
+    C.label(ctx, X1, yA + 26, posl, 17, mutS, 'right');
+    var levGr = X1 - ctx.measureText(posl).width - 12;
+    for (i = 0; i < n; i++) {
+      var v = i * st, xx = X0 + v / Wn * (X1 - X0), t = obrez(String(parseFloat(v.toPrecision(6))));
+      ctx.font = '17px "Golos Text", system-ui, sans-serif';
+      if (xx + ctx.measureText(t).width / 2 > levGr) continue;
+      C.label(ctx, xx, yA + 26, t, 17, mutS, 'center');
+    }
+  }
+
+  function kursor(ctx, M, y0, y1, ink) {
+    if (M.s <= 0 || M.s >= 1) return;
+    var x = X0 + M.s * (X1 - X0);
+    punktir(ctx, x, y0, x, y1, 'rgba(' + ink + ',.45)', 1.4);
+  }
+
+  /* ── пара ── */
+
+  function risParu(ctx, M, tone) {
+    var ink = tone.ink, mut = tone.muted, mutS = 'rgba(' + mut + ',.95)';
+    for (var i = 0; i < 2; i++) {
+      var yT = 6 + i * 212, r = M.rows[i], o = M.oscs[i], z = M.izm[i], rgb = CV[i];
+      var yC = yT + 80, yB = yT + 172;
+      C.label(ctx, X0, yT + 20, (i ? 'Второй' : 'Первый') + ': период ' + fmtT(o.T) +
+              ', γ = ' + stepen(o.g / o.T) + ' с⁻¹', 18, 'rgb(' + rgb + ')', 'left');
+      C.label(ctx, X1, yT + 20, 'в e раз за ' + kolSlovo(z.Ne) + ', ' + fmtT(z.Ne * o.T) +
+              '; Q ≈ ' + fmtQ(z.Q), 18, 'rgba(' + ink + ',.9)', 'right');
+      risStroku(ctx, r, yC, 42, rgb, M.s, ink);
+      risEnergiyu(ctx, r, yB, 38, rgb, ink);
+      metkaE(ctx, r, z.Ne, M.s, yT + 32, yB, rgb);
+      C.label(ctx, X0 - 14, yC + 6, 'x', 18, mutS, 'right');
+      C.label(ctx, X0 - 14, yB - 8, 'W', 18, mutS, 'right');
+      var u = M.os === 'kol' ? M.s * M.okno : M.s * M.okno / o.T;
+      C.label(ctx, X1, yT + 196, 'на курсоре ' + kolSlovo(u) + ', ' + fmtT(u * o.T), 17, mutS, 'right');
+    }
+    kursor(ctx, M, 34, 424, ink);
+    risOs(ctx, M, 424, mut);
+  }
+
+  /* ── одна система ── */
+
+  function pokazanie(ctx, x, y, capt, value, color, mut) {
+    ctx.textAlign = 'right';
+    ctx.font = '600 17px "JetBrains Mono", ui-monospace, monospace';
+    ctx.fillStyle = 'rgba(' + mut + ',.95)';
+    ctx.fillText(capt, x, y);
+    ctx.font = '600 30px "JetBrains Mono", ui-monospace, monospace';
+    ctx.fillStyle = color;
+    ctx.fillText(String(value), x, y + 36);
+    ctx.textAlign = 'center';
+  }
+
+  function risSistemu(ctx, M, tone) {
+    var ink = tone.ink, mut = tone.muted, mutS = 'rgba(' + mut + ',.95)';
+    var r = M.rows[0], z = M.izm[0], rgb = CV[0], yC = 112, A = 70, yB = 268, BH = 62;
+    C.label(ctx, X0, 24, 'Декремент d = ' + dKratko(M.d) + ', время в периодах осциллятора', 18, 'rgb(' + rgb + ')', 'left');
+    C.label(ctx, X1, 24, 'амплитуда в e раз за ' + kolSlovo(z.Ne), 18, 'rgba(' + ink + ',.9)', 'right');
+    risStroku(ctx, r, yC, A, rgb, M.s, ink);
+    var shag = risEnergiyu(ctx, r, yB, BH, rgb, ink);
+    metkaE(ctx, r, z.Ne, M.s, 40, yB, rgb);
+    C.label(ctx, X0 - 14, yC + 6, 'x', 18, mutS, 'right');
+    /* энергия первого максимума W слева на уровне столбика; потеря за
+       период ΔW шапкой второго, подпись над ней */
+    C.label(ctx, X0 - 14, yB - BH + 14, 'W', 18, 'rgb(' + rgb + ')', 'right');
+    if (r.maks.length >= 2 && shag >= 14) {
+      var xb = X0 + r.maks[1].u / r.U * (X1 - X0);
+      var W1 = r.maks[1].x * r.maks[1].x, shir = Math.min(10, Math.max(2, 0.45 * shag));
+      var hcap = Math.max(1.5, BH * (1 - W1));
+      ctx.fillStyle = 'rgba(' + CV[1] + ',.45)';
+      ctx.fillRect(xb - shir / 2, yB - BH, shir, hcap);
+      ctx.strokeStyle = 'rgb(' + CV[1] + ')'; ctx.lineWidth = 1.4;
+      ctx.strokeRect(xb - shir / 2 - 0.7, yB - BH - 0.7, shir + 1.4, hcap + 1.4);
+      var uZ = xb + 24 > X1;
+      C.label(ctx, uZ ? xb + shir / 2 + 1 : xb, yB - BH - 8, 'ΔW', 18, 'rgb(' + CV[1] + ')', uZ ? 'right' : 'center');
+    }
+    kursor(ctx, M, 40, 280, ink);
+    risOs(ctx, M, 280, mut);
+
+    var RY = 344, RX = [232, 478, 724, 975], inkS = 'rgb(' + ink + ')';
+    pokazanie(ctx, RX[0], RY, 'd ПО МАКСИМУМАМ', fmtD(z.d), 'rgb(' + rgb + ')', mut);
+    pokazanie(ctx, RX[1], RY, 'Q = π/d', fmtQ2(z.Q), inkS, mut);
+    pokazanie(ctx, RX[2], RY, 'ω₀/2γ', fmtQ2(z.q0), inkS, mut);
+    pokazanie(ctx, RX[3], RY, 'W/ΔW ЗА ПЕРИОД', num(z.WdW, 2), 'rgb(' + CV[1] + ')', mut);
+    C.label(ctx, RX[0], RY + 64, 'ln(x₀/x₁) со следа', 17, mutS, 'right');
+    C.label(ctx, RX[1], RY + 64, 'рабочее определение', 17, mutS, 'right');
+    C.label(ctx, RX[2], RY + 64, 'из ω₀ и γ уравнения', 17, mutS, 'right');
+    C.label(ctx, RX[3], RY + 64, '2πW/ΔW = ' + fmtQ2(z.Qe), 17, mutS, 'right');
+    C.label(ctx, RX[3], RY + 88, 'энергия на среднюю потерю за радиан', 17, mutS, 'right');
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), M = S.M;
+    if (M.rezhim === 'sistema') risSistemu(ctx, M, tone); else risParu(ctx, M, tone);
+    ctx.textAlign = 'center';
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* ── ручки ── */
+
+  function postavit(rezhim, os, okno, d) { S.M = sobrat(rezhim, os, okno, d); snyat(); obnovit(); }
+  function vybratRezhim(rez) {
+    var os = rez === 'sistema' || S.M.rezhim === 'sistema' ? 'kol' : S.M.os;
+    postavit(rez, os, null, S.M.d);
+  }
+  function vybratOs(os) { postavit(S.M.rezhim, os, null, S.M.d); }
+  function vybratOkno(i) { postavit(S.M.rezhim, S.M.os, OKNA[S.M.os][Math.round(i)], S.M.d); }
+  function vybratD(i) { postavit('sistema', 'kol', S.M.okno, DS[Math.round(i)]); }
+  function zanovo() { postavit(S.M.rezhim, S.M.os, S.M.okno, S.M.d); }
+
+  /* Для автопроверки: __demoSet({ mode, axis, window, d }) ставит опыт и
+     запускает курсор с нуля; окно null или без поля берётся по умолчанию
+     для режима и оси. __demoCheck(d) — измерение со следа без развёртки. */
+  window.__demoSet = function (q) {
+    q = q || {};
+    var rez = q.mode || S.M.rezhim;
+    var os = rez === 'sistema' ? 'kol' : (q.axis || (q.mode ? 'kol' : S.M.os));
+    postavit(rez, os, q.window != null ? q.window : null, q.d != null ? q.d : S.M.d);
+    return pokaz;
+  };
+  window.__demoCheck = function (d) { return izmerit(oscillyator(d, null)); };
+  window.__demoModel = { oscillyator: oscillyator, izmerit: izmerit, sobrat: sobrat, prodvinut: prodvinut,
+                         svodka: svodka, PARY: PARY, OKNA: OKNA, DS: DS };
+
+  /* ── строка показаний ── */
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var M = S.M, z = M.izm, o = M.oscs;
+    if (M.rezhim === 'sistema') {
+      var p = z[0], dq = (p.q0 / p.Q - 1) * 100, de = (p.Qe / p.Q - 1) * 100;
+      return 'Декремент снят по двум соседним максимумам, d = ' + A(fmtD(p.d)) + '. Добротность по определению главы Q = π/d = ' +
+        A(fmtQ2(p.Q)) + (dq < 0.05 ? ', и столько же даёт ω₀/2γ = ' + fmtQ2(p.q0) + '. '
+                                   : ', а ω₀/2γ = ' + fmtQ2(p.q0) + ' больше на ' + num(dq, dq < 1 ? 2 : 1) + ' %: π/d равно ω/2γ, а частота ω с трением меньше ω₀. ') +
+        'Энергия в максимуме больше потери за период в ' + A(num(p.WdW, 2)) + ' раза. Средняя потеря за радиан в 2π раз меньше, и отношение энергии к ней, 2πW/ΔW = ' +
+        fmtQ2(p.Qe) + (de < 100 ? ', больше Q на ' + num(de, de < 10 ? 1 : 0) + ' %' : ', больше Q в ' + num(p.Qe / p.Q, 1) + ' раза') +
+        ': с π/d оно сходится только при малом d. ' +
+        'Столбики показывают энергию в максимумах, оранжевая шапка второго есть потеря за период.';
+    }
+    var t1 = fmtT(p1(0)), t2 = fmtT(p1(1));
+    function p1(i) { return z[i].Ne * o[i].T; }
+    var n1 = kolSlovo(z[0].Ne), n2 = kolSlovo(z[1].Ne);
+    var vo = obrez(String(Math.round(p1(1) / p1(0))));
+    if (M.rezhim === 'para') {
+      if (M.os === 'kol')
+        return 'Пара главы, время в колебаниях, у каждого свои. Амплитуда первого падает в e раз за ' + A(n1) + ', второго за ' + A(n2) +
+          ': по счёту колебаний второй гаснет быстрее, Q ≈ ' + fmtQ(z[1].Q) + ' против ' + fmtQ(z[0].Q) + '. Под строкой показано, сколько секунд прошло у каждого к курсору.';
+      return 'Та же пара по секундомеру. Первый гаснет в e раз за ' + A(t1) + ', второй за ' + A(t2) + ', в ' + vo + ' раз медленнее. ' +
+        'Кто гаснет быстрее, зависит от часов; добротность считает колебания. Под строкой показано, сколько колебаний сделал каждый к курсору.';
+    }
+    if (M.os === 'kol')
+      return 'У обоих d = 0,01 и Q ≈ ' + fmtQ(z[0].Q) + ', периоды 10 нс и 1 мс. В своих колебаниях строки совпадают: амплитуда падает в e раз за ' +
+        A(n1) + ' у каждого. В периодах самой системы уравнение помнит только декремент.';
+    return 'По секундомеру та же пара расходится: первый гаснет в e раз за ' + A(t1) + ', второй за ' + A(t2) + '. Добротность у них одна.';
+  }
+
+  var M = S.M, ok = OKNA[M.os], iOk = ok.indexOf(M.okno), iD = DS.indexOf(M.d);
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Что показать:">
+          <${C.Btn} active=${M.rezhim === 'para'} onClick=${function () { vybratRezhim('para'); }}>Пара главы<//>
+          <${C.Btn} active=${M.rezhim === 'odnaQ'} onClick=${function () { vybratRezhim('odnaQ'); }}>Одна добротность<//>
+          <${C.Btn} active=${M.rezhim === 'sistema'} onClick=${function () { vybratRezhim('sistema'); }}>Одна система<//>
+        <//>
+        ${M.rezhim !== 'sistema' ? html`
+          <${C.Group} label="Ось времени:">
+            <${C.Btn} active=${M.os === 'kol'} onClick=${function () { vybratOs('kol'); }}>в колебаниях<//>
+            <${C.Btn} active=${M.os === 'sek'} onClick=${function () { vybratOs('sek'); }}>в секундах<//>
+          <//>` : html`
+          <${C.Slider} label="Декремент d:" min=${0} max=${DS.length - 1} step=${1} value=${iD < 0 ? 0 : iD}
+                       onChange=${vybratD} display=${dKratko(M.d)} />`}
+        <${C.Slider} label="Окно:" min=${0} max=${ok.length - 1} step=${1} value=${iOk < 0 ? 0 : iOk}
+                     onChange=${vybratOkno} display=${fmtOkno(M.os, M.okno)} />
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${zanovo}>Заново<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(Dobrotnost);
+</script>
+</body>
+</html>

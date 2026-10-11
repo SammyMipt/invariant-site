@@ -1,0 +1,820 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Кривая периода физического маятника</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-07/">&larr; Неделя 07</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/demo-osc.js"></script>
+<script src="../shared/analytics.js?demo=period-tela"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html, O = window.DemoOsc;
+var useRef = React.useRef, useState = React.useState;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `fizicheskij-mayatnik` (бриф briefs/demki_nedelya07.md, № 5;
+   карточка 4 описи lekciya07_demki_minuty.md §1.3; рамка §6, демка 5,
+   «Принято» п. 8 и 9, решение без автора № 12). Тело качается на
+   неподвижной горизонтальной оси A; центр масс C в расстоянии a от оси.
+   Метод динамический, как в главе (решения автора, п. 2): уравнение
+   моментов для закреплённой оси
+
+       I_A φ̈ = −m g a sin φ,
+
+   инерция α = I_A, жёсткость κ = mga. Потенциала демка не называет.
+
+   ДВЕ ДОРОГИ К ПЕРИОДУ. По формуле главы: I_A = I_C + ma² по Штейнеру с
+   I_C = ml²/12 у стержня и m(l² + w²)/12 у телефона, T = 2π√(I_A/(mga)),
+   то же, что 2π√(l_A/g) с эффективной длиной l_A = I_A/(ma). С движения:
+   момент инерции демка берёт суммой по клеткам тела относительно точки
+   оси (у стержня 1000 отрезков, у телефона 75 × 35 клеток по 2 мм, у
+   каждой клетки свой момент относительно её центра, dx²/12 или
+   (dx² + dy²)/12, поэтому сумма точна для этих тел и сверка со Штейнером
+   проверяет код, а не сетку), расстояние a от точки оси до центра масс,
+   найденного той же суммой, и интегрирует уравнение моментов без
+   приближения малых углов. Период снимается по разворотам. Масса в обе
+   части входит множителем и сокращается; в счёте она единичная, а I_A
+   печатается как m·(число) м².
+
+   ПОЛОЖЕНИЕ ОСИ. Ось ходит по прямой через центр масс: у стержня вдоль
+   него, у телефона по диагонали (кнопка меняет диагональ). Ползунок даёт
+   координату s на этой прямой со знаком, a = |s|; концы ползунка лежат
+   ровно в концах стержня и в углах телефона. Шаг у стержня 1 мм, у
+   телефона 1/80 полудиагонали (1,03 мм). Ноль ползунка и кнопка «в центр
+   масс» ставят ось в C: момент тяжести исчезает при любом угле, равновесие
+   безразличное, тело остаётся там, где его отпустили. Ближайшая к нулю ось
+   лежит в шаге ползунка: у стержня при a = 1 мм период 18,3 с.
+
+   ЦЕНТР КАЧАНИЯ B лежит на прямой AC за центром масс, в l_A от оси:
+   s_B = s − sign(s)·l_A, то есть в I_C/(ma) от C по другую сторону.
+   «В центр качания» переносит ось туда; это возможно, только если B лежит
+   на теле (у стержня при a ≥ l/6, у телефона по диагонали при
+   a ≥ 2,76 см). Рядом с телом качается груз на нити длиной l_A: его
+   уравнение φ̈ = −(g/l_A) sin φ интегрируется отдельно, тем же шагом, с
+   того же угла. С уравнением тела оно совпадает при любой амплитуде, не
+   только при малой, поэтому груз идёт вровень с точкой B и при 60°.
+   Отставание печатается в __demoState.synced, радианы.
+
+   КРИВАЯ T(a) строится точками с движения: при каждом новом положении оси
+   то же уравнение прогоняется без кадров на один период (тот же код и
+   тот же шаг, что у живой сцены; точка берёт первый период от
+   отпускания, живое показание последний, и они расходятся не больше чем
+   на 10⁻⁸ относительных), и точка ложится на график; кнопка «Снять
+   кривую» снимает 40 точек. Тонкая линия под точками — формула главы для малых углов.
+   Наименьший период ищется золотым сечением по периодам, снятым с
+   движения, а не по формуле. Амплитуда меняет все периоды в одно и то же
+   число раз (в безразмерном времени ωt уравнение одно для любого a),
+   поэтому минимум остаётся на радиусе инерции при любой амплитуде.
+
+   СЧЁТ. Скоростной Верле из shared/demo-osc.js, шаг T/400, где T период
+   малых колебаний при этом a; период по разворотам (нулям угловой
+   скорости) с кубикой Эрмита. Время идёт целыми шагами, остаток кадра
+   копится: числа не зависят от частоты кадров.
+
+   ПРОВЕРКА (09.10, hcheck на порту 49825: __demoTick и чтение
+   __demoState, прогон __demoCheck; та же физика в node; отчёт
+   briefs/demki_nedelya07_period-tela_REPORT.md). Сумма по клеткам против
+   Штейнера до 3·10⁻¹⁴ относительных. Стержень по формуле: наименьший
+   период 1,5243 с при a = 0,2887 м (радиус инерции l/√12), за конец
+   1,6380 с, l_A = 0,6667 м, B в 0,1667 м за центром масс; при a = 1 см
+   5,79 с, при 1 мм 18,31 с; опоры в 0,40 м: 1,5646 с, l_A = 0,6083 м,
+   g по паре на 31,5 % больше. Телефон: радиус инерции 4,78 см, за угол
+   a = 8,28 см, l_A = 11,04 см (две трети диагонали), 0,6664 с, B в
+   2,76 см за центром масс; наименьший 0,6202 с. Вдоль диагонали телефон
+   качается как стержень длиной в диагональ: I_C = m(l² + w²)/12. С
+   движения периоды короче точного на 1,03·10⁻⁵ (ошибка схемы при T/400)
+   и длиннее формулы малых углов на 6,6·10⁻⁵ при 2° и на 4,66·10⁻⁴ при
+   5°; четыре угла телефона дают один период до 2·10⁻¹⁶, ось в B до
+   4·10⁻¹⁴ относительных; минимум снятой кривой при a = 0,28868 м, при
+   60° там же. Груз на нити l_A отстаёт от тела на 10⁻¹⁵ рад за период и
+   на 6·10⁻¹² за двести периодов при 60°. Энергия держится до 6·10⁻⁵
+   своей величины. Подложенные дефекты ловятся: см. отчёт. */
+
+/* ── чистая физика ──────────────────────────────────────────────
+   Отсюда до пометки «конец чистой физики» код не знает о браузере и
+   прогоняется в node вместе с demo-osc.js. */
+
+var G = 9.81;
+var TWO_PI = 2 * Math.PI, DEG = Math.PI / 180;
+var SHAGOV = 400;                  /* шагов на период малых колебаний */
+
+/* Клетки тела в его осях (x вдоль длины, y поперёк, центр в середине):
+   [x, y, доля массы, собственный момент клетки на её долю массы]. */
+function kletki(dl, sh, nx, ny) {
+  var dx = dl / nx, dy = ny > 1 ? sh / ny : 0, mi = 1 / (nx * ny), out = [];
+  var own = mi * (dx * dx + dy * dy) / 12;
+  for (var i = 0; i < nx; i++)
+    for (var j = 0; j < ny; j++)
+      out.push([-dl / 2 + (i + 0.5) * dx, ny > 1 ? -sh / 2 + (j + 0.5) * dy : 0, mi, own]);
+  return out;
+}
+function centrMass(kl) {
+  var x = 0, y = 0, m = 0;
+  for (var i = 0; i < kl.length; i++) { x += kl[i][2] * kl[i][0]; y += kl[i][2] * kl[i][1]; m += kl[i][2]; }
+  return [x / m, y / m, m];
+}
+/* Момент инерции относительно оси, перпендикулярной плоскости тела и
+   проходящей через точку P: сумма m_i r_i² и собственных моментов клеток. */
+function momentOtn(kl, P) {
+  var I = 0;
+  for (var i = 0; i < kl.length; i++) {
+    var dx = kl[i][0] - P[0], dy = kl[i][1] - P[1];
+    I += kl[i][2] * (dx * dx + dy * dy) + kl[i][3];
+  }
+  return I;
+}
+
+function sdelatTelo(o) {
+  o.kl = kletki(o.dl, o.sh, o.nx, o.ny);
+  var c = centrMass(o.kl);
+  o.C = [c[0], c[1]]; o.m = c[2];
+  o.IC = momentOtn(o.kl, o.C);                       /* суммой по клеткам */
+  o.ICform = o.m * (o.dl * o.dl + o.sh * o.sh) / 12;  /* формула главы */
+  o.rho = Math.sqrt(o.ICform / o.m);                  /* радиус инерции */
+  return o;
+}
+var PD = Math.hypot(0.075, 0.035);                    /* полудиагональ телефона */
+/* half — от центра масс до конца прямой оси (конец стержня, угол);
+   N — шагов ползунка на half; mash — пикселей на метр на сцене. */
+var TELA = [
+  sdelatTelo({ id: 'sterzhen', knopka: 'стержень 1 м', dl: 1, sh: 0, nx: 1000, ny: 1,
+               half: 0.5, N: 500, linii: [[1, 0]], ed: { k: 1, u: 'м', d: 3 },
+               mash: 250, shkala: 0.2, shkalaT: '20 см' }),
+  sdelatTelo({ id: 'telefon', knopka: 'телефон 15×7 см', dl: 0.15, sh: 0.07, nx: 75, ny: 35,
+               half: PD, N: 80, linii: [[0.075 / PD, 0.035 / PD], [-0.075 / PD, 0.035 / PD]],
+               ed: { k: 100, u: 'см', d: 2 }, mash: 1500, shkala: 0.05, shkalaT: '5 см' })
+];
+var PO_ID = {};
+TELA.forEach(function (t) { PO_ID[t.id] = t; });
+
+function sign(x) { return x > 0 ? 1 : x < 0 ? -1 : 0; }
+
+/* Ось в точке s прямой номер line. Всё, что дальше нужно счёту и сцене. */
+function geometriya(t, line, s) {
+  var e = t.linii[line];
+  var P = [t.C[0] + s * e[0], t.C[1] + s * e[1]];
+  var a = Math.hypot(P[0] - t.C[0], P[1] - t.C[1]);
+  var g = { s: s, line: line, P: P, a: a, IA: momentOtn(t.kl, P),
+            IAsht: t.ICform + t.m * a * a, IC: t.IC, ICform: t.ICform, m: t.m };
+  if (a > 0) {
+    g.lA = g.IA / (t.m * a);                                  /* I_A/(ma), по сумме */
+    g.lAform = a + t.ICform / (t.m * a);                      /* a + I_C/(ma), по формуле */
+    g.Tformula = TWO_PI * Math.sqrt(g.IAsht / (t.m * G * a)); /* 2π√(I_A/(mga)) */
+    g.sB = s - sign(s) * g.lA;
+    g.Bvnutri = Math.abs(g.sB) <= t.half * (1 + 1e-9);
+  } else {
+    g.lA = Infinity; g.lAform = Infinity; g.Tformula = Infinity; g.sB = null; g.Bvnutri = false;
+  }
+  return g;
+}
+
+/* Новый опыт: тело на оси s отпущено из покоя на угол ampDeg вправо,
+   рядом груз на нити длиной l_A с того же угла. */
+function novyj(t, line, s, ampDeg) {
+  var g = geometriya(t, line, s), amp = ampDeg * DEG;
+  var m = { t: t, line: line, g: g, ampDeg: ampDeg, amp: amp, nakop: 0,
+            telo: { t: 0, q: amp, v: 0 }, nit: { t: 0, q: amp, v: 0 },
+            povoroty: O.crossing(0), povNit: O.crossing(0),
+            Tizm: null, Tnit: null, sync: 0, dE: 0 };
+  if (g.a > 0) {
+    var mga = t.m * G * g.a, IA = g.IA, lA = g.lA;
+    m.acc = function (q) { return -mga * Math.sin(q) / IA; };      /* I_A φ̈ = −mga sin φ */
+    m.accNit = function (q) { return -G * Math.sin(q) / lA; };     /* l φ̈ = −g sin φ */
+    m.h = TWO_PI * Math.sqrt(IA / mga) / SHAGOV;
+    m.povoroty.mark(0, -1);            /* отпущен справа: разворот в момент отпускания */
+    m.povNit.mark(0, -1);
+  } else {
+    m.acc = function () { return 0; };
+    m.accNit = m.acc;
+    m.h = 1 / 240;
+  }
+  m.E0 = energiya(m);
+  return m;
+}
+
+/* Энергия на единицу массы: ½I_Aφ̇² + g a (1 − cos φ) */
+function energiya(m) {
+  var s = m.telo;
+  return 0.5 * m.g.IA * s.v * s.v + G * m.g.a * (1 - Math.cos(s.q));
+}
+
+function shag(m) {
+  var s = m.telo, n = m.nit, h = m.h;
+  var t0 = s.t, v0 = s.v, a0 = s.a == null ? m.acc(s.q) : s.a;
+  O.verlet(s, m.acc, h);
+  var tc = m.povoroty.feed(t0, v0, s.t, s.v, a0, s.a);
+  if (tc != null) {
+    var T = m.povoroty.period(), half = m.povoroty.half();
+    m.Tizm = T != null ? T : (half != null ? 2 * half : null);
+  }
+  var u0 = n.v, b0 = n.a == null ? m.accNit(n.q) : n.a;
+  O.verlet(n, m.accNit, h);
+  if (m.povNit.feed(t0, u0, n.t, n.v, b0, n.a) != null) {
+    var Tn = m.povNit.period(), hn = m.povNit.half();
+    m.Tnit = Tn != null ? Tn : (hn != null ? 2 * hn : null);
+  }
+  var d = Math.abs(s.q - n.q);
+  if (d > m.sync) m.sync = d;
+  if (m.E0 > 0) {
+    var e = Math.abs(energiya(m) - m.E0) / m.E0;
+    if (e > m.dE) m.dE = e;
+  }
+}
+
+/* Продвинуть на dt модельного времени целыми шагами; остаток копится. */
+function prodvinut(m, dt) {
+  m.nakop += dt;
+  var n = Math.floor(m.nakop / m.h + 1e-9);
+  if (n > 20000) n = 20000;
+  for (var i = 0; i < n; i++) shag(m);
+  m.nakop -= n * m.h;
+  if (m.nakop < 0) m.nakop = 0;
+}
+
+/* Прогон без кадров до n разворотов после отпускания (2 — один период). */
+function progonModel(t, line, s, ampDeg, n) {
+  var m = novyj(t, line, s, ampDeg);
+  if (!(m.g.a > 0)) return m;
+  var lim = (n || 2) + 1, guard = 0;
+  while (m.povoroty.count < lim && guard++ < 200 * SHAGOV) shag(m);
+  return m;
+}
+function Tsnyatyj(t, line, s, ampDeg) { return progonModel(t, line, s, ampDeg, 2).Tizm; }
+
+/* Наименьший период снятой кривой: золотое сечение по a на (0, half]. */
+function minimum(t, line, ampDeg) {
+  var lo = 0.02 * t.half, hi = t.half, r = (Math.sqrt(5) - 1) / 2;
+  var x1 = hi - r * (hi - lo), x2 = lo + r * (hi - lo);
+  var f1 = Tsnyatyj(t, line, x1, ampDeg), f2 = Tsnyatyj(t, line, x2, ampDeg);
+  for (var i = 0; i < 80 && hi - lo > 1e-9 * t.half; i++) {
+    if (f1 < f2) { hi = x2; x2 = x1; f2 = f1; x1 = hi - r * (hi - lo); f1 = Tsnyatyj(t, line, x1, ampDeg); }
+    else { lo = x1; x1 = x2; f1 = f2; x2 = lo + r * (hi - lo); f2 = Tsnyatyj(t, line, x2, ampDeg); }
+  }
+  var a = 0.5 * (lo + hi);
+  return { a: a, T: Tsnyatyj(t, line, a, ampDeg) };
+}
+
+/* Сводка опыта: то, что демка утверждает. dop — снятые без кадров
+   периоды на оси в B и на симметричной опоре, минимум кривой. */
+function svodka(m, dop) {
+  var g = m.g, t = m.t;
+  dop = dop || {};
+  return {
+    body: t.id, line: m.line, s: g.s, a: g.a,
+    mode: g.a > 0 ? 'kolebaniya' : 'bezrazlichnoe',
+    IC: g.IC, ICformula: g.ICform, IA: g.IA, IAsteiner: g.IAsht, rho: t.rho,
+    lA: g.a > 0 ? g.lA : null, lAformula: g.a > 0 ? g.lAform : null,
+    B: g.sB, Binside: g.Bvnutri,
+    AB: g.sB != null ? Math.abs(g.s - g.sB) : null,
+    Tformula: g.a > 0 ? g.Tformula : null,
+    Tmeasured: m.Tizm, Tthread: m.Tnit,
+    TatB: dop.TatB != null ? dop.TatB : null,
+    /* оборотный маятник: g по расстоянию между осями A и B и периоду на B */
+    gAB: dop.TatB != null ? TWO_PI * TWO_PI * Math.abs(g.s - g.sB) / (dop.TatB * dop.TatB) : null,
+    Tsym: dop.Tsym != null ? dop.Tsym : null,
+    TminMeasured: dop.min ? dop.min.T : null, aMinMeasured: dop.min ? dop.min.a : null,
+    amp: m.ampDeg, t: m.telo.t, phi: m.telo.q, phiThread: m.nit.q,
+    synced: m.sync, energyDrift: m.E0 > 0 ? m.dE : null,
+    turns: Math.max(0, m.povoroty.count - 1), h: m.h
+  };
+}
+
+/* Прогон без кадров для проверки: n разворотов. */
+function progon(id, line, s, ampDeg, n) {
+  var t = PO_ID[id];
+  var m = progonModel(t, line || 0, s == null ? t.half : s, ampDeg == null ? 5 : ampDeg, n || 4);
+  var dop = {};
+  if (m.g.a > 0) {
+    dop.TatB = Tsnyatyj(t, m.line, m.g.sB, m.ampDeg);
+    dop.Tsym = Tsnyatyj(t, m.line, -m.g.s, m.ampDeg);
+  }
+  return svodka(m, dop);
+}
+/* ── конец чистой физики ── */
+
+/* Русская запятая и настоящий минус; крохи печатаются нулём. */
+function num(v, d) {
+  if (v == null || !isFinite(v)) return '—';
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function dl(t, x) { return num(x * t.ed.k, t.ed.d) + ' ' + t.ed.u; }        /* длина в единицах тела */
+function sek(T) { return T == null || !isFinite(T) ? '—' : num(T, T >= 10 ? 2 : 3); }
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева тело на оси A с центром масс C и центром качания B; правее, на
+   той же высоте подвеса, груз на нити длиной l_A, и пунктир от B к грузу:
+   пока они идут в такт, пунктир горизонтален. Центр масс тела стоит на
+   месте при любом положении оси, а ось ходит по телу, как отверстие, в
+   которое вставляют гвоздь. Справа кривая периода против положения оси
+   по обе стороны от центра масс: линия по формуле, точки с движения,
+   текущая ось и три другие оси с тем же периодом (симметричная опора,
+   центр качания B и его отражение). Под кривой три периода. */
+
+var W = 1000, HGT = 460;
+var SC_X1 = 492;                               /* правый край сцены тела */
+var CX = 220, CY = 172;                        /* центр масс тела на сцене */
+var NIT_DX = 118;                              /* подвес нити правее оси */
+var PX0 = 530, PX1 = 975, PY0 = 64, PY1 = 236; /* кривая периода */
+var RY = 314, RX = [662, 818, 975];            /* показания */
+var CV_DV = '77,182,198';                      /* тело и снятое с движения */
+var CV_B = '224,138,82';                       /* центр качания и груз на нити */
+
+var pokaz = {};
+window.__demoState = pokaz;
+
+/* Подпись с нижним индексом: части [текст, флаг], флаг 1 — индекс,
+   'm' — буква формулы курсивом с засечками: в рубленом шрифте l и I
+   неразличимы, а у главы это две величины, l_A и I_A. */
+function rich(ctx, x, y, parts, size, color, align) {
+  var fs = size || 17, w = 0, i;
+  var fonts = parts.map(function (p) {
+    if (p[1] === 'm') return 'italic ' + Math.round(fs * 1.12) + 'px "Times New Roman", Cambria, Georgia, serif';
+    return (p[1] ? Math.round(fs * 0.72) : fs) + 'px "Golos Text", system-ui, sans-serif';
+  });
+  for (i = 0; i < parts.length; i++) { ctx.font = fonts[i]; w += ctx.measureText(parts[i][0]).width; }
+  var x0 = align === 'right' ? x - w : align === 'center' ? x - w / 2 : x;
+  ctx.fillStyle = color; ctx.textAlign = 'left';
+  for (i = 0; i < parts.length; i++) {
+    ctx.font = fonts[i];
+    ctx.fillText(parts[i][0], x0, y + (parts[i][1] === 1 ? fs * 0.28 : 0));
+    x0 += ctx.measureText(parts[i][0]).width;
+  }
+  ctx.textAlign = 'center';
+  return w;
+}
+
+function PeriodTela() {
+  var ref0 = useRef(null);
+  if (!ref0.current) {
+    var t0 = TELA[0];
+    ref0.current = { t: t0, line: 0, s: t0.half, amp: 5, run: true, otkuda: null, theta: 0,
+                     tochki: [], dop: null, faza: '' };
+    novyjOpyt(ref0.current);
+  }
+  var S = ref0.current;
+  var pair = useState({ id: S.t.id, line: 0, s: S.s, amp: S.amp, run: true, faza: '' });
+  var ui = pair[0], setUi = pair[1];
+
+  /* Опыт и всё, что снимается без кадров: точка кривой, ось в B,
+     симметричная опора, минимум (один раз на тело, прямую и амплитуду). */
+  function novyjOpyt(st) {
+    st.m = novyj(st.t, st.line, st.s, st.amp);
+    var g = st.m.g, dop = { TatB: null, Tsym: null };
+    var kl = st.t.id + '|' + st.line + '|' + st.amp;
+    if (st.kluch !== kl) { st.kluch = kl; st.tochki = []; st.min = minimum(st.t, st.line, st.amp); }
+    dop.min = st.min;
+    if (g.a > 0) {
+      dop.T = Tsnyatyj(st.t, st.line, g.s, st.amp);
+      dop.TatB = Tsnyatyj(st.t, st.line, g.sB, st.amp);
+      dop.Tsym = Tsnyatyj(st.t, st.line, -g.s, st.amp);
+      dobavit(st, g.s, dop.T);
+      if (g.Bvnutri) dobavit(st, g.sB, dop.TatB);
+      /* равновесная ориентация: отрезок от A к C смотрит вниз */
+      var e = st.t.linii[st.line], ux = -sign(g.s) * e[0], uy = -sign(g.s) * e[1];
+      st.theta = Math.PI / 2 - Math.atan2(uy, ux);
+    }
+    st.dop = dop;
+  }
+  function dobavit(st, s, T) {
+    if (T == null) return;
+    for (var i = 0; i < st.tochki.length; i++) if (Math.abs(st.tochki[i][0] - s) < 1e-9) return;
+    st.tochki.push([s, T]);
+  }
+
+  function faza() {
+    var m = S.m;
+    return m.Tizm != null ? 'T' + num(m.Tizm, 4) : 'zhdem';
+  }
+  function snyat() {
+    Object.assign(pokaz, svodka(S.m, S.dop));
+    pokaz.running = S.run; pokaz.points = S.tochki.length;
+    var f = faza();
+    if (f !== S.faza) {
+      S.faza = f;
+      setUi(function (u) { return Object.assign({}, u, { faza: f }); });
+    }
+  }
+  if (!pokaz.body) Object.assign(pokaz, svodka(S.m, S.dop), { running: S.run, points: S.tochki.length });
+
+  function step(dt) {
+    if (!S.run) return;
+    prodvinut(S.m, dt);
+    snyat();
+  }
+
+  /* ── примитивы ── */
+
+  function punktir(ctx, x0, y0, x1, y1, color, w) {
+    ctx.save(); ctx.setLineDash([5, 5]); ctx.strokeStyle = color; ctx.lineWidth = w || 1.4;
+    ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.restore();
+  }
+  function krug(ctx, x, y, r, fill) {
+    ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(x, y, r, 0, TWO_PI); ctx.fill();
+  }
+  /* Значок центра масс: круг с двумя закрашенными четвертями. */
+  function znakCM(ctx, x, y, ink) {
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.arc(x, y, 7, -Math.PI / 2, 0); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.arc(x, y, 7, Math.PI / 2, Math.PI); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgb(' + ink + ')'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(x, y, 7, 0, TWO_PI); ctx.stroke();
+  }
+
+  /* ── тело ── */
+
+  function telo(ctx, m, ink, mut) {
+    var t = m.t, g = m.g, k = t.mash, phi = m.telo.q;
+    var Ax = CX, Ay = CY - g.a * k;
+    var rot = S.theta - phi;
+    var cr = Math.cos(rot), sr = Math.sin(rot);
+    /* точка тела (в метрах, в осях тела) на сцену */
+    function V(p) {
+      var dx = (p[0] - g.P[0]) * k, dy = (p[1] - g.P[1]) * k;
+      return [Ax + dx * cr - dy * sr, Ay + dx * sr + dy * cr];
+    }
+    var mutS = 'rgba(' + mut + ',.95)';
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, SC_X1, HGT); ctx.clip();
+
+    /* кронштейн оси */
+    ctx.strokeStyle = 'rgba(' + ink + ',.55)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(Ax, Ay); ctx.lineTo(Ax - 14, Ay - 22); ctx.lineTo(Ax + 14, Ay - 22); ctx.closePath(); ctx.stroke();
+
+    if (t.id === 'sterzhen') {
+      var p0 = V([-t.dl / 2, 0]), p1 = V([t.dl / 2, 0]);
+      ctx.strokeStyle = 'rgba(' + CV_DV + ',.9)'; ctx.lineWidth = 12; ctx.lineCap = 'butt';
+      ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.stroke();
+      /* метка одного конца: видно, что симметричная опора переворачивает стержень */
+      var q0 = V([t.dl / 2 - 0.03, 0]);
+      ctx.strokeStyle = 'rgb(' + ink + ')'; ctx.lineWidth = 12;
+      ctx.beginPath(); ctx.moveTo(q0[0], q0[1]); ctx.lineTo(p1[0], p1[1]); ctx.stroke();
+    } else {
+      ctx.save();
+      ctx.translate(Ax, Ay); ctx.rotate(rot); ctx.scale(k, k); ctx.translate(-g.P[0], -g.P[1]);
+      ctx.fillStyle = 'rgba(' + CV_DV + ',.88)';
+      C.roundRect(ctx, -t.dl / 2, -t.sh / 2, t.dl, t.sh, 0.008); ctx.fill();
+      ctx.fillStyle = 'rgba(6,8,15,.35)';
+      C.roundRect(ctx, -t.dl / 2 + 0.012, -t.sh / 2 + 0.004, t.dl - 0.02, t.sh - 0.008, 0.004); ctx.fill();
+      /* камера у одной короткой стороны: ориентация телефона */
+      ctx.fillStyle = 'rgb(' + ink + ')';
+      ctx.beginPath(); ctx.arc(t.dl / 2 - 0.0045, 0, 0.0022, 0, TWO_PI); ctx.fill();
+      ctx.restore();
+    }
+
+    /* центр масс */
+    var Cs = V(t.C);
+    znakCM(ctx, Cs[0], Cs[1], ink);
+    /* у близкой к центру масс оси буква C уходит вправо, чтобы не лечь на A */
+    if (g.a * k < 24) C.label(ctx, Cs[0] + 16, Cs[1] + 6, 'C', 17, 'rgb(' + ink + ')', 'left');
+    else C.label(ctx, Cs[0] - 14, Cs[1] + 6, 'C', 17, 'rgb(' + ink + ')', 'right');
+
+    /* ось */
+    krug(ctx, Ax, Ay, 5.5, 'rgb(' + ink + ')');
+    krug(ctx, Ax, Ay, 2.2, 'rgba(6,8,15,.9)');
+    C.label(ctx, Ax - 18, Ay + 6, 'A', 17, 'rgb(' + ink + ')', 'right');
+
+    /* центр качания и груз на нити */
+    if (g.a > 0) {
+      var e = t.linii[m.line], Bb = [t.C[0] + g.sB * e[0], t.C[1] + g.sB * e[1]];
+      var Bs = V(Bb);
+      var Nx = Ax + NIT_DX, Ny = Ay, L = g.lA * k, ps = m.nit.q;
+      var bx = Nx + L * Math.sin(ps), by = Ny + L * Math.cos(ps);
+      ctx.strokeStyle = 'rgba(' + ink + ',.7)'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(Nx, Ny); ctx.lineTo(bx, by); ctx.stroke();
+      krug(ctx, Nx, Ny, 3.5, 'rgb(' + ink + ')');
+      if (by < HGT - 24) {
+        punktir(ctx, Bs[0], Bs[1], bx, by, 'rgba(' + CV_B + ',.75)', 1.4);
+        krug(ctx, bx, by, 9, 'rgb(' + CV_B + ')');
+      } else {
+        rich(ctx, SC_X1 - 6, HGT - 14, [['груз ниже кадра: '], ['l', 'm'], ['A', 1], [' = ' + dl(t, g.lA)]], 17, 'rgb(' + CV_B + ')', 'right');
+      }
+      rich(ctx, Nx + 10, Ny - 10, [['нить '], ['l', 'm'], ['A', 1]], 17, mutS, 'left');
+      /* B: на теле кольцом, за его краем пустым кольцом с пунктиром от края */
+      if (Bs[1] < HGT - 8) {
+        if (!g.Bvnutri) {
+          var kraj = V([t.C[0] + sign(g.sB) * t.half * e[0], t.C[1] + sign(g.sB) * t.half * e[1]]);
+          punktir(ctx, kraj[0], kraj[1], Bs[0], Bs[1], 'rgba(' + CV_B + ',.9)', 1.6);
+        }
+        ctx.strokeStyle = 'rgb(' + CV_B + ')'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(Bs[0], Bs[1], 7, 0, TWO_PI); ctx.stroke();
+        C.label(ctx, Bs[0] - 14, Bs[1] + 6, 'B', 17, 'rgb(' + CV_B + ')', 'right');
+      }
+    }
+
+    /* масштаб */
+    var sl = t.shkala * k;
+    ctx.strokeStyle = 'rgba(' + mut + ',.9)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(16, HGT - 30); ctx.lineTo(16 + sl, HGT - 30);
+    ctx.moveTo(16, HGT - 36); ctx.lineTo(16, HGT - 24); ctx.moveTo(16 + sl, HGT - 36); ctx.lineTo(16 + sl, HGT - 24);
+    ctx.stroke();
+    C.label(ctx, 16, HGT - 42, t.shkalaT, 17, mutS, 'left');
+    ctx.restore();
+  }
+
+  /* ── кривая периода ── */
+
+  function krivaya(ctx, m, ink, mut) {
+    var t = m.t, g = m.g, h = t.half, mutS = 'rgba(' + mut + ',.95)';
+    var Tend = TWO_PI * Math.sqrt((t.ICform + h * h) / (G * h));
+    var ylo = 0.85 * Tend, yhi = 1.85 * Tend;
+    function X(s) { return PX0 + (s + h) / (2 * h) * (PX1 - PX0); }
+    function Y(T) { return PY1 - (T - ylo) / (yhi - ylo) * (PY1 - PY0); }
+    function Tf(a) { return TWO_PI * Math.sqrt((t.ICform + a * a) / (G * a)); }
+
+    /* подписи над графиком */
+    C.label(ctx, PX0, 26, 'период, с', 17, mutS, 'left');
+    var lg = PX1;
+    C.label(ctx, lg, 26, 'с движения', 17, 'rgb(' + CV_DV + ')', 'right');
+    lg -= ctx.measureText('с движения').width + 12;
+    krug(ctx, lg, 20, 4.5, 'rgb(' + CV_DV + ')');
+    lg -= 18;
+    C.label(ctx, lg, 26, 'по формуле', 17, mutS, 'right');
+    lg -= ctx.measureText('по формуле').width + 8;
+    ctx.strokeStyle = 'rgba(' + ink + ',.55)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(lg - 26, 20); ctx.lineTo(lg, 20); ctx.stroke();
+    if (S.min) C.label(ctx, PX1, 50, 'наименьший ' + sek(S.min.T) + ' с при a = ' + dl(t, S.min.a), 17, 'rgb(' + CV_DV + ')', 'right');
+
+    /* оси и сетка */
+    var shagT = Tend > 1 ? 0.5 : 0.2, T0 = Math.ceil(ylo / shagT) * shagT, Ti;
+    ctx.lineWidth = 1;
+    for (Ti = T0; Ti <= yhi + 1e-9; Ti += shagT) {
+      ctx.strokeStyle = 'rgba(' + ink + ',.10)';
+      ctx.beginPath(); ctx.moveTo(PX0, Y(Ti)); ctx.lineTo(PX1, Y(Ti)); ctx.stroke();
+      C.label(ctx, PX0 - 6, Y(Ti) + 6, num(Ti, 1), 17, mutS, 'right');
+    }
+    ctx.strokeStyle = 'rgba(' + mut + ',.7)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(PX0, PY1); ctx.lineTo(PX1, PY1);
+    [-h, -t.rho, 0, t.rho, h].forEach(function (s) { ctx.moveTo(X(s), PY1); ctx.lineTo(X(s), PY1 + 7); });
+    ctx.stroke();
+    /* метки: концы прямой, центр масс и радиус инерции по обе стороны */
+    var dr = t.id === 'telefon' ? 2 : 3;
+    C.label(ctx, X(-h), PY1 + 28, num(-h * t.ed.k, 1), 17, mutS, 'left');
+    C.label(ctx, X(h), PY1 + 28, num(h * t.ed.k, 1) + ' ' + t.ed.u, 17, mutS, 'right');
+    C.label(ctx, X(0), PY1 + 28, '0', 17, mutS);
+    C.label(ctx, X(-t.rho), PY1 + 28, num(-t.rho * t.ed.k, dr), 17, mutS);
+    C.label(ctx, X(t.rho), PY1 + 28, num(t.rho * t.ed.k, dr), 17, mutS);
+    C.label(ctx, X(0), PY1 + 50, 'положение оси от центра масс', 17, mutS);
+
+    ctx.save();
+    /* по бокам запас на кружки у концов прямой */
+    ctx.beginPath(); ctx.rect(PX0 - 10, PY0 - 2, PX1 - PX0 + 20, PY1 - PY0 + 4); ctx.clip();
+    /* центр масс: асимптота */
+    punktir(ctx, X(0), PY0, X(0), PY1, 'rgba(' + mut + ',.5)', 1.2);
+    /* формула малых углов, две ветви */
+    ctx.strokeStyle = 'rgba(' + ink + ',.55)'; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+    [-1, 1].forEach(function (sg) {
+      ctx.beginPath();
+      for (var i = 0; i <= 220; i++) {
+        var a = h * Math.pow(i / 220, 1.6) + 1e-4 * h, x = X(sg * a), y = Math.max(PY0 - 40, Y(Tf(a)));
+        if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      }
+      ctx.stroke();
+    });
+    /* точки с движения */
+    S.tochki.forEach(function (p) { krug(ctx, X(p[0]), Y(p[1]), 4, 'rgba(' + CV_DV + ',.95)'); });
+
+    if (g.a > 0 && S.dop && S.dop.T != null) {
+      var Tc = S.dop.T, yc = Y(Tc);
+      /* та же высота: ещё три оси с этим периодом */
+      punktir(ctx, PX0, yc, PX1, yc, 'rgba(' + ink + ',.35)', 1.2);
+      var drugie = [[-g.s, false], [g.sB, true], [-g.sB, false]];
+      drugie.forEach(function (d) {
+        if (Math.abs(d[0]) > h * (1 + 1e-9)) return;
+        ctx.strokeStyle = d[1] ? 'rgb(' + CV_B + ')' : 'rgba(' + ink + ',.6)'; ctx.lineWidth = 2.4;
+        ctx.beginPath(); ctx.arc(X(d[0]), yc, 7, 0, TWO_PI); ctx.stroke();
+      });
+      punktir(ctx, X(g.s), yc, X(g.s), PY1, 'rgba(' + CV_DV + ',.7)', 1.4);
+      krug(ctx, X(g.s), yc, 7.5, 'rgb(' + CV_DV + ')');
+    }
+    ctx.restore();
+
+    /* буквы у осей с тем же периодом (вне клипа, чтобы не резались) */
+    if (g.a > 0 && S.dop && S.dop.T != null) {
+      var yl = Y(S.dop.T) - 12;
+      if (yl > PY0 + 4) {
+        C.label(ctx, X(g.s), yl, 'A', 17, 'rgb(' + CV_DV + ')');
+        if (Math.abs(g.sB) <= h * (1 + 1e-9)) C.label(ctx, X(g.sB), yl, 'B', 17, 'rgb(' + CV_B + ')');
+      }
+    }
+  }
+
+  /* ── показания ── */
+
+  function pokazaniya(ctx, m, ink, mut) {
+    var g = m.g, t = m.t, mutS = 'rgba(' + mut + ',.95)';
+    var k1, k2, k3;
+    if (g.a > 0) {
+      k1 = { c: 'ПО ФОРМУЛЕ, с', v: sek(g.Tformula), s: [['2π√('], ['l', 'm'], ['A', 1], ['/'], ['g', 'm'], [')']] };
+      k2 = { c: 'С ДВИЖЕНИЯ, с', v: sek(m.Tizm), s: m.Tizm != null ? [['шаг T/400']] : [['ждём разворота']] };
+      k3 = { c: 'С ОСИ В B, с', v: g.Bvnutri ? sek(S.dop.TatB) : '—',
+             s: g.Bvnutri ? [['B в ' + dl(t, Math.abs(g.sB)) + ' от C']] : [['B за краем тела']] };
+    } else {
+      k1 = { c: 'ПО ФОРМУЛЕ, с', v: '∞', s: [['mga = 0']] };
+      k2 = { c: 'С ДВИЖЕНИЯ, с', v: '—', s: [['стоит']] };
+      k3 = { c: 'С ОСИ В B, с', v: '—', s: [['B нет']] };
+    }
+    var kol = [k1, k2, k3], cvet = ['rgb(' + ink + ')', 'rgb(' + CV_DV + ')', 'rgb(' + CV_B + ')'];
+    for (var i = 0; i < 3; i++) {
+      C.readout(ctx, RX[i], RY, kol[i].c, kol[i].v, cvet[i]);
+      rich(ctx, RX[i], RY + 64, kol[i].s, 17, mutS, 'right');
+    }
+    var ink9 = 'rgba(' + ink + ',.9)';
+    var x = PX0 - 30, y1 = RY + 102, y2 = RY + 132;
+    rich(ctx, x, y1, [['a = ' + dl(t, g.a) + ',  радиус инерции ' + dl(t, t.rho)]], 17, ink9, 'left');
+    if (g.a > 0) {
+      rich(ctx, x, y2, [['I', 'm'], ['A', 1], [' = '], ['m', 'm'], ['·' + num(g.IA, t.id === 'telefon' ? 6 : 4) + ' м²,  '],
+                        ['l', 'm'], ['A', 1], [' = ' + dl(t, g.lA)]], 17, ink9, 'left');
+    } else {
+      rich(ctx, x, y2, [['I', 'm'], ['A', 1], [' = '], ['I', 'm'], ['C', 1], [' = '], ['m', 'm'],
+                        ['·' + num(g.IA, t.id === 'telefon' ? 6 : 4) + ' м²']], 17, ink9, 'left');
+    }
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, mut = tone.muted;
+    var m = S.m;
+    telo(ctx, m, ink, mut);
+    krivaya(ctx, m, ink, mut);
+    pokazaniya(ctx, m, ink, mut);
+    ctx.textAlign = 'center';
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* ── ручки ── */
+
+  function zagruzit(t, line, s, amp, run, otkuda) {
+    var prev = S.m;
+    S.t = t; S.line = line; S.s = s; S.amp = amp; S.run = run;
+    S.otkuda = otkuda ? Object.assign({ T: prev && prev.g.a > 0 ? S.dop.T : null, s: prev ? prev.g.s : null }, otkuda) : null;
+    novyjOpyt(S);
+    S.faza = null;
+    snyat();
+    setUi({ id: t.id, line: line, s: s, amp: amp, run: run, faza: S.faza });
+  }
+  function vybrat(id) { var t = PO_ID[id]; zagruzit(t, 0, t.half, S.amp, true, null); }
+  function polozhenie(v) {
+    var k = Math.round(v), s = k * S.t.half / S.t.N;
+    if (Math.abs(s - S.s) > 1e-12) zagruzit(S.t, S.line, s, S.amp, S.run, null);
+  }
+  function amplituda(v) {
+    var A = Math.min(60, Math.max(2, Math.round(v)));
+    if (A !== S.amp) zagruzit(S.t, S.line, S.s, A, S.run, null);
+  }
+  function vB() { var g = S.m.g; if (g.a > 0 && g.Bvnutri) zagruzit(S.t, S.line, g.sB, S.amp, true, { vid: 'B' }); }
+  function vSym() { var g = S.m.g; if (g.a > 0) zagruzit(S.t, S.line, -g.s, S.amp, true, { vid: 'sym' }); }
+  function vCM() { zagruzit(S.t, S.line, 0, S.amp, true, null); }
+  function drugayaDiag() { zagruzit(S.t, 1 - S.line, S.s, S.amp, true, { vid: 'diag' }); }
+  function snyatKrivuyu() {
+    var t = S.t, st = t.N / 20;
+    for (var k = -t.N; k <= t.N; k += st) {
+      if (k === 0) continue;
+      var s = k * t.half / t.N;
+      dobavit(S, s, Tsnyatyj(t, S.line, s, S.amp));
+    }
+    snyat();
+    setUi(function (u) { return Object.assign({}, u, { tochki: S.tochki.length }); });
+  }
+  function pusk() { S.run = !S.run; snyat(); setUi(function (u) { return Object.assign({}, u, { run: S.run }); }); }
+  function sbros() { zagruzit(S.t, S.line, S.s, S.amp, true, null); }
+
+  /* Для автопроверки: __demoSet({ body, line, s, amp, run, curve }) ставит
+     опыт с этими ручками (curve: true снимает кривую); __demoAction(имя)
+     жмёт кнопку: 'B', 'sym', 'cm', 'diag'; __demoCheck(body, line, s, amp, n)
+     — прогон без кадров на n разворотов, живую сцену не трогает. */
+  window.__demoSet = function (q) {
+    q = q || {};
+    var t = q.body ? PO_ID[q.body] : S.t;
+    var line = q.line != null ? q.line : (q.body ? 0 : S.line);
+    zagruzit(t, line, q.s != null ? q.s : (q.body ? t.half : S.s), q.amp != null ? q.amp : S.amp,
+             q.run == null ? true : !!q.run, null);
+    if (q.curve) snyatKrivuyu();
+    return pokaz;
+  };
+  window.__demoAction = function (name) {
+    ({ B: vB, sym: vSym, cm: vCM, diag: drugayaDiag, curve: snyatKrivuyu })[name]();
+    return pokaz;
+  };
+  window.__demoCheck = progon;
+  window.__demoModel = { TELA: TELA, geometriya: geometriya, novyj: novyj, shag: shag, svodka: svodka,
+                         prodvinut: prodvinut, minimum: minimum, Tsnyatyj: Tsnyatyj, points: function () { return S.tochki.slice(); } };
+
+  /* ── строка показаний ── */
+
+  function slova() {
+    var A = function (x) { return '<span class="accent">' + x + '</span>'; };
+    var m = S.m, g = m.g, t = m.t, tel = t.id === 'telefon';
+    /* l_A в строке не пишется: в рубленом шрифте l и I не различить,
+       поэтому эффективная длина названа словами */
+    var IA = 'I<sub>A</sub>';
+    if (!(g.a > 0)) {
+      var s1 = t.half / t.N, T1 = TWO_PI * Math.sqrt((t.ICform + s1 * s1) / (G * s1));
+      return 'Ось проходит через центр масс. Момент тяжести равен нулю при любом угле, равновесие безразличное, ' +
+        'и ' + (tel ? 'телефон остаётся' : 'стержень остаётся') + ' там, где его отпустили. Колебаний нет, период ушёл в бесконечность: ' +
+        'на соседнем делении ползунка, при a = ' + dl(t, s1) + ', он уже ' + A(sek(T1) + ' с') + '.';
+    }
+    var T = m.Tizm, Tf = g.Tformula;
+    var izm = T != null ? ', снятый с движения ' + A(sek(T) + ' с') : ', снятый с движения появится после первого разворота';
+    var o = S.otkuda, txt;
+    if (o && o.vid === 'B') {
+      /* расстояние между прежней и новой осью, а не формула l_A */
+      var dAB = Math.abs(o.s - g.s), gIzm = TWO_PI * TWO_PI * dAB / (S.dop.T * S.dop.T);
+      txt = 'Ось перенесена в центр качания, и прежняя ось стала для новой центром качания. Период тот же: ' +
+        A(sek(S.dop.T) + ' с') + ' против ' + sek(o.T) + ' с. Расстояние между осями ' + A(dl(t, dAB)) +
+        ' равно эффективной длине. По такому расстоянию и периоду оборотный маятник меряет g, здесь выходит ' +
+        A(num(gIzm, 2) + ' м/с²') + '.';
+      if (Math.abs(gIzm / G - 1) > 5e-4)
+        txt += ' Это меньше 9,81 на ' + num((1 - gIzm / G) * 100, 2) + ' %: тело отпущено с ' + m.ampDeg +
+          '°, и период длиннее, чем у малых колебаний.';
+      return txt;
+    }
+    if (o && o.vid === 'sym') {
+      var d2 = 2 * g.a, gp = TWO_PI * TWO_PI * d2 / (Tf * Tf);
+      txt = 'Ось перенесена на то же расстояние по другую сторону центра масс, и период тот же: ' + A(sek(S.dop.T) + ' с') +
+        ' против ' + sek(o.T) + ' с. ';
+      if (Math.abs(d2 / g.lA - 1) < 2e-3)
+        return txt + 'Здесь a равно радиусу инерции, расстояние между опорами ' + dl(t, d2) + ' совпало с эффективной длиной, ' +
+          'и симметричная опора оказалась центром качания.';
+      return txt + 'Но расстояние между опорами ' + A(dl(t, d2)) + ', а эффективная длина ' + dl(t, g.lA) +
+        ', и g по такой паре опор вышло бы ' + A(num(gp, 1) + ' м/с²') + ', на ' + num(Math.abs(gp / G - 1) * 100, 1) +
+        ' % ' + (gp > G ? 'больше' : 'меньше') + ' настоящего.';
+    }
+    var nach = tel
+      ? 'Телефон качается в своей плоскости на оси A в ' + dl(t, g.a) + ' от центра масс C. '
+      : 'Стержень 1 м качается на оси A в ' + dl(t, g.a) + ' от центра масс C. ';
+    if (tel && Math.abs(g.a - t.half) < 1e-9)
+      nach += 'Все четыре угла лежат на этом расстоянии, и за любой угол период один по симметрии' +
+        (o && o.vid === 'diag' ? ': ось перенесена за угол на другой диагонали, а период прежний, ' + A(sek(S.dop.T) + ' с') + ' против ' + sek(o.T) + ' с' : '') + '. ';
+    else if (o && o.vid === 'diag')
+      nach += 'Ось перенесена на другую диагональ на то же расстояние от центра масс, и период прежний. ';
+    var ur = 'Уравнение моментов ' + IA + 'φ̈ = −mga sin φ: инерцию задаёт ' + IA + ' = I<sub>C</sub> + ma², жёсткость mga. ';
+    var per = 'Период по формуле ' + A(sek(Tf) + ' с') + izm;
+    var dp = T != null ? (T / Tf - 1) * 100 : 0;
+    per += T != null && dp > 0.02
+      ? ', на ' + num(dp, dp < 1 ? 2 : 1) + ' % длиннее: формула написана для малых углов, а тело отпущено с ' + m.ampDeg + '°. '
+      : '. ';
+    var b;
+    var bDl = dl(t, Math.abs(g.sB));
+    if (Math.abs(g.a - t.rho) < 0.5 * t.half / t.N)
+      b = 'Ось на радиусе инерции: период здесь наименьший, эффективная длина равна двум радиусам инерции, ' + A(dl(t, g.lA)) +
+        ', и центр качания B лежит на том же расстоянии от центра масс по другую сторону. ';
+    else if (g.Bvnutri)
+      b = 'Центр качания B лежит на прямой AC на эффективной длине ' + A(dl(t, g.lA)) + ' от оси, в ' + bDl + ' за центром масс' +
+        (tel ? ', и подвесить за него телефон можно только сквозь отверстие. ' : '. ');
+    else
+      b = 'Центр качания B на эффективной длине ' + dl(t, g.lA) + ' от оси лежит за ' + (tel ? 'краем телефона' : 'концом стержня') +
+        ', и подвесить тело за него нельзя. ';
+    var nit = 'Груз на нити, равной эффективной длине, качается в такт с телом' +
+      (m.ampDeg >= 20 ? ' и при ' + m.ampDeg + '°: уравнения у них одинаковы при любой амплитуде.' : '.');
+    return nach + ur + per + b + nit;
+  }
+
+  var t = S.t, g = S.m.g;
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Тело:">
+          ${TELA.map(function (tt) {
+            return html`<${C.Btn} key=${tt.id} active=${ui.id === tt.id} onClick=${function () { vybrat(tt.id); }}>${tt.knopka}<//>`; })}
+        <//>
+        <${C.Slider} label="Ось от центра масс:" min=${-t.N} max=${t.N} step=${1} value=${S.s / t.half * t.N}
+                     onChange=${polozhenie} display=${num(S.s * t.ed.k, t.ed.d) + ' ' + t.ed.u} />
+        <${C.Group} label="Перенести ось:">
+          <${C.Btn} disabled=${!(g.a > 0 && g.Bvnutri)} onClick=${vB}>в центр качания<//>
+          <${C.Btn} disabled=${!(g.a > 0)} onClick=${vSym}>симметрично<//>
+          <${C.Btn} disabled=${!(g.a > 0)} onClick=${vCM}>в центр масс<//>
+          ${t.linii.length > 1 ? html`<${C.Btn} onClick=${drugayaDiag}>на другую диагональ<//>` : null}
+        <//>
+        <${C.Slider} label="Амплитуда:" min=${2} max=${60} step=${1} value=${ui.amp}
+                     onChange=${amplituda} display=${ui.amp + '°'} />
+        <${C.Group}>
+          <${C.Btn} onClick=${snyatKrivuyu}>Снять кривую<//>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.run ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(PeriodTela);
+</script>
+</body>
+</html>

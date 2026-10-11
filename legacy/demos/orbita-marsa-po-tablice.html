@@ -1,0 +1,1209 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Орбита Марса по таблице</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-05/">&larr; Неделя 05</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=orbita-marsa-po-tablice"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Демка № 12 пятой недели, блоки `zakony-keplera` и `dannye-dayut-zakony`.
+   Запрос автора 29.09: «вот мы на земле, что мы видим в телескоп и какие
+   параметры приходят в таблицы, а затем как из таблиц собираются законы
+   Кеплера». Как Кеплер получил орбиту Марса из таблиц Браге (Astronomia
+   Nova, 1609) и как из таблиц же читается третий закон.
+
+   МОДЕЛЬ НЕБА. Средние элементы J2000, гелиоцентрическая эклиптика:
+     Земля  a = 1,00000 а.е., e = 0,01671, период 365,256 сут,
+            долгота перигелия 102,94°, средняя долгота в эпоху 100,46°;
+     Марс   a = 1,52368 а.е., e = 0,09340, период 686,98 сут,
+            долгота перигелия 336,06°, наклон 1,850°, восходящий узел 49,56°,
+            средняя долгота в эпоху 355,45°.
+   Средняя аномалия идёт равномерно, M = L₀ + 2πt/P − ϖ; уравнение Кеплера
+   M = E − e sin E решается методом Ньютона до 10⁻¹⁵ рад, положение в
+   плоскости орбиты поворачивается узлом, наклоном и аргументом перигелия
+   ω = ϖ − Ω. Возмущений нет: таблица посчитана по модели, это не записи
+   Браге. Сутки отсчитываются от эпохи J2000, таблица покрывает 20 лет,
+   как наблюдения Браге.
+
+   ЧТО В ТАБЛИЦЕ. С Земли видно только направление: время, долгота Солнца,
+   долгота λ и широта β Марса среди звёзд. Расстояния нет. Все три угла
+   округляются до 2′, как у Браге, ошибка таблицы до 1′; режим «2′ и
+   разброс» сперва добавляет ошибку наблюдателя, равномерную в пределах
+   ±1′ (генератор с зерном 1609 у Марса и 1610 у Солнца, прогон
+   воспроизводим), и уже потом округляет, так что ошибка таблицы до 2′,
+   как точность Браге; режим «точно» оставляет углы как есть и печатает
+   десятые доли минуты. Долгота Солнца в засечку не идёт: положение Земли
+   берётся из её известной орбиты.
+
+   ЗАСЕЧКИ. Марс возвращается в ту же точку орбиты через звёздный период
+   686,98 сут; его дают средний промежуток между противостояниями 779,94 сут
+   и год: 1/T = 1/365,256 − 1/779,94 (с 779,9 выходит 687,01). По
+   отдельности промежутки в таблице от 764,0 до 806,1 сут (противостояния
+   на сутки 529,2; 1335,3; 2136,9; 2914,3; 3681,3; 4445,3; 5211,4; 5986,0;
+   6781,8); у круговой орбиты Марса было бы от 776,7 до 783,5, так что
+   разброс даёт его эксцентриситет, а остаток земной. Земля за это
+   время приходит в другую точку своей орбиты, орбита Земли считается
+   известной (Кеплер восстановил её тем же приёмом, взяв за опору Марс).
+   Два луча по табличным долготам из двух положений Земли пересекаются в
+   проекции точки Марса на эклиптику; высоту над эклиптикой дают широты,
+   z = ρ tg β, среднее по двум наблюдениям. Пар 24: первая дата каждой пары
+   сдвинута на 1/24 периода Марса от предыдущей, а из всех повторов через
+   целое число периодов, где Марс дальше 30° от Солнца в обоих
+   наблюдениях, берётся тот, где лучи пересекаются под самым большим
+   углом (его видно по самой таблице: это разность долгот). Точность
+   засечки проверяется по модели: в режиме «точно» точка совпадает с
+   положением Марса до 2·10⁻¹⁴ а.е.
+
+   ПОДГОНКА. По точкам наименьшими квадратами находится плоскость через
+   Солнце, z = px + qy; из неё наклон и узел. Точки переводятся в эту
+   плоскость. Окружность: центр и радиус свободны. Начало даёт окружность,
+   ближайшая к точкам в плоскости: алгебраическое приближение
+   (x² + y² + Dx + Ey + F = 0) и десять шагов Гаусса — Ньютона по
+   расстоянию до окружности. Показывается же промах с Земли, поэтому
+   окружность дальше подбирается по нему: центр и радиус такие, чтобы
+   наибольший промах был как можно меньше (минимакс, Нелдер — Мид с шестью
+   перезапусками по 300 шагов). Это лучшая окружность по той мерке, что на
+   графике: ни у какой другой окружности в этой плоскости наибольший
+   промах с Земли не меньше. Эллипс с Солнцем в
+   фокусе: 1/r = A + B cos θ + C sin θ линейна по A, B, C, это начальное
+   приближение, потом шесть шагов Гаусса — Ньютона по невязке в r.
+   Эксцентриситет e = √(B² + C²)/A, параметр p = 1/A, a = p/(1 − e²).
+   Эллипсу поблажек не нужно: он и так укладывается в точность таблицы.
+
+   ПРОМАХ С ЗЕМЛИ. Для каждой точки берётся точка подогнанной кривой в том
+   же направлении от Солнца, и из обоих положений Земли её пары считается
+   долгота; промах есть разность с табличной долготой, в угловых минутах,
+   из двух наблюдений берётся больший. Прогон 30.09 (__demoProgon): при
+   точной таблице эллипс промахивается на 5·10⁻¹¹′, окружность на 7,98′;
+   при округлении до 2′ эллипс на 0,98′, окружность на 8,17′; с разбросом
+   эллипс на 1,28′ при ошибке самой таблицы до 1,74′, окружность на 7,73′.
+   Ближайшая к точкам окружность, с которой подгонка начинается, дала бы
+   10,09′, 10,35′ и 9,71′. Что окружность минимаксная, проверено отдельно:
+   случайные старты симплекса не находят меньшего максимума, промах
+   достигает максимума в четырёх наблюдениях, и ноль лежит в выпуклой
+   оболочке их градиентов со знаком. По двумстам зёрнам разброса эллипс от
+   0,80′ до 2,18′ (медиана 1,36′, выше 2′ два раза из двухсот), окружность
+   от 7,36′ до 8,87′ (медиана 8,19′), всякий раз не меньше чем в 3,8 раза
+   хуже эллипса. При округлении до 2′: e = 0,0933, a = 1,5237 а.е.,
+   перигелий 336,06°, наклон 1,85°, узел 49,53°. Пока точек мало, в 2′
+   укладывается и окружность: при таблице до 2′ до восьми точек (1,22′),
+   с девяти уже нет (2,17′). Контроль: если брать вторые наблюдения через
+   687,5 сут вместо 686,98, эллипс при точной таблице промахивается уже на
+   2,58′; если сделать орбиту Марса круговой, окружность при таблице до 2′
+   промахивается на 0,76′, эллипс на 0,97′. Восемь минут у Кеплера
+   получены другой моделью (окружность с эквантом, подогнанная по
+   противостояниям) и другой проверкой; близость к 8′ здесь ничего не
+   воспроизводит, и в подписи это число названо историей.
+
+   ПЛОЩАДИ. Время точки известно по часам Марса, с точностью до целого
+   числа периодов: τ = t₁ mod 686,98. У соседних по τ точек оно отличается
+   на 28,62 сут. Площадь сектора между соседними направлениями считается
+   интегралом ∫ r²/2 dθ по подогнанному эллипсу (Симпсон, 64 отрезка),
+   делится на время; разброс (max − min)/среднее. Прогон: при точной
+   таблице 7·10⁻¹³, при 2′ 0,11 %, с разбросом 0,19 %; разброс угла за
+   сутки 37,7 %. Средняя площадь за сутки 0,010570 а.е.², за 28,62 сут
+   0,3026 а.е.². Сумма секторов за период равна πab = 7,262 а.е.² по
+   построению (секторы покрывают эллипс один раз, их времена дают ровно
+   период), поэтому проверкой она не считается.
+
+   ТРЕТИЙ ЗАКОН. Таблица шести планет на круговых орбитах, это не засечки
+   Марса и не наблюдения: углы и сроки посчитаны по нынешним средним
+   расстояниям, и геометрия возвращает эти расстояния обратно. Подпись
+   режима так и говорит, и называет, насколько грубо приём работает на
+   настоящих орбитах: отдельные квадратуры Марса за 1800–2050 дают от 1,36
+   до 2,13 а.е. (пересчёт по элементам Стэндиша, см. шапку nebo-i-tablicy).
+   У внутренней планеты в наибольшей элонгации ε угол
+   при планете прямой, a = sin ε. У внешней от противостояния до квадратуры
+   (элонгации 90°) Земля обгоняет планету на угол θ = 360°·t/T_син, и в
+   квадратуре cos θ = 1/a. Звёздный период из синодического:
+   1/T = 1/T_З + 1/T_син у внутренних, 1/T = 1/T_З − 1/T_син у внешних.
+   Синодические периоды 115,88; 583,92; 779,94; 398,88; 378,09 сут.
+   Измеренные величины получены из средних расстояний 0,387; 0,723; 1,524;
+   5,203; 9,537 а.е., округлены до сотых градуса и сотых суток, и
+   расстояния считаются обратно из округлённых. У Юпитера и Сатурна
+   квадратура почти прямой угол, и ошибка 0,1 сут во времени сдвигает a
+   на 0,8 и 1,6 процента: время нужно знать до часа. У Меркурия наибольшая
+   элонгация на деле ходит от 18° до 28° из-за вытянутой орбиты, 22,77°
+   отвечает круговой.
+
+   УЗКИЙ ЭКРАН. Кадр 1000×460 на телефоне шириной 375 px сжимается втрое,
+   и подписи режима «третий закон» выходят около 6 px. Поэтому этот режим,
+   когда так выходит крупнее, рисуется своим кадром 500×560 поверх той же
+   канвы (свой setTransform в risovatTretij): сверху таблица, под ней оба
+   треугольника, график в логарифмах опущен. Выбор по масштабу: узкий кадр
+   берётся, если он крупнее широкого больше чем в 1,15 раза. Замер 30.09
+   при 375×800: канва 375×450, узкий кадр в масштабе 0,75, кегль 18
+   выходит 13,5 px против 6,4 в широком; при 320×640 канва 320×371,
+   масштаб 0,64, кегль 11,5 px. На 1280×800 остаётся широкий кадр.
+
+   АДРЕС. ?rezhim=tretij открывает демку сразу в режиме «третий закон»,
+   ?rezhim=ploshchadi в режиме «площади»: на первый ведёт ссылка из главы
+   (блок nebo-i-tablicy), где сказано, что оба треугольника начерчены там. */
+
+var GRAD = Math.PI / 180, MINUTA = GRAD / 60, DVA_PI = 2 * Math.PI;
+
+var T_ZEMLI = 365.256;                  /* звёздный год, сут */
+var T_SIN = 779.94;                     /* средний синодический период Марса, сут */
+var T_MARSA = 686.98;                   /* звёздный период Марса, сут */
+
+var ZEMLYA = { a: 1.00000, e: 0.01671, P: T_ZEMLI, pi: 102.94, L0: 100.46, i: 0, uzel: 0 };
+var MARS = { a: 1.52368, e: 0.09340, P: T_MARSA, pi: 336.06, L0: 355.45, i: 1.850, uzel: 49.56 };
+
+var SROK = 20 * 365.25;                 /* таблица за двадцать лет */
+var N_PAR = 24;                         /* пар наблюдений, по одной на 1/24 периода Марса */
+var ELONG_MIN = 30 * GRAD;              /* ближе к Солнцу Марс тонет в сумерках */
+var UGOL_MIN = 15 * GRAD;               /* лучи под острым углом пересекаются плохо */
+var SHAG_TABL = 2 * MINUTA;             /* округление таблицы, как у Браге */
+var RAZBROS = 1 * MINUTA;               /* ошибка наблюдателя до округления: вместе с ним до 2′ */
+var TOCHNOST_BRAGE = 2;                 /* с чем сравнивать промах, угловые минуты */
+var ZERNO = 1609;
+
+/* Уравнение Кеплера M = E − e sin E методом Ньютона. */
+function kepler(M, e) {
+  var E = M + e * Math.sin(M);
+  for (var k = 0; k < 30; k++) {
+    var d = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+    E -= d;
+    if (Math.abs(d) < 1e-15) break;
+  }
+  return E;
+}
+
+/* Гелиоцентрическое эклиптическое положение планеты в момент t, а.е. */
+function polozhenie(p, t) {
+  var M = (p.L0 - p.pi) * GRAD + DVA_PI * t / p.P;
+  M -= DVA_PI * Math.floor(M / DVA_PI);
+  var E = kepler(M, p.e);
+  var xo = p.a * (Math.cos(E) - p.e), yo = p.a * Math.sqrt(1 - p.e * p.e) * Math.sin(E);
+  var O = p.uzel * GRAD, w = (p.pi - p.uzel) * GRAD, I = p.i * GRAD;
+  var cO = Math.cos(O), sO = Math.sin(O), cw = Math.cos(w), sw = Math.sin(w);
+  var ci = Math.cos(I), si = Math.sin(I);
+  return [
+    (cO * cw - sO * sw * ci) * xo + (-cO * sw - sO * cw * ci) * yo,
+    (sO * cw + cO * sw * ci) * xo + (-sO * sw + cO * cw * ci) * yo,
+    (sw * si) * xo + (cw * si) * yo
+  ];
+}
+
+function obernut(a) { return a - DVA_PI * Math.round(a / DVA_PI); }
+function do360(a) { return a - DVA_PI * Math.floor(a / DVA_PI); }
+
+/* Что видно с Земли в момент t: долгота и широта Марса, долгота Солнца,
+   элонгация (угол между Марсом и Солнцем). */
+function nablyudenie(t, mars) {
+  var E = polozhenie(ZEMLYA, t), M = polozhenie(mars || MARS, t);
+  var dx = M[0] - E[0], dy = M[1] - E[1], dz = M[2] - E[2];
+  var rho = Math.hypot(dx, dy), d = Math.hypot(rho, dz), rE = Math.hypot(E[0], E[1], E[2]);
+  return {
+    t: t, E: E, M: M,
+    lam: do360(Math.atan2(dy, dx)), bet: Math.atan2(dz, rho),
+    lsun: do360(Math.atan2(-E[1], -E[0])),
+    elong: Math.acos(C.clamp(-(dx * E[0] + dy * E[1] + dz * E[2]) / (d * rE), -1, 1))
+  };
+}
+
+/* Генератор с зерном: прогон с разбросом воспроизводим. */
+function generator(zerno) {
+  var s = zerno >>> 0;
+  return function () {
+    s = (s + 0x6D2B79F5) >>> 0;
+    var t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* Строка таблицы: углы с ошибкой наблюдателя и округлением. Долгота
+   Солнца записывается так же, но шумит от своего генератора: ряд Марса
+   от неё не зависит. В засечку она не идёт, положение Земли берётся из
+   известной орбиты. */
+function zapis(o, tochnost, rnd, rndS) {
+  var lam = o.lam, bet = o.bet, lsun = o.lsun;
+  if (tochnost === 'razbros') {
+    lam += (2 * rnd() - 1) * RAZBROS;
+    bet += (2 * rnd() - 1) * RAZBROS;
+    lsun += (2 * rndS() - 1) * RAZBROS;
+  }
+  if (tochnost !== 'tochno') {
+    lam = Math.round(lam / SHAG_TABL) * SHAG_TABL;
+    bet = Math.round(bet / SHAG_TABL) * SHAG_TABL;
+    lsun = Math.round(lsun / SHAG_TABL) * SHAG_TABL;
+  }
+  return { t: o.t, E: o.E, M: o.M, lam: do360(lam), bet: bet, lsun: do360(lsun), lamIst: o.lam, betIst: o.bet, lsunIst: o.lsun };
+}
+
+/* Выбор пар. Первая дата пары τ_j = j·T/24 плюс целое число периодов;
+   вторая через interval (честно 686,98). Из повторов берётся тот, где
+   лучи пересекаются под самым большим углом, видимым по самой таблице:
+   угол между лучами есть разность долгот. */
+function vyborPar(interval, mars) {
+  var pary = [];
+  for (var j = 0; j < N_PAR; j++) {
+    var tau = j * T_MARSA / N_PAR, luchshaya = null;
+    for (var m = 0; tau + m * T_MARSA + interval <= SROK; m++) {
+      var t1 = tau + m * T_MARSA, t2 = t1 + interval;
+      var a = nablyudenie(t1, mars), b = nablyudenie(t2, mars);
+      if (a.elong < ELONG_MIN || b.elong < ELONG_MIN) continue;
+      var ugol = Math.abs(Math.sin(b.lam - a.lam));
+      if (ugol < Math.sin(UGOL_MIN)) continue;
+      if (!luchshaya || ugol > luchshaya.ugol) luchshaya = { t1: t1, t2: t2, tau: tau, ugol: ugol };
+    }
+    if (luchshaya) pary.push(luchshaya);
+  }
+  pary.sort(function (p, q) { return p.t1 - q.t1; });
+  return pary;
+}
+
+/* Таблица по парам: строки в порядке наблюдений. */
+function tablica(pary, tochnost, mars) {
+  var rnd = generator(ZERNO), rndS = generator(ZERNO + 1);
+  return pary.map(function (p) {
+    return [zapis(nablyudenie(p.t1, mars), tochnost, rnd, rndS), zapis(nablyudenie(p.t2, mars), tochnost, rnd, rndS)];
+  });
+}
+
+/* Засечка: пересечение двух лучей в проекции на эклиптику, высота по широтам. */
+function zasechka(z1, z2, tau) {
+  var u1x = Math.cos(z1.lam), u1y = Math.sin(z1.lam), u2x = Math.cos(z2.lam), u2y = Math.sin(z2.lam);
+  var det = -u1x * u2y + u1y * u2x;
+  var bx = z2.E[0] - z1.E[0], by = z2.E[1] - z1.E[1];
+  var s = (-bx * u2y + by * u2x) / det;
+  var x = z1.E[0] + s * u1x, y = z1.E[1] + s * u1y;
+  var r1 = Math.hypot(x - z1.E[0], y - z1.E[1]), r2 = Math.hypot(x - z2.E[0], y - z2.E[1]);
+  var z = (r1 * Math.tan(z1.bet) + r2 * Math.tan(z2.bet)) / 2;
+  return { x: x, y: y, z: z, tau: tau, t1: z1.t, zap: [z1, z2],
+           oshibka: Math.hypot(x - z1.M[0], y - z1.M[1], z - z1.M[2]) };
+}
+
+/* Наименьшие квадраты: строки X, правые части y; нормальные уравнения
+   и исключение Гаусса (неизвестных не больше трёх). */
+function mnk(X, y) {
+  var n = X[0].length, A = [], i, j, k;
+  for (i = 0; i < n; i++) { A.push([]); for (j = 0; j <= n; j++) A[i].push(0); }
+  for (k = 0; k < X.length; k++) {
+    for (i = 0; i < n; i++) {
+      for (j = 0; j < n; j++) A[i][j] += X[k][i] * X[k][j];
+      A[i][n] += X[k][i] * y[k];
+    }
+  }
+  for (i = 0; i < n; i++) {
+    var p = i;
+    for (k = i + 1; k < n; k++) if (Math.abs(A[k][i]) > Math.abs(A[p][i])) p = k;
+    var tmp = A[i]; A[i] = A[p]; A[p] = tmp;
+    for (k = i + 1; k < n; k++) {
+      var f = A[k][i] / A[i][i];
+      for (j = i; j <= n; j++) A[k][j] -= f * A[i][j];
+    }
+  }
+  var x = [];
+  for (i = n - 1; i >= 0; i--) {
+    var s = A[i][n];
+    for (j = i + 1; j < n; j++) s -= A[i][j] * x[j];
+    x[i] = s / A[i][i];
+  }
+  return x;
+}
+
+/* Нелдер — Мид: минимум f от n переменных без производных, симплекс со
+   стороной shag вокруг x0, iter шагов. Нужен там, где у функции изломы:
+   наибольший промах меняет точку, на которой достигается. */
+function nelderMead(f, x0, shag, iter) {
+  var n = x0.length, S = [x0.slice()], F, i, k, it;
+  for (i = 0; i < n; i++) { var x = x0.slice(); x[i] += shag; S.push(x); }
+  F = S.map(f);
+  function otrazh(c, v, a) { var y = []; for (var k = 0; k < n; k++) y.push(c[k] + a * (c[k] - v[k])); return y; }
+  for (it = 0; it < iter; it++) {
+    var por = S.map(function (x, i) { return i; }).sort(function (a, b) { return F[a] - F[b]; });
+    S = por.map(function (i) { return S[i]; }); F = por.map(function (i) { return F[i]; });
+    var c = [];
+    for (k = 0; k < n; k++) { c.push(0); for (i = 0; i < n; i++) c[k] += S[i][k] / n; }
+    var xr = otrazh(c, S[n], 1), fr = f(xr);
+    if (fr < F[0]) {
+      var xe = otrazh(c, S[n], 2), fe = f(xe);
+      if (fe < fr) { S[n] = xe; F[n] = fe; } else { S[n] = xr; F[n] = fr; }
+    } else if (fr < F[n - 1]) { S[n] = xr; F[n] = fr; }
+    else {
+      var xc = otrazh(c, S[n], -0.5), fc = f(xc);
+      if (fc < F[n]) { S[n] = xc; F[n] = fc; }
+      else for (i = 1; i <= n; i++) { S[i] = otrazh(S[0], S[i], -0.5); F[i] = f(S[i]); }
+    }
+  }
+  var luch = 0;
+  for (i = 1; i <= n; i++) if (F[i] < F[luch]) luch = i;
+  return { x: S[luch], f: F[luch] };
+}
+
+/* Разбор точек: плоскость орбиты, координаты в ней, окружность, эллипс,
+   промахи с Земли и площади. Нужно не меньше пяти точек. */
+function razbor(tochki) {
+  if (tochki.length < 5) return null;
+  var pq = mnk(tochki.map(function (k) { return [k.x, k.y]; }), tochki.map(function (k) { return k.z; }));
+  var p = pq[0], q = pq[1];
+  var uzel = Math.atan2(-p, q);
+  var nn = Math.hypot(p, q, 1), n = [-p / nn, -q / nn, 1 / nn];
+  var e1 = [Math.cos(uzel), Math.sin(uzel), 0];
+  var e2 = [n[1] * e1[2] - n[2] * e1[1], n[2] * e1[0] - n[0] * e1[2], n[0] * e1[1] - n[1] * e1[0]];
+  function vPlosk(k) {
+    var X = [k.x, k.y, p * k.x + q * k.y];
+    return [X[0] * e1[0] + X[1] * e1[1] + X[2] * e1[2], X[0] * e2[0] + X[1] * e2[1] + X[2] * e2[2]];
+  }
+  function izPlosk(xi, eta) {
+    return [xi * e1[0] + eta * e2[0], xi * e1[1] + eta * e2[1], xi * e1[2] + eta * e2[2]];
+  }
+  var V = tochki.map(vPlosk);
+  var th = V.map(function (v) { return Math.atan2(v[1], v[0]); });
+  var r = V.map(function (v) { return Math.hypot(v[0], v[1]); });
+
+  /* эллипс с Солнцем в фокусе */
+  var abc = mnk(th.map(function (t) { return [1, Math.cos(t), Math.sin(t)]; }), r.map(function (x) { return 1 / x; }));
+  for (var it = 0; it < 6; it++) {
+    var J = [], res = [];
+    th.forEach(function (t, k) {
+      var D = abc[0] + abc[1] * Math.cos(t) + abc[2] * Math.sin(t);
+      J.push([-1 / (D * D), -Math.cos(t) / (D * D), -Math.sin(t) / (D * D)]);
+      res.push(r[k] - 1 / D);
+    });
+    var d = mnk(J, res);
+    abc = [abc[0] + d[0], abc[1] + d[1], abc[2] + d[2]];
+  }
+  var e = Math.hypot(abc[1], abc[2]) / abc[0], par = 1 / abc[0];
+  var ell = { A: abc[0], B: abc[1], C: abc[2], e: e, p: par, a: par / (1 - e * e), varpi: Math.atan2(abc[2], abc[1]) };
+  ell.b = ell.a * Math.sqrt(1 - e * e);
+  ell.r = function (t) { return 1 / (abc[0] + abc[1] * Math.cos(t) + abc[2] * Math.sin(t)); };
+  /* долгота перигелия по определению ϖ = Ω + ω: узел плюс угол от узла в плоскости орбиты */
+  ell.perigelij = do360(uzel + ell.varpi) / GRAD;
+
+  /* Окружность со свободным центром. Сначала ближайшая к точкам в
+     плоскости орбиты: алгебраическое приближение и десять шагов Гаусса —
+     Ньютона по расстоянию до окружности. Это только начало: показывается
+     промах с Земли, и окружность подбирается по нему же, так чтобы
+     наибольший промах был как можно меньше (Нелдер — Мид с перезапусками). */
+  var s = mnk(V.map(function (v) { return [v[0], v[1], 1]; }), V.map(function (v) { return -(v[0] * v[0] + v[1] * v[1]); }));
+  var c = [-s[0] / 2, -s[1] / 2, 0];
+  c[2] = Math.sqrt(c[0] * c[0] + c[1] * c[1] - s[2]);
+  for (it = 0; it < 10; it++) {
+    var Jk = [], rk = [];
+    V.forEach(function (v) {
+      var dx = v[0] - c[0], dy = v[1] - c[1], dd = Math.hypot(dx, dy);
+      Jk.push([-dx / dd, -dy / dd, -1]);
+      rk.push(-(dd - c[2]));
+    });
+    var dk = mnk(Jk, rk);
+    c = [c[0] + dk[0], c[1] + dk[1], c[2] + dk[2]];
+  }
+  var cth = th.map(Math.cos), sth = th.map(Math.sin);
+  function hudshij(k) {
+    if (!(k[2] > 0)) return Infinity;
+    var mx = 0;
+    for (var j = 0; j < tochki.length; j++) {
+      var cu = k[0] * cth[j] + k[1] * sth[j], D = cu * cu - k[0] * k[0] - k[1] * k[1] + k[2] * k[2];
+      if (D < 0) return Infinity;
+      var R = cu + Math.sqrt(D), xi = R * cth[j], eta = R * sth[j];
+      var Fx = xi * e1[0] + eta * e2[0], Fy = xi * e1[1] + eta * e2[1];
+      for (var q = 0; q < 2; q++) {
+        var z = tochki[j].zap[q], d = Math.abs(obernut(Math.atan2(Fy - z.E[1], Fx - z.E[0]) - z.lam));
+        if (d > mx) mx = d;
+      }
+    }
+    return mx / MINUTA;
+  }
+  var kbl = { x: c, f: hudshij(c) };
+  var kl = { x: kbl.x, f: kbl.f };
+  for (it = 0; it < 6; it++) {
+    var kq = nelderMead(hudshij, kl.x, 0.02 / Math.pow(3, it), 300);
+    if (kq.f < kl.f) kl = kq;
+  }
+  c = kl.x;
+  var krug = { cx: c[0], cy: c[1], R: c[2], sdvig: Math.hypot(c[0], c[1]), blizhajshij: kbl.f };
+  krug.r = function (t) {
+    var cu = c[0] * Math.cos(t) + c[1] * Math.sin(t);
+    return cu + Math.sqrt(cu * cu - c[0] * c[0] - c[1] * c[1] + c[2] * c[2]);
+  };
+
+  /* промах с Земли: точка кривой в том же направлении от Солнца */
+  function promahi(rf) {
+    var mx = 0, spisok = [];
+    tochki.forEach(function (k, j) {
+      var R = rf(th[j]), F = izPlosk(R * Math.cos(th[j]), R * Math.sin(th[j])), m = 0;
+      k.zap.forEach(function (z) {
+        var lf = Math.atan2(F[1] - z.E[1], F[0] - z.E[0]);
+        var dm = obernut(lf - z.lam) / MINUTA;
+        if (Math.abs(dm) > Math.abs(m)) m = dm;
+      });
+      spisok.push({ lon: do360(Math.atan2(k.y, k.x)) / GRAD, d: m });
+      if (Math.abs(m) > mx) mx = Math.abs(m);
+    });
+    return { max: mx, spisok: spisok };
+  }
+
+  /* площади между соседними по времени точками */
+  var poryadok = tochki.map(function (k, i) { return i; }).sort(function (i, j) { return tochki[i].tau - tochki[j].tau; });
+  var sektory = [];
+  for (var sI = 0; sI < poryadok.length; sI++) {
+    var i0 = poryadok[sI], i1 = poryadok[(sI + 1) % poryadok.length];
+    var dt = tochki[i1].tau - tochki[i0].tau;
+    if (dt <= 0) dt += T_MARSA;
+    var dth = do360(th[i1] - th[i0]);
+    var S = 0, K = 64;
+    for (var mm = 0; mm <= K; mm++) {
+      var w = (mm === 0 || mm === K) ? 1 : (mm % 2 ? 4 : 2), rr = ell.r(th[i0] + dth * mm / K);
+      S += w * rr * rr / 2;
+    }
+    S *= dth / K / 3;
+    sektory.push({ ot: th[i0], dth: dth, dt: dt, S: S, skorS: S / dt, skorU: dth / GRAD / dt });
+  }
+  function razbros(key) {
+    var v = sektory.map(function (x) { return x[key]; });
+    var mn = Math.min.apply(null, v), mx = Math.max.apply(null, v);
+    var sr = v.reduce(function (x, y) { return x + y; }, 0) / v.length;
+    return { spread: (mx - mn) / sr, min: mn, max: mx, sr: sr };
+  }
+
+  var ist = 0, oshT = 0;
+  tochki.forEach(function (k) {
+    oshT = Math.max(oshT, k.oshibka);
+    k.zap.forEach(function (z) { ist = Math.max(ist, Math.abs(obernut(z.lam - z.lamIst)) / MINUTA); });
+  });
+
+  return {
+    p: p, q: q, naklon: Math.atan(Math.hypot(p, q)) / GRAD, uzel: do360(uzel) / GRAD,
+    izPlosk: izPlosk, th: th, r: r, ell: ell, krug: krug,
+    promahE: promahi(ell.r), promahK: promahi(krug.r),
+    sektory: sektory, razbrosS: razbros('skorS'), razbrosU: razbros('skorU'),
+    oshibkaTablicy: ist, oshibkaTochki: oshT
+  };
+}
+
+/* Третий закон по таблице шести планет. */
+var PLANETY = [
+  { imya: 'Меркурий', vid: 'vnutr', aSr: 0.387, sin: 115.88 },
+  { imya: 'Венера', vid: 'vnutr', aSr: 0.723, sin: 583.92 },
+  { imya: 'Земля', vid: 'zemlya' },
+  { imya: 'Марс', vid: 'vnesh', aSr: 1.524, sin: 779.94 },
+  { imya: 'Юпитер', vid: 'vnesh', aSr: 5.203, sin: 398.88 },
+  { imya: 'Сатурн', vid: 'vnesh', aSr: 9.537, sin: 378.09 }
+];
+function okrugl(x, n) { var k = Math.pow(10, n); return Math.round(x * k) / k; }
+function tretijZakon() {
+  return PLANETY.map(function (pl) {
+    var a, Tsut, izm = null;
+    if (pl.vid === 'zemlya') { a = 1; Tsut = T_ZEMLI; }
+    else if (pl.vid === 'vnutr') {
+      izm = okrugl(Math.asin(pl.aSr) / GRAD, 2);                  /* наибольшая элонгация, ° */
+      a = Math.sin(izm * GRAD);
+      Tsut = 1 / (1 / T_ZEMLI + 1 / pl.sin);
+    } else {
+      izm = okrugl(Math.acos(1 / pl.aSr) / DVA_PI * pl.sin, 2);   /* от противостояния до квадратуры, сут */
+      a = 1 / Math.cos(DVA_PI * izm / pl.sin);
+      Tsut = 1 / (1 / T_ZEMLI - 1 / pl.sin);
+    }
+    var T = Tsut / T_ZEMLI;
+    return { planet: pl.imya, method: pl.vid, measured: izm, synodic: pl.sin || null,
+             a: a, T: T, ratio: a * a * a / (T * T) };
+  });
+}
+var TABLICA3 = tretijZakon();
+
+/* Прогон без анимации для автопроверки. interval и eMars нужны для
+   контроля: неверный период или круговая орбита Марса обязаны дать
+   другой ответ, иначе проверка молчит. */
+function progon(opt) {
+  opt = opt || {};
+  var mars = opt.eMars != null ? Object.assign({}, MARS, { e: opt.eMars }) : MARS;
+  var pary = vyborPar(opt.interval || T_MARSA, mars);
+  var zap = tablica(pary, opt.tochnost || 'brage', mars);
+  var tochki = zap.map(function (z, i) { return zasechka(z[0], z[1], pary[i].tau); });
+  var r = razbor(tochki);
+  return {
+    points: tochki.length, fitCircleMaxMissArcmin: r.promahK.max, fitEllipseMaxMissArcmin: r.promahE.max,
+    eFit: r.ell.e, aFit: r.ell.a, perihelionFit: r.ell.perigelij, iFit: r.naklon, nodeFit: r.uzel,
+    circleOffset: r.krug.sdvig, circleRadius: r.krug.R, circleNearestMissArcmin: r.krug.blizhajshij,
+    areaSpread: r.razbrosS.spread, angleSpread: r.razbrosU.spread, areaRate: r.razbrosS.sr,
+    tableMaxErrorArcmin: r.oshibkaTablicy, maxPointErrorAU: r.oshibkaTochki,
+    minLineAngle: Math.min.apply(null, pary.map(function (p) { return Math.asin(p.ugol) / GRAD; }))
+  };
+}
+
+/* Русская запятая и настоящий минус; крохи печатаются нулём. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* Число и единица через неразрывный пробел: перенос их не разрывает. */
+function ed(x, u) { return x + ' ' + u; }
+/* Угол в градусах и минутах; дробь минуты только у точной таблицы. */
+function gradMin(rad, znak, drob) {
+  var g = rad / GRAD, s = g < 0 ? '−' : (znak ? '+' : '');
+  var m = Math.abs(g) * 60;
+  m = drob ? Math.round(m * 10) / 10 : Math.round(m);
+  var gg = Math.floor(m / 60 + 1e-9), mm = m - gg * 60;
+  if (!znak && gg >= 360) gg -= 360;
+  var ms = drob ? mm.toFixed(1).replace('.', ',') : String(Math.round(mm));
+  if (mm < 10) ms = '0' + ms;
+  return s + gg + '°' + ms + '′';
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева плоскость эклиптики сверху: Солнце, известная орбита Земли,
+   лучи зрения по таблице и точки орбиты Марса. Справа небо, как его
+   видно с Земли (долгота и широта Марса и Солнца), строки таблицы, промах
+   подогнанных кривых по точкам и показания. В режиме «площади» справа
+   столбики угла и площади за сутки; в режиме «третий закон» слева график
+   периода от расстояния в логарифмах, справа таблица шести планет. */
+
+var W = 1000, HGT = 460;
+var CX = 235, CY = 232, SC = 125;          /* Солнце на канве и пикселей на а.е. */
+var PL_X1 = 470;                            /* правый край плоскости */
+var RX0 = 490, RX1 = 990;                   /* правая панель */
+var NEBO_Y = 76, NEBO_H = 40, NEBO_B = 8;   /* середина полосы неба, её полувысота и ±8° широты */
+var PR_X0 = 536, PR_Y0 = 256, PR_Y1 = 346, PR_M = 12;   /* рамка графика промахов, ±12′ */
+var POK_Y = 404;                            /* строка показаний под графиком */
+var CZ = '#4db6c6', CM = '#e5704f', CS = '#ffc857', CK = '#7aa6ff', CE = '#a6c35a';
+var SEKTORA = ['rgba(166,195,90,.24)', 'rgba(77,182,198,.24)'];
+var MONO = '"JetBrains Mono", ui-monospace, monospace';
+var DLIT = { pervoe: 0.9, perelet: 1.8, vtoroe: 0.9, derzhim: 0.7 };
+var SEKTOR_SEK = 0.6;                       /* столько секунд длится сектор в режиме «площади» */
+
+var UZ_W = 500, UZ_H = 560;                 /* узкий кадр режима «третий закон» */
+
+/* Режим при открытии: ?rezhim=tretij или ?rezhim=ploshchadi. */
+var REZHIM0 = (function () {
+  try {
+    var r = new URLSearchParams(location.search).get('rezhim');
+    return r === 'tretij' || r === 'ploshchadi' ? r : 'zasechki';
+  } catch (e) { return 'zasechki'; }
+})();
+
+function X(x) { return CX + x * SC; }
+function Y(y) { return CY - y * SC; }
+
+function OrbitaMarsa() {
+  var st = useRef(null);
+  if (!st.current) {
+    var pary0 = vyborPar(T_MARSA, MARS);
+    st.current = {
+      rezhim: REZHIM0, tochnost: 'brage', pary: pary0, zap: tablica(pary0, 'brage'),
+      gotovo: 0, faza: 'pervoe', f: 0, t: pary0[0].t1, idet: true,
+      krug: false, ellips: false, tochki: [], raz: null, sweep: 0
+    };
+  }
+  var s = st.current;
+  /* «площади» по адресу: режиму нужны все точки, как при нажатии кнопки */
+  if (s.rezhim === 'ploshchadi' && !s.raz) vsePary();
+  var pair = useState(0), setV = pair[1];
+
+  /* Точка текущей пары входит в счёт, как только засечка её дала (фаза
+     «держим»): её видно на плоскости, и показание, строка состояния и
+     __demoState считают одинаково. */
+  function chisloTochek() { return Math.min(s.pary.length, s.gotovo + (s.faza === 'derzhim' ? 1 : 0)); }
+  function pereschitat() {
+    s.tochki = [];
+    for (var i = 0; i < chisloTochek(); i++) s.tochki.push(zasechka(s.zap[i][0], s.zap[i][1], s.pary[i].tau));
+    s.raz = razbor(s.tochki);
+  }
+  function obnovit() { pokazaniya(); setV(function (v) { return v + 1; }); }
+
+  function pokazaniya() {
+    var r = s.raz;
+    window.__demoState = {
+      mode: s.rezhim, precision: s.tochnost, stage: s.faza, t: s.t,
+      points: s.tochki.length, pointsTotal: s.pary.length,
+      pointList: s.tochki.map(function (k) { return { x: k.x, y: k.y, z: k.z, t1: k.t1, tau: k.tau }; }),
+      pairInterval: T_MARSA, siderealFromSynodic: 1 / (1 / T_ZEMLI - 1 / T_SIN),
+      fitCircleMaxMissArcmin: r && s.krug ? r.promahK.max : null,
+      circleOffset: r && s.krug ? r.krug.sdvig : null, circleRadius: r && s.krug ? r.krug.R : null,
+      circleNearestMissArcmin: r && s.krug ? r.krug.blizhajshij : null,
+      fitEllipseMaxMissArcmin: r && s.ellips ? r.promahE.max : null,
+      eFit: r && s.ellips ? r.ell.e : null, aFit: r && s.ellips ? r.ell.a : null,
+      perihelionFit: r && s.ellips ? r.ell.perigelij : null,
+      iFit: r ? r.naklon : null, nodeFit: r ? r.uzel : null,
+      areaSpread: r ? r.razbrosS.spread : null, angleSpread: r ? r.razbrosU.spread : null,
+      areaRate: r ? r.razbrosS.sr : null, areaPerPeriod: r ? r.razbrosS.sr * T_MARSA : null,
+      ellipseArea: r ? Math.PI * r.ell.a * r.ell.b : null,
+      tableMaxErrorArcmin: r ? r.oshibkaTablicy : null, maxPointErrorAU: r ? r.oshibkaTochki : null,
+      table: TABLICA3
+    };
+  }
+
+  function vsePary() {
+    s.gotovo = s.pary.length; s.faza = 'vse'; s.f = 0;
+    s.t = s.pary[s.pary.length - 1].t2;
+    pereschitat();
+  }
+
+  function step(dt) {
+    if (!s.idet) return;
+    if (s.rezhim === 'zasechki' && s.faza !== 'vse') {
+      s.f += dt * (s.gotovo < 3 ? 1 : 2.5);          /* первые три пары медленно */
+      var para = s.pary[s.gotovo], smena = false;
+      while (s.faza !== 'vse' && s.f >= DLIT[s.faza]) {
+        s.f -= DLIT[s.faza]; smena = true;
+        if (s.faza === 'pervoe') s.faza = 'perelet';
+        else if (s.faza === 'perelet') s.faza = 'vtoroe';
+        else if (s.faza === 'vtoroe') s.faza = 'derzhim';
+        else {
+          s.gotovo++;
+          if (s.gotovo >= s.pary.length) { s.faza = 'vse'; s.f = 0; }
+          else { s.faza = 'pervoe'; para = s.pary[s.gotovo]; }
+        }
+      }
+      if (s.faza === 'pervoe') s.t = para.t1;
+      else if (s.faza === 'perelet') s.t = para.t1 + (para.t2 - para.t1) * s.f / DLIT.perelet;
+      else if (s.faza !== 'vse') s.t = para.t2;
+      if (smena) {
+        if (chisloTochek() !== s.tochki.length) pereschitat();
+        obnovit();
+      }
+    } else if (s.rezhim === 'ploshchadi' && s.raz) {
+      s.sweep = (s.sweep + dt / SEKTOR_SEK) % s.raz.sektory.length;
+    }
+    pokazaniya();
+  }
+
+  /* ── рисование ── */
+
+  function luch(ctx, x0, y0, lam, dlina, cvet, shir, shtrih) {
+    ctx.save();
+    ctx.strokeStyle = cvet; ctx.lineWidth = shir;
+    if (shtrih) ctx.setLineDash([6, 6]);
+    ctx.beginPath(); ctx.moveTo(X(x0), Y(y0));
+    ctx.lineTo(X(x0 + dlina * Math.cos(lam)), Y(y0 + dlina * Math.sin(lam)));
+    ctx.stroke(); ctx.restore();
+  }
+  function tochka(ctx, x, y, r, cvet) {
+    ctx.fillStyle = cvet; ctx.beginPath(); ctx.arc(x, y, r, 0, DVA_PI); ctx.fill();
+  }
+  function krivaya(ctx, raz, rf, cvet, shir) {
+    ctx.strokeStyle = cvet; ctx.lineWidth = shir; ctx.beginPath();
+    for (var i = 0; i <= 240; i++) {
+      var t = i / 240 * DVA_PI, R = rf(t), P = raz.izPlosk(R * Math.cos(t), R * Math.sin(t));
+      if (i === 0) ctx.moveTo(X(P[0]), Y(P[1])); else ctx.lineTo(X(P[0]), Y(P[1]));
+    }
+    ctx.closePath(); ctx.stroke();
+  }
+
+  function risovatPlosk(ctx, tone) {
+    var ink = tone.ink, muted = tone.muted, mut = 'rgb(' + muted + ')', i;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, PL_X1, HGT); ctx.clip();
+
+    /* орбита Земли, известная; в режиме «площади» она не нужна */
+    if (s.rezhim === 'zasechki') {
+      ctx.strokeStyle = 'rgba(77,182,198,.45)';
+      ctx.lineWidth = 1.4; ctx.beginPath();
+      for (i = 0; i <= 180; i++) {
+        var E = polozhenie(ZEMLYA, i / 180 * T_ZEMLI);
+        if (i === 0) ctx.moveTo(X(E[0]), Y(E[1])); else ctx.lineTo(X(E[0]), Y(E[1]));
+      }
+      ctx.stroke();
+    }
+
+    var raz = s.raz;
+    if (s.rezhim === 'ploshchadi' && raz) {
+      /* секторы между соседними по времени точками; текущий обведён, и по
+         нему идёт радиус-вектор. Внутри сектора угол ведётся линейно по
+         времени: секторы узкие, это только картинка, числа считаны выше. */
+      var tek = Math.floor(s.sweep);
+      raz.sektory.forEach(function (sk, k) {
+        ctx.fillStyle = SEKTORA[k % 2];
+        ctx.beginPath(); ctx.moveTo(X(0), Y(0));
+        for (var m = 0; m <= 24; m++) {
+          var t = sk.ot + sk.dth * m / 24, R = raz.ell.r(t), P = raz.izPlosk(R * Math.cos(t), R * Math.sin(t));
+          ctx.lineTo(X(P[0]), Y(P[1]));
+        }
+        ctx.closePath(); ctx.fill();
+        if (k === tek) { ctx.strokeStyle = 'rgba(' + ink + ',.85)'; ctx.lineWidth = 1.6; ctx.stroke(); }
+      });
+      krivaya(ctx, raz, raz.ell.r, CE, 2);
+      var sk0 = raz.sektory[tek], tt = sk0.ot + sk0.dth * (s.sweep - tek);
+      var RR = raz.ell.r(tt), Q = raz.izPlosk(RR * Math.cos(tt), RR * Math.sin(tt));
+      ctx.strokeStyle = 'rgba(' + ink + ',.8)'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(X(0), Y(0)); ctx.lineTo(X(Q[0]), Y(Q[1])); ctx.stroke();
+      C.glow(ctx, X(Q[0]), Y(Q[1]), 16, '229,112,79', .5);
+      tochka(ctx, X(Q[0]), Y(Q[1]), 6, CM);
+    } else if (raz) {
+      if (s.krug) {
+        krivaya(ctx, raz, raz.krug.r, CK, 2);
+        var ck = raz.izPlosk(raz.krug.cx, raz.krug.cy);
+        ctx.strokeStyle = CK; ctx.lineWidth = 2; ctx.beginPath();
+        ctx.moveTo(X(ck[0]) - 6, Y(ck[1])); ctx.lineTo(X(ck[0]) + 6, Y(ck[1]));
+        ctx.moveTo(X(ck[0]), Y(ck[1]) - 6); ctx.lineTo(X(ck[0]), Y(ck[1]) + 6); ctx.stroke();
+      }
+      if (s.ellips) {
+        krivaya(ctx, raz, raz.ell.r, CE, 2);
+        /* линия апсид: перигелий и афелий */
+        var ep = raz.ell, rp = ep.r(ep.varpi), ra = ep.r(ep.varpi + Math.PI);
+        var P1 = raz.izPlosk(rp * Math.cos(ep.varpi), rp * Math.sin(ep.varpi));
+        var P2 = raz.izPlosk(-ra * Math.cos(ep.varpi), -ra * Math.sin(ep.varpi));
+        ctx.save(); ctx.setLineDash([4, 6]); ctx.strokeStyle = 'rgba(166,195,90,.7)'; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(X(P1[0]), Y(P1[1])); ctx.lineTo(X(P2[0]), Y(P2[1])); ctx.stroke(); ctx.restore();
+        /* подписи ставятся с той стороны, где Солнце: снаружи орбиты их режет край */
+        [[P1, 'перигелий'], [P2, 'афелий']].forEach(function (q) {
+          var vnutr = q[0][0] > 0;
+          C.label(ctx, X(q[0][0]) + (vnutr ? -10 : 10), Y(q[0][1]) + (q[0][1] > 0 ? 24 : -12), q[1], 17, CE, vnutr ? 'right' : 'left');
+        });
+      }
+    }
+
+    /* точки орбиты Марса */
+    s.tochki.forEach(function (k) { tochka(ctx, X(k.x), Y(k.y), 4.2, CM); });
+
+    /* текущая пара */
+    if (s.rezhim === 'zasechki' && s.faza !== 'vse') {
+      var z = s.zap[s.gotovo], D = 3.4;
+      var dol1 = s.faza === 'pervoe' ? C.ease(Math.min(1, s.f / DLIT.pervoe)) : 1;
+      luch(ctx, z[0].E[0], z[0].E[1], z[0].lam, D * dol1, CM, 2);
+      ctx.strokeStyle = CZ; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(X(z[0].E[0]), Y(z[0].E[1]), 8, 0, DVA_PI); ctx.stroke();
+      C.label(ctx, X(z[0].E[0]) + 12, Y(z[0].E[1]) - 10, '1', 17, CZ, 'left');
+      if (s.faza === 'perelet') {
+        var o = nablyudenie(s.t);
+        luch(ctx, o.E[0], o.E[1], o.lam, D, 'rgba(229,112,79,.45)', 1.4, true);
+      }
+      if (s.faza === 'vtoroe' || s.faza === 'derzhim') {
+        var dol2 = s.faza === 'vtoroe' ? C.ease(Math.min(1, s.f / DLIT.vtoroe)) : 1;
+        luch(ctx, z[1].E[0], z[1].E[1], z[1].lam, D * dol2, CM, 2);
+        ctx.strokeStyle = CZ; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(X(z[1].E[0]), Y(z[1].E[1]), 8, 0, DVA_PI); ctx.stroke();
+        C.label(ctx, X(z[1].E[0]) + 12, Y(z[1].E[1]) - 10, '2', 17, CZ, 'left');
+      }
+      if (s.faza === 'derzhim') {
+        var P = zasechka(z[0], z[1], 0);
+        C.glow(ctx, X(P.x), Y(P.y), 22, '229,112,79', .6);
+        tochka(ctx, X(P.x), Y(P.y), 6, CM);
+        C.label(ctx, X(P.x) + 12, Y(P.y) + 22, 'Марс', 17, CM, 'left');
+      }
+    }
+
+    /* Солнце и Земля */
+    C.glow(ctx, X(0), Y(0), 26, '255,200,87', .55);
+    tochka(ctx, X(0), Y(0), 7, CS);
+    C.label(ctx, X(0) + 12, Y(0) + 24, 'Солнце', 17, mut, 'left');
+    var Ez = polozhenie(ZEMLYA, s.rezhim === 'zasechki' ? s.t : 0);
+    if (s.rezhim === 'zasechki') {
+      tochka(ctx, X(Ez[0]), Y(Ez[1]), 6, CZ);
+      C.label(ctx, X(Ez[0]) - 12, Y(Ez[1]) + 22, 'Земля', 17, CZ, 'right');
+      C.label(ctx, 14, 26, 'сутки ' + num(s.t, 0), 17, 'rgb(' + ink + ')', 'left');
+    }
+    ctx.restore();
+  }
+
+  function risovatNebo(ctx, tone) {
+    var ink = tone.ink, muted = tone.muted, mut = 'rgb(' + muted + ')', i;
+    var L = function (lam) { return RX0 + lam / DVA_PI * (RX1 - RX0); };
+    var B = function (b) { return NEBO_Y - b / (NEBO_B * GRAD) * NEBO_H; };
+    C.label(ctx, RX0, 22, 'небо с Земли: долгота и широта среди звёзд', 17, mut, 'left');
+    ctx.fillStyle = 'rgba(' + ink + ',.04)';
+    ctx.fillRect(RX0, NEBO_Y - NEBO_H, RX1 - RX0, 2 * NEBO_H);
+    ctx.strokeStyle = 'rgba(' + muted + ',.35)'; ctx.lineWidth = 1;
+    ctx.strokeRect(RX0, NEBO_Y - NEBO_H, RX1 - RX0, 2 * NEBO_H);
+    ctx.beginPath(); ctx.moveTo(RX0, NEBO_Y); ctx.lineTo(RX1, NEBO_Y); ctx.stroke();
+    for (i = 0; i <= 12; i++) {
+      var x = RX0 + i / 12 * (RX1 - RX0);
+      ctx.beginPath(); ctx.moveTo(x, NEBO_Y + NEBO_H); ctx.lineTo(x, NEBO_Y + NEBO_H + (i % 3 ? 4 : 8)); ctx.stroke();
+      if (i % 3 === 0) C.label(ctx, x, NEBO_Y + NEBO_H + 26, (i * 30) + '°', 17, mut, i === 0 ? 'left' : i === 12 ? 'right' : 'center');
+    }
+    C.label(ctx, RX1 - 4, NEBO_Y - NEBO_H + 20, '+8°', 17, mut, 'right');
+
+    /* След Марса за последние 900 суток. Противостояния в этой таблице
+       отстоят друг от друга на 764–806 сут, петля длится 60–81 сут, и
+       900 суток хватает, чтобы целая петля была на небе в любой момент,
+       в том числе после «Все пары». Марс за это время обходит небо больше
+       чем на круг, поэтому старая часть следа бледнее. */
+    var t = s.t, SLED = 900, KUSKI = 6, pred = null, px0 = 0, py0 = 0;
+    ctx.lineWidth = 1.6;
+    for (var kus = 0; kus < KUSKI; kus++) {
+      ctx.strokeStyle = 'rgba(229,112,79,' + (0.12 + 0.5 * (kus + 1) / KUSKI).toFixed(3) + ')';
+      ctx.beginPath();
+      if (pred != null) ctx.moveTo(px0, py0);
+      var ot = t - SLED + SLED * kus / KUSKI, doo = t - SLED + SLED * (kus + 1) / KUSKI;
+      for (var tt = ot; tt <= doo + 1e-9; tt += 3) {
+        var o = nablyudenie(tt), px = L(o.lam), py = B(o.bet);
+        if (pred == null || Math.abs(o.lam - pred) > Math.PI) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        pred = o.lam; px0 = px; py0 = py;
+      }
+      ctx.stroke();
+    }
+    var on = nablyudenie(t);
+    C.glow(ctx, L(on.lsun), NEBO_Y, 18, '255,200,87', .5);
+    tochka(ctx, L(on.lsun), NEBO_Y, 6, CS);
+    tochka(ctx, L(on.lam), B(on.bet), 5, CM);
+
+    /* записанные в таблицу направления текущей пары */
+    if (s.faza !== 'vse') {
+      var z = s.zap[s.gotovo];
+      var pokaz = [true, s.faza === 'vtoroe' || s.faza === 'derzhim'];
+      z.forEach(function (zz, k) {
+        if (!pokaz[k]) return;
+        ctx.strokeStyle = CM; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.arc(L(zz.lam), B(zz.bet), 9, 0, DVA_PI); ctx.stroke();
+        C.label(ctx, L(zz.lam) + (k ? 13 : -13), B(zz.bet) + 6, String(k + 1), 17, CM, k ? 'left' : 'right');
+      });
+    }
+  }
+
+  function risovatTablicu(ctx, tone) {
+    var ink = 'rgb(' + tone.ink + ')', mut = 'rgb(' + tone.muted + ')';
+    var y0 = 172, dy = 24, drob = s.tochnost === 'tochno';
+    C.label(ctx, RX0, y0, 'сутки', 17, mut, 'left');
+    C.label(ctx, 690, y0, 'Солнце', 17, mut, 'right');
+    C.label(ctx, 850, y0, 'Марс: долгота', 17, mut, 'right');
+    C.label(ctx, RX1, y0, 'широта', 17, mut, 'right');
+    var k = s.faza === 'vse' ? s.pary.length - 1 : s.gotovo;
+    var z = s.zap[k], n = s.faza === 'vse' || s.faza === 'vtoroe' || s.faza === 'derzhim' ? 2 : 1;
+    ctx.font = '17px ' + MONO;
+    for (var i = 0; i < n; i++) {
+      var y = y0 + dy * (i + 1), zz = z[i];
+      ctx.fillStyle = ink; ctx.textAlign = 'left'; ctx.fillText(num(zz.t, 2), RX0, y);
+      ctx.textAlign = 'right'; ctx.fillText(gradMin(zz.lsun, false, drob), 690, y);
+      ctx.fillStyle = CM; ctx.fillText(gradMin(zz.lam, false, drob), 850, y);
+      ctx.fillStyle = ink; ctx.fillText(gradMin(zz.bet, true, drob), RX1, y);
+    }
+    ctx.textAlign = 'center';
+  }
+
+  function risovatPromahi(ctx, tone) {
+    var ink = tone.ink, muted = tone.muted, mut = 'rgb(' + muted + ')';
+    /* шкалы вынесены за рамку: промахи окружности ложатся как раз на
+       высоту подписей, внутри рамки они бы их закрыли */
+    var ym = (PR_Y0 + PR_Y1) / 2, k = (PR_Y1 - PR_Y0) / 2 / PR_M, i;
+    C.label(ctx, RX0, PR_Y0 - 10, 'промах с Земли по точкам орбиты, ′', 17, mut, 'left');
+    ctx.fillStyle = 'rgba(' + ink + ',.08)';
+    ctx.fillRect(PR_X0, ym - TOCHNOST_BRAGE * k, RX1 - PR_X0, 2 * TOCHNOST_BRAGE * k);
+    ctx.strokeStyle = 'rgba(' + muted + ',.35)'; ctx.lineWidth = 1;
+    ctx.strokeRect(PR_X0, PR_Y0, RX1 - PR_X0, PR_Y1 - PR_Y0);
+    ctx.beginPath(); ctx.moveTo(PR_X0, ym); ctx.lineTo(RX1, ym); ctx.stroke();
+    for (i = 1; i < 4; i++) {
+      var xt = PR_X0 + i / 4 * (RX1 - PR_X0);
+      ctx.beginPath(); ctx.moveTo(xt, PR_Y1); ctx.lineTo(xt, PR_Y1 + 5); ctx.stroke();
+    }
+    C.label(ctx, PR_X0 - 6, PR_Y0 + 12, '+12′', 17, mut, 'right');
+    C.label(ctx, PR_X0 - 6, ym + 6, '±2′', 17, mut, 'right');
+    C.label(ctx, PR_X0 - 6, PR_Y1, '−12′', 17, mut, 'right');
+    C.label(ctx, PR_X0, PR_Y1 + 22, '0°', 17, mut, 'left');
+    C.label(ctx, (PR_X0 + RX1) / 2, PR_Y1 + 22, 'долгота точки орбиты', 17, mut);
+    C.label(ctx, RX1, PR_Y1 + 22, '360°', 17, mut, 'right');
+    var raz = s.raz;
+    if (!raz || (!s.krug && !s.ellips)) {
+      C.label(ctx, (PR_X0 + RX1) / 2, PR_Y1 - 14, 'подгоните кривую: здесь появятся промахи', 17, mut);
+      return;
+    }
+    function ryad(sp, cvet) {
+      sp.forEach(function (q) {
+        var x = PR_X0 + q.lon / 360 * (RX1 - PR_X0), y = ym - C.clamp(q.d, -PR_M, PR_M) * k;
+        tochka(ctx, x, y, 4, cvet);
+      });
+    }
+    if (s.krug) ryad(raz.promahK.spisok, CK);
+    if (s.ellips) ryad(raz.promahE.spisok, CE);
+  }
+
+  function risovatZasechki(ctx, tone) {
+    risovatPlosk(ctx, tone);
+    risovatNebo(ctx, tone);
+    risovatTablicu(ctx, tone);
+    risovatPromahi(ctx, tone);
+    var raz = s.raz, mut = 'rgb(' + tone.muted + ')';
+    C.readout(ctx, 580, POK_Y, 'ТОЧЕК', String(s.tochki.length), CM);
+    C.readout(ctx, 720, POK_Y, 'ОКРУЖНОСТЬ, ′', raz && s.krug ? num(raz.promahK.max, 1) : '—', CK);
+    C.readout(ctx, 845, POK_Y, 'ЭЛЛИПС, ′', raz && s.ellips ? num(raz.promahE.max, s.tochnost === 'tochno' ? 2 : 1) : '—', CE);
+    C.readout(ctx, 990, POK_Y, 'ЭКСЦЕНТРИСИТЕТ', raz && s.ellips ? num(raz.ell.e, 4) : '—', raz && s.ellips ? CE : mut);
+  }
+
+  function risovatPloshchadi(ctx, tone) {
+    risovatPlosk(ctx, tone);
+    var raz = s.raz, mut = 'rgb(' + tone.muted + ')', ink = tone.ink;
+    if (!raz) return;
+    var sk = raz.sektory, n = sk.length, w = (RX1 - RX0) / n, tek = Math.floor(s.sweep);
+    function stolbiki(y0, y1, key, maks, podpis) {
+      C.label(ctx, RX0, y0 - 12, podpis, 17, mut, 'left');
+      ctx.strokeStyle = 'rgba(' + tone.muted + ',.45)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(RX0, y1); ctx.lineTo(RX1, y1); ctx.stroke();
+      sk.forEach(function (x, i) {
+        var h = x[key] / maks * (y1 - y0);
+        ctx.fillStyle = i === tek ? 'rgba(' + ink + ',.75)' : (i % 2 ? 'rgba(77,182,198,.7)' : 'rgba(166,195,90,.7)');
+        ctx.fillRect(RX0 + i * w + 2, y1 - h, w - 4, h);
+      });
+    }
+    stolbiki(40, 150, 'skorU', 0.7, 'угол за сутки, от 0 до 0,7°');
+    stolbiki(200, 310, 'skorS', raz.razbrosS.max * 1.2, 'площадь за сутки');
+    C.readout(ctx, 700, 350, 'РАЗБРОС УГЛОВ, %', num(raz.razbrosU.spread * 100, 1), 'rgb(' + ink + ')');
+    C.readout(ctx, 990, 350, 'РАЗБРОС ПЛОЩАДЕЙ, %', num(raz.razbrosS.spread * 100, s.tochnost === 'tochno' ? 4 : 2), CE);
+    C.label(ctx, RX0, 440, 'за ' + num(sk[0].dt, 2) + ' сут заметается в среднем ' +
+      num(raz.razbrosS.sr * sk[0].dt, 4) + ' а.е.²', 17, mut, 'left');
+  }
+
+  /* Узкий кадр: свой масштаб поверх того, что поставил paint (канва уже
+     очищена). Берётся, только если он заметно крупнее широкого. */
+  function uzkijKadr(ctx) {
+    var rc = ctx.canvas.getBoundingClientRect();
+    if (!rc.width || !rc.height) return false;
+    var sShir = Math.min(rc.width / W, rc.height / HGT), sUz = Math.min(rc.width / UZ_W, rc.height / UZ_H);
+    if (sUz < sShir * 1.15) return false;
+    var dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr * sUz, 0, 0, dpr * sUz, (rc.width - UZ_W * sUz) / 2 * dpr, (rc.height - UZ_H * sUz) / 2 * dpr);
+    return true;
+  }
+
+  function izmereno(r) {
+    return r.method === 'vnutr' ? num(r.measured, 2) + '°' : r.method === 'vnesh' ? num(r.measured, 2) + ' сут' : '—';
+  }
+
+  /* Два чертежа по тем же числам: Венера в наибольшей элонгации (угол при
+     планете прямой, угол при Солнце arccos a) и Марс в квадратуре (угол при
+     Земле прямой, угол при Солнце arccos 1/a). Земля внизу. */
+  function chertezh(ctx, tone, cx, cy, R, rp, ugolS, bukva, uZemli, kegl) {
+    var k = kegl / 17;
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.6)'; ctx.lineWidth = k;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, DVA_PI); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, R * rp, 0, DVA_PI); ctx.stroke();
+    var Ex = cx, Ey = cy + R;
+    var Px = cx + R * rp * Math.sin(ugolS), Py = cy + R * rp * Math.cos(ugolS);
+    ctx.strokeStyle = 'rgb(' + tone.ink + ')'; ctx.lineWidth = 1.4 * k; ctx.beginPath();
+    ctx.moveTo(cx, cy); ctx.lineTo(Ex, Ey); ctx.lineTo(Px, Py); ctx.closePath(); ctx.stroke();
+    tochka(ctx, cx, cy, 5 * k, CS); tochka(ctx, Ex, Ey, 5 * k, CZ); tochka(ctx, Px, Py, 5 * k, CM);
+    /* ε внутри угла при Земле, выше точки: у самой точки буква ложилась на луч к Венере */
+    if (uZemli) C.label(ctx, Ex + 4 * k, Ey - 20 * k, bukva, kegl, CE, 'left');
+    else C.label(ctx, cx + 8 * k, cy + 22 * k, bukva, kegl, CE, 'left');
+  }
+
+  /* Узкий кадр 500×560: таблица без графика, под ней оба треугольника. */
+  function risovatTretijUzko(ctx, tone) {
+    var ink = 'rgb(' + tone.ink + ')', mut = 'rgb(' + tone.muted + ')', K = 18;
+    var kol = [14, 238, 320, 404, 488];
+    C.label(ctx, kol[0], 28, 'планета', K, mut, 'left');
+    C.label(ctx, kol[1], 28, 'с Земли', K, mut, 'right');
+    C.label(ctx, kol[2], 28, 'a, а.е.', K, mut, 'right');
+    C.label(ctx, kol[3], 28, 'T, лет', K, mut, 'right');
+    C.label(ctx, kol[4], 28, 'a³/T²', K, mut, 'right');
+    C.label(ctx, kol[1], 52, 'ε или t', K, mut, 'right');
+    TABLICA3.forEach(function (r, k) {
+      var y = 88 + 32 * k;
+      C.label(ctx, kol[0], y, r.planet, K, ink, 'left');
+      ctx.font = K + 'px ' + MONO; ctx.textAlign = 'right'; ctx.fillStyle = ink;
+      ctx.fillText(izmereno(r), kol[1], y);
+      ctx.fillText(num(r.a, 3), kol[2], y);
+      ctx.fillText(num(r.T, 3), kol[3], y);
+      ctx.fillStyle = CE; ctx.fillText(num(r.ratio, 3), kol[4], y);
+    });
+    ctx.textAlign = 'center';
+    C.label(ctx, UZ_W / 2, 296, 'треугольники на круговых орбитах', K, mut);
+    chertezh(ctx, tone, 125, 400, 80, 0.723, Math.acos(0.723), 'ε', true, K);
+    chertezh(ctx, tone, 375, 402, 50, 1.524, Math.acos(1 / 1.524), 'θ', false, K);
+    C.label(ctx, 125, 540, 'Венера: a = sin ε', K, mut);
+    C.label(ctx, 375, 540, 'Марс: cos θ = 1/a', K, mut);
+  }
+
+  function risovatTretij(ctx, tone) {
+    if (uzkijKadr(ctx)) { risovatTretijUzko(ctx, tone); return; }
+    var ink = 'rgb(' + tone.ink + ')', mut = 'rgb(' + tone.muted + ')', i;
+    /* график: lg a от −0,5 до 1,1, lg T от −0,8 до 1,6 */
+    var gx0 = 70, gx1 = 450, gy0 = 30, gy1 = 400;
+    var ax0 = -0.5, ax1 = 1.1, ay0 = -0.8, ay1 = 1.6;
+    function GX(a) { return gx0 + (Math.log10(a) - ax0) / (ax1 - ax0) * (gx1 - gx0); }
+    function GY(T) { return gy1 - (Math.log10(T) - ay0) / (ay1 - ay0) * (gy1 - gy0); }
+    ctx.strokeStyle = 'rgba(' + tone.muted + ',.45)'; ctx.lineWidth = 1;
+    ctx.strokeRect(gx0, gy0, gx1 - gx0, gy1 - gy0);
+    [0.5, 1, 2, 5, 10].forEach(function (a) {
+      ctx.beginPath(); ctx.moveTo(GX(a), gy1); ctx.lineTo(GX(a), gy1 + 6); ctx.stroke();
+      C.label(ctx, GX(a), gy1 + 26, num(a, a < 1 ? 1 : 0), 17, mut);
+    });
+    [0.2, 1, 5, 30].forEach(function (T) {
+      ctx.beginPath(); ctx.moveTo(gx0 - 6, GY(T)); ctx.lineTo(gx0, GY(T)); ctx.stroke();
+      C.label(ctx, gx0 - 10, GY(T) + 6, num(T, T < 1 ? 1 : 0), 17, mut, 'right');
+    });
+    C.label(ctx, gx1, gy1 + 50, 'a, а.е.', 17, mut, 'right');
+    C.label(ctx, gx0 + 8, gy0 + 22, 'T, лет', 17, mut, 'left');
+    /* прямая T = a^(3/2) */
+    ctx.strokeStyle = 'rgba(166,195,90,.8)'; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.moveTo(GX(0.33), GY(Math.pow(0.33, 1.5))); ctx.lineTo(GX(11.5), GY(Math.pow(11.5, 1.5))); ctx.stroke();
+    C.label(ctx, GX(0.6) - 8, GY(Math.pow(0.6, 1.5)) - 18, 'T² = a³', 17, CE, 'right');
+    TABLICA3.forEach(function (r) {
+      C.glow(ctx, GX(r.a), GY(r.T), 14, '229,112,79', .4);
+      tochka(ctx, GX(r.a), GY(r.T), 5, CM);
+      var sleva = r.planet === 'Сатурн';
+      C.label(ctx, GX(r.a) + (sleva ? -12 : 12), GY(r.T) + 6, r.planet, 17, ink, sleva ? 'right' : 'left');
+    });
+
+    /* таблица */
+    var kol = [RX0, 690, 780, 860, 925, RX1];
+    C.label(ctx, kol[0], 30, 'планета', 17, mut, 'left');
+    C.label(ctx, kol[1], 30, 'с Земли', 17, mut, 'right');
+    C.label(ctx, kol[2], 30, 'T син', 17, mut, 'right');
+    C.label(ctx, kol[3], 30, 'a', 17, mut, 'right');
+    C.label(ctx, kol[4], 30, 'T', 17, mut, 'right');
+    C.label(ctx, kol[5], 30, 'a³/T²', 17, mut, 'right');
+    C.label(ctx, kol[1], 52, 'ε или t до квадратуры', 17, mut, 'right');
+    C.label(ctx, kol[2], 52, 'сут', 17, mut, 'right');
+    C.label(ctx, kol[3], 52, 'а.е.', 17, mut, 'right');
+    C.label(ctx, kol[4], 52, 'лет', 17, mut, 'right');
+    TABLICA3.forEach(function (r, k) {
+      var y = 86 + 30 * k;
+      C.label(ctx, kol[0], y, r.planet, 17, ink, 'left');
+      ctx.font = '17px ' + MONO; ctx.textAlign = 'right'; ctx.fillStyle = ink;
+      ctx.fillText(izmereno(r), kol[1], y);
+      ctx.fillText(r.synodic ? num(r.synodic, 2) : '—', kol[2], y);
+      ctx.fillText(num(r.a, 3), kol[3], y);
+      ctx.fillText(num(r.T, 3), kol[4], y);
+      ctx.fillStyle = CE; ctx.fillText(num(r.ratio, 3), kol[5], y);
+    });
+    ctx.textAlign = 'center';
+
+    chertezh(ctx, tone, 610, 340, 58, 0.723, Math.acos(0.723), 'ε', true, 17);
+    chertezh(ctx, tone, 870, 345, 36, 1.524, Math.acos(1 / 1.524), 'θ', false, 17);
+    C.label(ctx, 610, 448, 'Венера: a = sin ε', 17, mut);
+    C.label(ctx, 870, 448, 'Марс: cos θ = 1/a', 17, mut);
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx);
+    if (s.rezhim === 'zasechki') risovatZasechki(ctx, tone);
+    else if (s.rezhim === 'ploshchadi') risovatPloshchadi(ctx, tone);
+    else risovatTretij(ctx, tone);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+  window.__demoProgon = progon;
+
+  /* ── управление ── */
+
+  function rezhim(r) {
+    s.rezhim = r;
+    if (r === 'ploshchadi') {
+      if (s.faza !== 'vse') vsePary();
+      s.sweep = 0; s.idet = true;
+    }
+    obnovit();
+  }
+  function tochnost(t) {
+    s.tochnost = t; s.zap = tablica(s.pary, t); pereschitat(); obnovit();
+  }
+  function vse() { vsePary(); obnovit(); }
+  function krug() { s.krug = !s.krug; obnovit(); }
+  function ellips() { s.ellips = !s.ellips; obnovit(); }
+  function pauza() { s.idet = !s.idet; obnovit(); }
+  function sbros() {
+    if (s.rezhim === 'zasechki') {
+      s.gotovo = 0; s.faza = 'pervoe'; s.f = 0; s.t = s.pary[0].t1;
+      s.krug = false; s.ellips = false; pereschitat();
+    } else s.sweep = 0;
+    s.idet = true; obnovit();
+  }
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var raz = s.raz, n = s.tochki.length, N = s.pary.length;
+    if (s.rezhim === 'tretij')
+      return 'Орбиты здесь круговые, с нынешними средними расстояниями, и углы с датами посчитаны по ним. ' +
+        'У Меркурия и Венеры в наибольшей элонгации ε угол при планете прямой: ' + A('a = sin ε') + '. ' +
+        'От противостояния внешней планеты до квадратуры Земля обгоняет её на θ = 360°·t/T<sub>син</sub>, и ' + A('cos θ = 1/a') + '. ' +
+        'Звёздный период из синодического: 1/T = 1/T<sub>З</sub> ± 1/T<sub>син</sub>. Отношение a³/T² от ' +
+        A(num(Math.min.apply(null, TABLICA3.map(function (r) { return r.ratio; })), 3)) +
+        ' до ' + A(num(Math.max.apply(null, TABLICA3.map(function (r) { return r.ratio; })), 3)) + ': это третий закон. ' +
+        'На настоящих орбитах отдельные квадратуры Марса дают от 1,4 до ' + ed('2,1', 'а.е.');
+    if (s.rezhim === 'ploshchadi') {
+      if (!raz) return '';
+      var sk = raz.sektory, dt = sk[0].dt;
+      var uMax = Math.max.apply(null, sk.map(function (x) { return x.dth; })) / GRAD;
+      var uMin = Math.min.apply(null, sk.map(function (x) { return x.dth; })) / GRAD;
+      return 'Время каждой точки известно по часам Марса, с точностью до целого числа его периодов, и соседние точки разделены ' +
+        A(ed(num(dt, 2), 'сут')) + '. За это время радиус-вектор у перигелия поворачивается на ' + A(num(uMax, 1) + '°') +
+        ', у афелия на ' + A(num(uMin, 1) + '°') + ', а площадь заметает одну и ту же: разброс площадей ' +
+        A(ed(num(raz.razbrosS.spread * 100, s.tochnost === 'tochno' ? 4 : 2), '%')) + ', разброс углов ' + A(ed(num(raz.razbrosU.spread * 100, 0), '%')) + '.';
+    }
+    if (s.faza === 'vse' || (s.krug || s.ellips)) {
+      var tch = s.tochnost === 'tochno' ? 'точной таблице' : 'точности таблицы 2′';
+      var nT = n + ' ' + C.plural(n, 'точке', 'точкам', 'точкам');
+      var vyhodit = raz && raz.promahK.max > TOCHNOST_BRAGE;
+      if (raz && s.krug && s.ellips)
+        return 'По ' + nT + ' окружность промахивается до ' + A(num(raz.promahK.max, 1) + '′') + ', эллипс с Солнцем в фокусе до ' +
+          A(num(raz.promahE.max, s.tochnost === 'tochno' ? 2 : 1) + '′') + ' при ' + tch + '. ' +
+          (vyhodit ? 'Даже окружность, подобранная так, чтобы её наибольший промах был как можно меньше, не укладывается в 2′. '
+                   : 'Пока точек мало, в 2′ укладывается и окружность. ') +
+          'На рисунке кривые сливаются, различает их только график промахов. ' +
+          'У Кеплера окружность с эквантом разошлась с наблюдениями Браге на 8′, но модель и проверка у него были другие.';
+      if (raz && s.ellips)
+        return 'Эллипс с Солнцем в фокусе проходит через ' + n + ' ' + C.plural(n, 'точку', 'точки', 'точек') + ' с промахом до ' + A(num(raz.promahE.max, s.tochnost === 'tochno' ? 2 : 1) + '′') +
+          ' при ' + tch + '. Эксцентриситет ' + A(num(raz.ell.e, 4)) + ', большая полуось ' + A(ed(num(raz.ell.a, 4), 'а.е.')) +
+          ', перигелий на долготе ' + num(raz.ell.perigelij, 1) + '°, плоскость орбиты наклонена к эклиптике на ' + num(raz.naklon, 2) + '°.';
+      if (raz && s.krug)
+        return 'Центр и радиус окружности подобраны так, чтобы её наибольший промах с Земли был как можно меньше, и по ' + nT + ' она ' +
+          (vyhodit ? 'всё равно ' : '') + 'промахивается до ' + A(num(raz.promahK.max, 1) + '′') + ' при ' + tch +
+          '. Центр сдвинут от Солнца на ' + ed(num(raz.krug.sdvig, 3), 'а.е.') + ', радиус ' + ed(num(raz.krug.R, 4), 'а.е.');
+      if (s.krug || s.ellips)
+        return 'Для подгонки нужно хотя бы пять точек, а их пока ' + n + '.';
+      return 'Все ' + N + ' ' + C.plural(N, 'точка', 'точки', 'точек') + ' орбиты на месте. Подгоните к ним окружность и эллипс: график справа покажет, на сколько каждая кривая ' +
+        'промахивается мимо таблицы, если смотреть с Земли.';
+    }
+    if (s.faza === 'pervoe')
+      return 'С Земли видно только направление на Марс. В таблицу записывают время, долготу Солнца, долготу и широту Марса среди звёзд; ' +
+        'расстояния в ней нет. Из того места, где стоит Земля, проводим луч по записанной долготе: Марс где-то на нём.';
+    if (s.faza === 'perelet')
+      return 'Ждём ' + A(ed('686,98', 'сут')) + ', звёздный период Марса: он вернётся в ту же точку орбиты. Земля за это время обходит Солнце ' +
+        'почти дважды и приходит в другое место. Период Марса получен из промежутка между противостояниями, в среднем за много лет ' + ed('779,94', 'сут') + ': ' +
+        '1/T = 1/365,256 − 1/779,94. За двадцать лет, которые покрывает таблица, промежутки от 764 до ' + ed('806', 'сут') + ', потому что орбита Марса вытянута.';
+    if (s.faza === 'vtoroe')
+      return 'Марс вернулся в ту же точку своей орбиты, а Земля пришла в другое место. Проводим из него второй луч по новой записанной долготе. ' +
+        'Там, где он пересечёт первый, Марс был оба раза.';
+    var P = zasechka(s.zap[s.gotovo][0], s.zap[s.gotovo][1], 0);
+    return 'Лучи пересеклись там, где Марс был оба раза. Засечка дала точку орбиты и расстояние до Солнца, ' +
+      A(ed(num(Math.hypot(P.x, P.y, P.z), 4), 'а.е.')) + ' Точек ' + s.tochki.length + ' из ' + N + '.';
+  }
+
+  var z3 = s.rezhim === 'tretij', zas = s.rezhim === 'zasechki';
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Режим:">
+          <${C.Btn} active=${zas} onClick=${function () { rezhim('zasechki'); }}>засечки<//>
+          <${C.Btn} active=${s.rezhim === 'ploshchadi'} onClick=${function () { rezhim('ploshchadi'); }}>площади<//>
+          <${C.Btn} active=${z3} onClick=${function () { rezhim('tretij'); }}>третий закон<//>
+        <//>
+        ${!z3 ? html`
+          <${C.Group} label="Таблица:">
+            <${C.Btn} active=${s.tochnost === 'tochno'} onClick=${function () { tochnost('tochno'); }}>точно<//>
+            <${C.Btn} active=${s.tochnost === 'brage'} onClick=${function () { tochnost('brage'); }}>до 2′<//>
+            <${C.Btn} active=${s.tochnost === 'razbros'} onClick=${function () { tochnost('razbros'); }}>2′ и разброс<//>
+          <//>` : null}
+        ${zas ? html`
+          <${C.Group} label="Подогнать:">
+            <${C.Btn} active=${s.krug} disabled=${s.tochki.length < 5} onClick=${krug}>окружность<//>
+            <${C.Btn} active=${s.ellips} disabled=${s.tochki.length < 5} onClick=${ellips}>эллипс<//>
+          <//>` : null}
+        ${!z3 ? html`
+          <${C.Group}>
+            ${zas ? html`<${C.Btn} action=${true} disabled=${s.faza === 'vse'} onClick=${vse}>Все пары<//>` : null}
+            <${C.Btn} onClick=${pauza}>${s.idet ? 'Пауза' : 'Пуск'}<//>
+            <${C.Btn} onClick=${sbros}>Сброс<//>
+          <//>` : null}
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(OrbitaMarsa);
+</script>
+</body>
+</html>

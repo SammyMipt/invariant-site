@@ -1,0 +1,729 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Гантель на моторе</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-06/">&larr; Неделя 06</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/demo-3d.js"></script>
+<script src="../shared/analytics.js?demo=gantel-na-motore"></script>
+<script>
+'use strict';
+var C = window.DemoCore, D = window.Demo3D, html = C.html;
+var useState = React.useState, useRef = React.useRef, useEffect = React.useEffect;
+
+/* ══════════════════ физика ══════════════════
+
+   Блоки главы `ot-tochki-k-telu` (вопрос залу: куда смотрит момент импульса
+   наклонённой гантели) и `primer-gantel` (ответ с числами и подшипники);
+   бриф briefs/demki_nedelya06.md, № 1. С этой демки начинается лекция: при
+   90° момент импульса лежит на оси, как импульс точки на её скорости, потом
+   лектор наклоняет штангу.
+
+   УСТАНОВКА. Вертикальный вал (ось z) держат два подшипника, на 0,1 м выше и
+   ниже точки O, база b = 0,2 м. Через O на валу штанга под углом α к оси, на
+   её концах две точечные массы m = 0,5 кг на r = 0,2 м от O. Мотор крутит вал
+   с ω = 10 рад/с. Числа главы, ничего не подобрано.
+
+   ЧТО СЧИТАЕТСЯ НА ВАЛУ. Положения масс берутся из угла поворота вала φ:
+   r₁ = r·(sin α cos φ, sin α sin φ, cos α), r₂ = −r₁; скорости v = ω × r.
+   Момент импульса складывается по массам, L = Σ m r × v, и ниоткуда не
+   выписывается готовым. Момент сил, который нужен, чтобы L так вращался,
+   считается тремя независимыми путями и печатается рядом.
+     1. ΔL/Δt: разность L на соседних шагах модели, делённая на шаг. Шаг
+        1/4000 с, а не кадр 1/60 с: хорда вращающегося вектора короче дуги в
+        sin(x/2)/(x/2) раз, x = ωΔt, и кадр давал бы 1,998 вместо 2,000
+        (при 56,3° 1,844 против 1,846, третий знак расходился бы). На шаге
+        1/4000 с недобор 2,6·10⁻⁷. Разность относится к середине шага, и
+        направлением она отстаёт от ω × L на ωΔt/2 = 0,07°.
+     2. ω × L.
+     3. Силами. Ускорения масс a = ω × (ω × r) при постоянной ω; штанга
+        действует на массу силой ma − mg (g вниз). Вал со штангой лёгкие,
+        поэтому сумма внешних сил на них и сумма моментов относительно O
+        нулевые. Отсюда поперечная часть момента N = Σ r × (ma − mg) достаётся
+        подшипникам, z-часть мотору (ноль при постоянной ω), а сумма
+        поперечных сил подшипников равна Σ m a⊥, нулю, пока центр масс на
+        оси. Две реакции R₁ (верхний) и R₂ (нижний) решаются из этих двух
+        условий, и их момент относительно O, (b/2)ẑ × R₁ − (b/2)ẑ × R₂,
+        печатается третьим. Тяжесть момента относительно O не даёт: центр
+        масс в O. Вес, 2mg = 9,81 Н, держит упорный подшипник вдоль оси;
+        приложен на оси, момента не даёт и не рисуется.
+
+   ЧИСЛА (сверено python-расчётом независимо от этого файла: numpy, сумма
+   m r × (ω × r), центральная разность, силы и статика вала; что делает
+   скрипт и где лежит, в отчёте). При 45°: |L| = 0,2828, L_z = 0,2000,
+   L⊥ = 0,2000 кг·м²/с, угол между L и штангой 90°; момент
+   mr²ω² sin 2α = 2,000 Н·м всеми тремя путями; реакции по 10,00 Н,
+   в 2,04 раза больше веса массы (4,905 Н).
+   При 56,3° (угол старого рисунка): |L| = 0,3328, L_z = 0,2769, момент
+   1,846 Н·м, реакции по 9,232 Н. При 90° L = 0,400 кг·м²/с на оси, момента
+   и реакций нет. При 0° массы на оси, L = 0.
+
+   ОТПУСТИТЬ ВАЛ. Опоры, вал и мотор исчезают, скорости масс в этот миг
+   остаются прежними. Дальше интегрируется свободное движение двух точечных
+   масс на жёсткой штанге: единственная сила, натяжение штанги, действует
+   вдоль неё. Схема RATTLE (скоростной Верле со связью |r₁ − r₂| = 2r):
+   полтолчка натяжения такой величины, чтобы в конце шага длина штанги была
+   точно 2r (множитель находится из квадратного уравнения, без итераций),
+   сдвиг, полтолчка, снимающий скорость вдоль штанги. Толчки направлены
+   вдоль штанги, поэтому L схема сохраняет точно, до округления; при
+   постоянной длине штанги отсюда же точно сохраняется скорость масс, то
+   есть энергия. Ошибка одна, фазовая: за шаг штанга поворачивается на
+   arcsin(hΩ) вместо hΩ, частота завышена на (hΩ)²/6, 5·10⁻⁷ при 45°.
+   Моменты инерции точечных масс: вокруг любой оси через O поперёк штанги
+   I⊥ = 2mr² = 0,04 кг·м², вокруг самой штанги ноль. Поэтому угловая
+   скорость вдоль штанги ничего не двигает и смысла не имеет; та, что
+   двигает массы, Ω = (r₁ − r₂) × (v₁ − v₂)/|r₁ − r₂|², лежит по L, и
+   |Ω| = |L|/I⊥ = ω sin α = 7,071 рад/с при 45°. Энергия 1,000 Дж до и после
+   (mω²r² sin²α = L²/2I⊥). Демка проверяет это измерением: угол, на который
+   штанга повернулась вокруг L, набирается по шагам и делится на время.
+   Центр масс оставлен в O: тяжесть приложена к нему, момента относительно
+   него не даёт, и его падение вращения не меняет.
+
+   ПРОВЕРКА (04.10, hcheck, __demoTick и __demoProgon; подробно в отчёте
+   briefs/demki_nedelya06_gantel-na-motore_REPORT.md).
+     На валу, через ползунок и 30 кадров: при 45° |L| = 0,282843,
+     L_z = 0,200000, момент ω × L и парой 2,000000, ΔL/Δt 1,9999995
+     (недобор 2,6·10⁻⁷, как и должно), реакции по 10,0000 Н, угол L со
+     штангой 90°, K = 1,000 Дж; при 56,3° 0,332782, 0,276859, 1,846420 Н·м
+     и 9,2321 Н. При 90° момент не больше 5·10⁻¹³, это шум округления.
+     С формулами и python-расчётом всё сходится до 10⁻¹⁴ в долях. За
+     оборот L_z и |L| стоят до 1,1·10⁻¹⁶, R₁ = −R₂ точно.
+     Свободно: в миг отпускания L не прыгает (разность 0); за 10 с
+     |ΔL|/|L| и |ΔK|/K около 10⁻¹⁴, штанга перпендикулярна L до 5·10⁻¹⁷;
+     частота по набранному углу 7,0710715 против |L|/I⊥ = 7,0710678
+     (5,2·10⁻⁷, как предсказывает (hΩ)²/6). За 10 минут, 2,4 млн шагов,
+     L и K уходят на 3·10⁻¹⁴ и 4,5·10⁻¹⁴. Направление штанги через 10 с
+     расходится с точным поворотом вокруг L (python, solve_ivp) на
+     3,68·10⁻⁵, ровно на набег фазы N·arcsin(hΩ) − ΩT = 3,683·10⁻⁵;
+     за вычетом набега на 10⁻¹².
+     Отрицательный контроль, на временных копиях файла: база в реакциях
+     на 5 % больше настоящей даёт расхождение третьего пути с двумя
+     другими 4,8 %; RATTLE без второй половины даёт уход энергии 7,8·10⁻⁷
+     за 10 с вместо 5·10⁻¹⁴; скорости с ω на 0,1 % больше, чем поворот
+     вала, разводят первые два пути с третьим на 10⁻³. */
+
+var M = 0.5;                   /* масса каждой гири, кг */
+var R = 0.2;                   /* от O до массы, м */
+var OMEGA = 10;                /* угловая скорость мотора, рад/с */
+var BAZA = 0.2;                /* расстояние между подшипниками, м */
+var G = 9.81;
+var I_POPEREK = 2 * M * R * R; /* вокруг оси через O поперёк штанги, кг·м² */
+var H_SHAG = 1 / 4000;         /* шаг модели, с */
+var ZAMEDLENIE = 5;            /* «Медленно»: время идёт в пять раз медленнее */
+var UGOL_NACH = 90;            /* с совпадения начинается лекция */
+var PRESETY = [90, 45, 56.3];  /* 56,3° — угол старого рисунка главы */
+var EZ = [0, 0, 1];
+var RAD = Math.PI / 180, DVA_PI = 2 * Math.PI;
+
+/* Единичный вектор штанги к первой массе. На валу первая масса верхняя. */
+function napravlenie(alpha, phi) {
+  var s = Math.sin(alpha);
+  return [s * Math.cos(phi), s * Math.sin(phi), Math.cos(alpha)];
+}
+
+function momentImpulsa(q, v) {
+  return D.add(D.mul(D.cross(q[0], v[0]), M), D.mul(D.cross(q[1], v[1]), M));
+}
+
+/* Массы на валу: положения из угла φ, скорости ω × r. */
+function naVal(s) {
+  var e = napravlenie(s.alpha, s.phi), W = [0, 0, OMEGA];
+  s.q = [D.mul(e, R), D.mul(e, -R)];
+  s.v = [D.cross(W, s.q[0]), D.cross(W, s.q[1])];
+}
+
+/* После скачка (новый угол, вал вернули) предыдущего шага нет: он
+   восстанавливается той же кинематикой на H_SHAG раньше, и ΔL/Δt сразу
+   осмыслено, в том числе на паузе. */
+function proizvodnayaSnachala(s) {
+  var e = napravlenie(s.alpha, s.phi - OMEGA * H_SHAG), W = [0, 0, OMEGA];
+  var q = [D.mul(e, R), D.mul(e, -R)];
+  var Lp = momentImpulsa(q, [D.cross(W, q[0]), D.cross(W, q[1])]);
+  var L = momentImpulsa(s.q, s.v);
+  s.Mfd = D.mul(D.sub(L, Lp), 1 / H_SHAG);
+  s.Lprev = L;
+}
+
+function nachalo(ugol) {
+  var s = { ugol: ugol, alpha: ugol * RAD, phi: 0, t: 0, otpushchen: false,
+            q: null, v: null, Lprev: null, Mfd: [0, 0, 0],
+            tOtp: 0, L0: null, K0: 0, nabeg: 0 };
+  naVal(s);
+  proizvodnayaSnachala(s);
+  return s;
+}
+
+function energiya(v) { return 0.5 * M * (D.dot(v[0], v[0]) + D.dot(v[1], v[1])); }
+
+function otpustitSostoyanie(s) {
+  if (s.otpushchen) return;
+  s.otpushchen = true;
+  s.tOtp = s.t; s.nabeg = 0;
+  s.L0 = momentImpulsa(s.q, s.v);
+  s.K0 = energiya(s.v);
+}
+
+function vernutSostoyanie(s) {
+  s.otpushchen = false;
+  naVal(s);
+  proizvodnayaSnachala(s);
+}
+
+/* Шаг RATTLE для двух масс на жёсткой штанге длины 2r. Обозначения:
+   d — штанга от второй массы к первой, w — разность скоростей. */
+function rattle(s, h) {
+  var q1 = s.q[0], q2 = s.q[1], v1 = s.v[0], v2 = s.v[1];
+  var d0 = D.sub(q1, q2), w = D.sub(v1, v2), dd = 4 * R * R;
+  /* Первая половина. Толчок натяжения вдоль d0 меняет v1 на −k·d0, v2 на
+     +k·d0; новая штанга выходит c·d0 + h·w, c = 1 − 2hk. Длину 2r даёт
+     корень квадратного уравнения |c·d0 + h·w|² = 4r², ближний к единице. */
+  var a = D.dot(d0, d0), b = h * D.dot(d0, w), cc = h * h * D.dot(w, w) - dd;
+  var c = (-b + Math.sqrt(b * b - a * cc)) / a;
+  var k = (1 - c) / (2 * h);
+  var v1p = D.sub(v1, D.mul(d0, k)), v2p = D.add(v2, D.mul(d0, k));
+  var q1n = D.add(q1, D.mul(v1p, h)), q2n = D.add(q2, D.mul(v2p, h));
+  /* Вторая половина: толчок вдоль новой штанги снимает скорость вдоль неё. */
+  var dn = D.sub(q1n, q2n), wp = D.sub(v1p, v2p);
+  var mu = D.dot(wp, dn) / (2 * D.dot(dn, dn));
+  s.v = [D.sub(v1p, D.mul(dn, mu)), D.add(v2p, D.mul(dn, mu))];
+  s.q = [q1n, q2n];
+  /* Поворот штанги вокруг L за шаг: из него мерится частота вращения. */
+  var Lh = D.unit(s.L0);
+  s.nabeg += Math.atan2(D.dot(D.cross(d0, dn), Lh), D.dot(d0, dn));
+  s.t += h;
+}
+
+function shag(s, h) {
+  if (!s.otpushchen) {
+    s.phi += OMEGA * h; s.t += h;
+    if (s.phi > DVA_PI) s.phi -= DVA_PI;
+    naVal(s);
+  } else rattle(s, h);
+  var L = momentImpulsa(s.q, s.v);
+  s.Mfd = D.mul(D.sub(L, s.Lprev), 1 / h);
+  s.Lprev = L;
+}
+
+/* Реакции подшипников из второго закона для масс и равновесия лёгкого вала. */
+function reakcii(q) {
+  var W = [0, 0, OMEGA], gv = [0, 0, -G];
+  var N = [0, 0, 0], S = [0, 0, 0];
+  for (var i = 0; i < 2; i++) {
+    var a = D.cross(W, D.cross(W, q[i]));            /* ускорение массы, ω постоянна */
+    var F = D.sub(D.mul(a, M), D.mul(gv, M));       /* сила штанги на массу: ma − mg */
+    N = D.add(N, D.cross(q[i], F));                 /* момент, который вал передаёт массам */
+    S = D.add(S, D.mul(a, M));
+  }
+  var Np = [N[0], N[1], 0], Sp = [S[0], S[1], 0];
+  var raz = D.mul(D.cross(Np, EZ), 2 / BAZA);        /* R₁ − R₂ из моментов */
+  var R1 = D.mul(D.add(Sp, raz), 0.5), R2 = D.mul(D.sub(Sp, raz), 0.5);
+  var para = D.add(D.cross([0, 0, BAZA / 2], R1), D.cross([0, 0, -BAZA / 2], R2));
+  return { R1: R1, R2: R2, para: para, Mmotor: N[2], osevaya: S[2] + 2 * M * G };
+}
+
+/* Всё, что демка утверждает, снимается с состояния здесь, одним местом. */
+function izmerit(s) {
+  var q = s.q, v = s.v;
+  var L = momentImpulsa(q, v), Lmod = D.len(L);
+  var d = D.sub(q[0], q[1]), w = D.sub(v[0], v[1]);
+  var om = s.otpushchen ? D.mul(D.cross(d, w), 1 / D.dot(d, d)) : [0, 0, OMEGA];
+  var Mf = D.cross(om, L);
+  var r = s.otpushchen
+    ? { R1: [0, 0, 0], R2: [0, 0, 0], para: [0, 0, 0], Mmotor: 0, osevaya: 0 }
+    : reakcii(q);
+  var K = energiya(v);
+  var e = D.unit(d);
+  var tSv = s.t - s.tOtp;
+  return {
+    L: L, Lmod: Lmod, Lperp: Math.hypot(L[0], L[1]), om: om, omMod: D.len(om),
+    Mf: Mf, Mfd: s.Mfd, r: r, K: K, e: e,
+    ugolLsh: Lmod > 1e-12 ? D.angle(L, e) / RAD : null,
+    ugolLos: Lmod > 1e-12 ? D.angle(L, EZ) / RAD : null,
+    omSwept: s.otpushchen && tSv > 1e-9 ? s.nabeg / tSv : null,
+    Ldrift: s.otpushchen && s.L0 && D.len(s.L0) > 0 ? D.len(D.sub(L, s.L0)) / D.len(s.L0) : null,
+    Kdrift: s.otpushchen && s.K0 > 0 ? Math.abs(K - s.K0) / s.K0 : null,
+    dlinaOshibka: D.len(d) - 2 * R,
+    shtangaL: Lmod > 1e-12 ? D.dot(e, L) / Lmod : null
+  };
+}
+
+function sostoyanie(s, extra) {
+  var z = izmerit(s);
+  return Object.assign({
+    alpha: s.alpha, alphaDeg: s.ugol,
+    omega: z.omMod, omegaVec: z.om, omegaMotor: OMEGA,
+    L: z.L, Lmod: z.Lmod, Lz: z.L[2], Lperp: z.Lperp,
+    M_formula: D.len(z.Mf), M_fd: D.len(z.Mfd), M_reactions: D.len(z.r.para),
+    M_formula_vec: z.Mf, M_fd_vec: z.Mfd, M_reactions_vec: z.r.para,
+    R: D.len(z.r.R1), R1: z.r.R1, R2: z.r.R2, Raxial: z.r.osevaya, Mz_motor: z.r.Mmotor,
+    weight: M * G,
+    angleLtoRod: z.ugolLsh, angleLtoAxis: z.ugolLos,
+    K: z.K, released: s.otpushchen, t: s.t, phi: s.phi,
+    omegaExpected: z.Lmod / I_POPEREK, omegaSwept: z.omSwept,
+    Ldrift: z.Ldrift, Kdrift: z.Kdrift, rodLengthError: z.dlinaOshibka, rodDotL: z.shtangaL
+  }, extra || {});
+}
+
+/* Прогон без анимации для автопроверки: свежая модель с угла ugol (градусы),
+   faza — начальный угол вала, doOtpuska секунд на валу, потом при otpustit
+   ещё posle секунд свободно. Интерфейс демки не трогается. */
+function progon(opt) {
+  opt = opt || {};
+  var s = nachalo(opt.ugol != null ? opt.ugol : 45);
+  if (opt.faza != null) { s.phi = opt.faza; naVal(s); proizvodnayaSnachala(s); }
+  var h = opt.shag || H_SHAG, i;
+  var n1 = Math.round((opt.doOtpuska || 0) / h);
+  for (i = 0; i < n1; i++) shag(s, h);
+  if (opt.otpustit) {
+    otpustitSostoyanie(s);
+    var n2 = Math.round((opt.posle || 0) / h);
+    for (i = 0; i < n2; i++) shag(s, h);
+  }
+  return sostoyanie(s, { rodDir: D.unit(D.sub(s.q[0], s.q[1])), L0: s.L0, K0: s.K0 });
+}
+
+/* Русская запятая и настоящий минус; крохи печатаются нулём. */
+function num(v, d) {
+  v = +v.toPrecision(12);
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+function kx(tex) {
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Изометрия чуть сверху, мир правый, z вверх (Demo3D). Вал, корпуса
+   подшипников на своих местах (±0,1 м), под ними мотор с муфтой, спицы
+   муфты крутятся с валом. Штанга и массы в натуральную величину. Тела
+   сортируются по глубине общим слоем; векторы рисуются поверх тел, как на
+   рисунке главы, иначе стрелка, ушедшая за массу, пропадала бы.
+
+   Цвета по словарю рисунка главы (inputs/05/pics/gantel.tex): L, L_z и
+   конус бирюзовые (figa), ω оранжевая (figb), силы и момент зелёные
+   (figconst), тела нейтральные. Подписи векторов курсивом шрифта KaTeX со
+   стрелкой над буквой, как в главе.
+
+   Масштабы векторов постоянные на всём ползунке, длина стрелки отвечает
+   числу: L 0,75 м на 1 кг·м²/с, ω 0,009 м на 1 рад/с, силы 0,02 м на 1 Н,
+   момент 0,05 м на 1 Н·м. Стрелка ω стоит над верхним концом вала, как на
+   рисунке: при 90° L лежит на оси и доходит до 0,30 м, вал кончается на
+   0,355 м, и стрелки не ложатся одна на другую. После отпускания вала нет:
+   серым пунктиром его прежняя ось, оранжевым новая ось вращения по L, и ω
+   стоит на её конце, за остриём L. Момент сил нарисован у конца L, как
+   скорость этого конца (ΔL/Δt). Реакции начинаются у корпусов подшипников.
+   Корпуса на настоящих местах, ±0,1 м, поэтому при 45° стрелка R₁
+   пересекает L: рисунок главы ради чистоты разнёс подшипники на ±0,33 м, а
+   демке база нужна для счёта.
+
+   Сцену можно повернуть мышью или пальцем, двойной щелчок возвращает вид. */
+
+var W = 1000, HGT = 460;
+var KAMERA = { cx: 290, cy: 233, scale: 470, az: 35, el: 25, target: [0, 0, 0.1] };
+var S_L = 0.75, S_W = 0.009, S_F = 0.02, S_M = 0.05;
+var Z_VERH = 0.355, Z_NIZ = -0.24;           /* концы вала */
+var KORPUS = [0.03, 0.03, 0.015];            /* полуразмеры корпуса подшипника */
+/* Мотор ниже, чем опустится нижняя масса при α = 0 (0,2 м и радиус шара). */
+var MOTOR_C = [0, 0, -0.262], MOTOR = [0.048, 0.048, 0.02];
+var R_SHARA = 0.028;                         /* шар на рисунке; масса точечная */
+/* Верхний конец новой оси после отпускания: чуть дальше острия L. */
+function osVerh(z) { return z.Lmod * S_L + 0.035; }
+var CL = D.palette.teal, CW = D.palette.orange, CF = D.palette.green;
+var C_GIRYA = '#a3abc4', C_KORPUS = '#737c99', C_MOTOR = '#5e6783', C_MUFTA = '#9aa1b8';
+var SHRIFT_M = '"KaTeX_Math", "Times New Roman", serif';
+var SHRIFT_C = '"KaTeX_Main", "Times New Roman", serif';
+
+/* Шрифты KaTeX грузятся, когда их впервые встречает строка показаний;
+   канва до этого рисует запасным, со следующего кадра своим. */
+try {
+  if (document.fonts && document.fonts.load) {
+    document.fonts.load('italic 24px KaTeX_Math');
+    document.fonts.load('24px KaTeX_Main');
+  }
+} catch (e) {}
+
+/* Подпись величины: буква курсивом, индекс, стрелка над буквой у векторов.
+   Сначала мерится (нужно, чтобы отодвинуть подпись от острия), потом
+   рисуется с центром в (x, y). */
+function bukvaShrifty(o) {
+  var size = o.size || 24, sub = o.sub || '', cifra = /^[0-9]+$/.test(sub);
+  var subSize = Math.max(17, Math.round(size * 0.72));
+  return {
+    size: size, sub: sub, subSize: subSize,
+    glav: 'italic ' + size + 'px ' + SHRIFT_M,
+    ind: (cifra ? '' : 'italic ') + subSize + 'px ' + (cifra ? SHRIFT_C : SHRIFT_M)
+  };
+}
+function bukvaRazmer(ctx, b, o) {
+  var f = bukvaShrifty(o);
+  ctx.save();
+  ctx.font = f.glav; var w1 = ctx.measureText(b).width;
+  ctx.font = f.ind; var w2 = f.sub ? ctx.measureText(f.sub).width + 1 : 0;
+  ctx.restore();
+  return { w: w1 + w2, w1: w1, h: f.size * (o.vec ? 1.15 : 0.9) };
+}
+function bukva(ctx, x, y, b, o) {
+  var f = bukvaShrifty(o), r = bukvaRazmer(ctx, b, o);
+  var x0 = x - r.w / 2, base = y + f.size * 0.3 + (o.vec ? f.size * 0.1 : 0);
+  ctx.save();
+  ctx.fillStyle = o.color; ctx.textAlign = 'left';
+  ctx.font = f.glav; ctx.fillText(b, x0, base);
+  if (f.sub) { ctx.font = f.ind; ctx.fillText(f.sub, x0 + r.w1 + 1, base + f.size * 0.2); }
+  if (o.vec) {
+    /* как \vec: короткая стрелка над основной буквой, сдвинута по наклону курсива */
+    var ya = base - f.size * 0.86, xa0 = x0 + r.w1 * 0.2, xa1 = x0 + r.w1 * 0.2 + Math.max(10, r.w1 * 0.8);
+    ctx.strokeStyle = o.color; ctx.lineWidth = 1.7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(xa0, ya); ctx.lineTo(xa1, ya);
+    ctx.moveTo(xa1 - 4.5, ya - 3.2); ctx.lineTo(xa1, ya); ctx.lineTo(xa1 - 4.5, ya + 3.2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* Место подписи у конца стрелки: отодвинута вдоль стрелки на зазор плюс
+   полуразмер подписи в этом направлении (как в Demo3D). bok — поставить
+   сбоку от острия, слева (−1) или справа (+1): нужно стрелкам, у которых
+   над остриём стоит другая стрелка. Рисует rasstavit. */
+function mestoUKonca(ctx, cam, a, b, bk, o) {
+  var pa = cam.project(a), pb = cam.project(b);
+  var dx = pb[0] - pa[0], dy = pb[1] - pa[1], Ln = Math.hypot(dx, dy);
+  if (Ln < 1.5) return null;
+  var ux = dx / Ln, uy = dy / Ln, r = bukvaRazmer(ctx, bk, o), x, y;
+  if (o.bok) {
+    x = pb[0] + o.bok * (10 + r.w / 2); y = pb[1] + (o.dy || 0);
+  } else if (o.izbegat) {
+    /* поперёк стрелки у острия, с той стороны, где дальше до точек izbegat */
+    var dd = 12 + Math.max(r.w, r.h) / 2, best = -1;
+    [1, -1].forEach(function (sg) {
+      var cx = pb[0] - sg * uy * dd, cy = pb[1] + sg * ux * dd, dmin = Infinity;
+      o.izbegat.forEach(function (p) { dmin = Math.min(dmin, Math.hypot(p[0] - cx, p[1] - cy)); });
+      if (dmin > best) { best = dmin; x = cx; y = cy; }
+    });
+  } else {
+    var gap = 9 + Math.abs(ux) * r.w / 2 + Math.abs(uy) * r.h / 2;
+    x = pb[0] + ux * gap + (o.dx || 0); y = pb[1] + uy * gap + (o.dy || 0);
+  }
+  return { x: x, y: y, w: r.w, h: r.h, bk: bk, o: o };
+}
+function mesto(ctx, x, y, bk, o) {
+  var r = bukvaRazmer(ctx, bk, o);
+  return { x: x, y: y, w: r.w, h: r.h, bk: bk, o: o };
+}
+
+/* Подписи ставятся по старшинству, а та, что легла бы на уже поставленную,
+   пропускается. Когда плоскость оси и штанги идёт вдоль взгляда, стрелки
+   сходятся в пучок у O, и шесть букв в одном месте не прочесть; через
+   долю оборота они расходятся и подписи возвращаются. */
+function rasstavit(ctx, spisok) {
+  var stoyat = [];
+  spisok.forEach(function (p) {
+    if (!p) return;
+    var k = [p.x - p.w / 2 - 3, p.y - p.h / 2 - 3, p.x + p.w / 2 + 3, p.y + p.h / 2 + 3];
+    if (stoyat.some(function (q) { return k[0] < q[2] && q[0] < k[2] && k[1] < q[3] && q[1] < k[3]; })) return;
+    stoyat.push(k);
+    bukva(ctx, p.x, p.y, p.bk, p.o);
+  });
+}
+
+/* Конус, который обходит конец L: окружность на высоте L_z и две
+   образующие по краям видимого конуса (касательные из вершины O к эллипсу
+   основания). Если вершина видна внутри эллипса, краёв у конуса нет. */
+function konus(ctx, cam, h, rL) {
+  var c = [0, 0, h];
+  D.circle3(ctx, cam, c, EZ, rL, { color: CL, width: 1.4, dash: [5, 5], dimBehind: c, backAlpha: 0.35 });
+  var o = cam.project([0, 0, 0]), pc = cam.project(c);
+  var rx = pc[0] - o[0], ry = pc[1] - o[1], lo = null, hi = null;
+  for (var i = 0; i < 240; i++) {
+    var t = DVA_PI * i / 240, p3 = [rL * Math.cos(t), rL * Math.sin(t), h], p = cam.project(p3);
+    var px = p[0] - o[0], py = p[1] - o[1];
+    var ang = Math.atan2(rx * py - ry * px, rx * px + ry * py);
+    if (!lo || ang < lo.a) lo = { a: ang, p: p3 };
+    if (!hi || ang > hi.a) hi = { a: ang, p: p3 };
+  }
+  if (!lo || hi.a - lo.a > Math.PI * 0.97) return;
+  D.segment(ctx, cam, [0, 0, 0], lo.p, { color: CL, width: 1.1, alpha: 0.4 });
+  D.segment(ctx, cam, [0, 0, 0], hi.p, { color: CL, width: 1.1, alpha: 0.4 });
+}
+
+function GantelNaMotore() {
+  var ref0 = useRef(null);
+  if (!ref0.current) {
+    var cam = D.camera(KAMERA);
+    ref0.current = { s: nachalo(UGOL_NACH), idet: true, medlenno: false, cam: cam, sloj: D.layer(cam) };
+  }
+  var S = ref0.current;
+  var pair = useState({ ugol: UGOL_NACH, otpushchen: false, idet: true, medlenno: false });
+  var ui = pair[0], setUi = pair[1];
+
+  function pokazaniya() {
+    window.__demoState = sostoyanie(S.s, { paused: !S.idet, slow: S.medlenno });
+  }
+  function obnovit() {
+    setUi({ ugol: S.s.ugol, otpushchen: S.s.otpushchen, idet: S.idet, medlenno: S.medlenno });
+    pokazaniya();
+  }
+
+  function step(dt) {
+    if (!S.idet) return;
+    var T = dt / (S.medlenno ? ZAMEDLENIE : 1);
+    if (!(T > 0)) return;
+    var n = Math.max(1, Math.ceil(T / H_SHAG - 1e-9)), h = T / n;
+    for (var i = 0; i < n; i++) shag(S.s, h);
+    pokazaniya();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted;
+    var inkc = 'rgb(' + ink + ')', mut = 'rgb(' + muted + ')';
+    var s = S.s, z = izmerit(s), cam = S.cam, Ly = S.sloj;
+    var cVal = mut, cShtanga = 'rgb(' + D.mix(ink, muted, 0.35).map(Math.round).join(',') + ')';
+    var O = [0, 0, 0], i;
+
+    /* ── фон: пути масс, конус L; после отпускания прежняя ось и плоскость вращения ── */
+    if (!s.otpushchen) {
+      s.q.forEach(function (p) {
+        var rr = Math.hypot(p[0], p[1]);
+        if (rr > 0.004) D.circle3(ctx, cam, [0, 0, p[2]], EZ, rr,
+          { color: 'rgba(' + muted + ',.8)', width: 1.2, dash: [3, 5], dimBehind: [0, 0, p[2]], backAlpha: 0.4 });
+      });
+      if (z.Lperp * S_L > 0.004) konus(ctx, cam, z.L[2] * S_L, z.Lperp * S_L);
+    } else {
+      /* прежняя ось серым пунктиром; новая ось вращения по L оранжевым, как
+         прежде вал: на её конце стрелка ω */
+      D.segment(ctx, cam, [0, 0, Z_NIZ], [0, 0, Z_VERH], { color: mut, width: 1.4, dash: [6, 6], alpha: 0.6 });
+      if (z.Lmod > 1e-9) {
+        var Lh0 = D.unit(z.L);
+        D.segment(ctx, cam, D.mul(Lh0, -0.22), D.mul(Lh0, osVerh(z)),
+          { color: CW, width: 1.6, dash: [6, 5], alpha: 0.6 });
+        D.circle3(ctx, cam, O, z.L, R,
+          { color: 'rgba(' + muted + ',.85)', width: 1.2, dash: [3, 5], dimBehind: O, backAlpha: 0.4 });
+      }
+    }
+
+    /* ── тела, общей сортировкой по глубине ── */
+    if (!s.otpushchen) {
+      var hb = KORPUS[2], zb = BAZA / 2;
+      [[Z_NIZ, -zb - hb], [-zb + hb, zb - hb], [zb + hb, Z_VERH]].forEach(function (c) {
+        Ly.segment([0, 0, c[0]], [0, 0, c[1]],
+          { color: cVal, width: 6, pieces: Math.max(1, Math.round((c[1] - c[0]) / 0.025)) });
+      });
+      Ly.box([0, 0, zb], D.ident(), KORPUS, { color: C_KORPUS });
+      Ly.box([0, 0, -zb], D.ident(), KORPUS, { color: C_KORPUS });
+      Ly.box(MOTOR_C, D.ident(), MOTOR, { color: C_MOTOR });
+      Ly.disk([0, 0, MOTOR_C[2] + MOTOR[2] + 0.007], EZ, 0.034, 0.012,
+        { color: C_MUFTA, marks: 3, spin: s.phi, markColor: 'rgba(18,20,28,.7)' });
+    }
+    /* Штанга кончается у поверхности шаров: внутри шара её не видно. Её
+       куски считаются ближе к зрителю на 2 см, чем лежат: при α = 0 штанга
+       лежит на валу, куски вала и штанги разной длины, и без поправки они
+       чередовались бы полосами. Ошибиться поправка может только у самой O,
+       которую закрывает втулка. */
+    var e = z.e, rs = R - R_SHARA, sA = D.mul(e, -rs), sB = D.mul(e, rs);
+    for (i = 0; i < 12; i++) (function (p, q) {
+      Ly.add(cam.project(D.lerp(p, q, 0.5))[2] + 0.02, function (cx) {
+        D.segment(cx, cam, p, q, { color: cShtanga, width: 5 });
+      });
+    })(D.lerp(sA, sB, i / 12), D.lerp(sA, sB, (i + 1) / 12));
+    Ly.ball(O, 0.013, { color: C_MUFTA });
+    Ly.ball(s.q[0], R_SHARA, { color: C_GIRYA });
+    Ly.ball(s.q[1], R_SHARA, { color: C_GIRYA });
+    Ly.flush(ctx);
+
+    /* ── векторы поверх тел ── */
+    var Lk = D.mul(z.L, S_L), hL = Lk[2], rL = z.Lperp * S_L, px1 = cam.px(1);
+    var naOsi = rL * px1 < 6;                       /* L на оси: L_z с ним совпадает */
+    /* подписи по старшинству: L, ω, R₁, R₂, L_z, M, O */
+    var pL = null, pW = null, pR = [null, null], pLz = null, pM = null;
+
+    if (!s.otpushchen && hL * px1 > 2) {
+      D.segment(ctx, cam, [0, 0, hL], Lk, { color: CL, width: 1.4, dash: [5, 4], alpha: 0.9 });
+      D.arrow(ctx, cam, O, [0, 0, hL], { color: CL, width: 3.4, alpha: 0.85 });
+      if (!naOsi && hL * px1 > 18) {
+        /* L_z у верхнего конца проекции, с той стороны оси, где на экране нет L */
+        var po = cam.project([0, 0, hL]), pk = cam.project(Lk);
+        pLz = mesto(ctx, po[0] + (pk[0] < po[0] ? 1 : -1) * 24, po[1] - 8, 'L', { sub: 'z', color: CL, size: 22 });
+      }
+    }
+    if (z.Lmod * S_L * px1 > 2) {
+      D.arrow(ctx, cam, O, Lk, { color: CL, width: 5 });
+      /* прямой угол между L и штангой, в плоскости оси и штанги */
+      if (z.Lmod > 1e-6) {
+        var a = 0.032, Lh = D.unit(z.L), e1 = s.otpushchen ? e : (e[2] >= 0 ? e : D.mul(e, -1));
+        D.curve(ctx, cam, [D.mul(e1, a), D.add(D.mul(e1, a), D.mul(Lh, a)), D.mul(Lh, a)],
+          { color: 'rgba(' + ink + ',.75)', width: 1.4 });
+      }
+      /* Над остриём L стоит стрелка ω: при 90° на валу и всегда после
+         отпускания. Тогда подпись уходит вбок, подальше от масс. */
+      var oL = { vec: true, color: CL, size: 26 };
+      if (s.otpushchen) oL.izbegat = [cam.project(s.q[0]), cam.project(s.q[1])];
+      else if (naOsi) oL.bok = -1;
+      pL = mestoUKonca(ctx, cam, O, Lk, 'L', oL);
+    }
+
+    if (!s.otpushchen) {
+      /* момент сил у конца L: скорость, с которой конец бежит по кругу */
+      var Mv = z.Mfd, Mk = D.add(Lk, D.mul(Mv, S_M));
+      if (D.len(Mv) * S_M * px1 > 3) {
+        D.arrow(ctx, cam, Lk, Mk, { color: CF, width: 2.6 });
+        /* смотрит на зрителя, короткая: подпись только загромоздила бы конец L */
+        var pm0 = cam.project(Lk), pm1 = cam.project(Mk);
+        if (Math.hypot(pm1[0] - pm0[0], pm1[1] - pm0[1]) > 30)
+          pM = mestoUKonca(ctx, cam, Lk, Mk, 'M', { vec: true, color: CF, size: 22 });
+      }
+      /* реакции подшипников: от корпуса наружу, по силе */
+      [[z.r.R1, BAZA / 2, '1'], [z.r.R2, -BAZA / 2, '2']].forEach(function (rr, k) {
+        var F = rr[0], Fm = D.len(F);
+        if (Fm * S_F * px1 < 3) return;
+        var a0 = D.add([0, 0, rr[1]], D.mul(F, 0.032 / Fm)), a1 = D.add(a0, D.mul(F, S_F));
+        D.arrow(ctx, cam, a0, a1, { color: CF, width: 4 });
+        pR[k] = mestoUKonca(ctx, cam, a0, a1, 'R', { sub: rr[2], vec: true, color: CF, size: 22 });
+      });
+      /* ω над валом */
+      var w0 = [0, 0, Z_VERH], w1 = [0, 0, Z_VERH + OMEGA * S_W];
+      D.arrow(ctx, cam, w0, w1, { color: CW, width: 5 });
+      pW = mestoUKonca(ctx, cam, w0, w1, 'ω', { vec: true, color: CW, size: 26 });
+    } else if (z.omMod * S_W * px1 > 2) {
+      /* после отпускания угловая скорость, которая двигает массы, лежит по L;
+         стрелка стоит на конце новой оси, за остриём L */
+      var wa = D.mul(D.unit(z.L), osVerh(z)), wb = D.add(wa, D.mul(z.om, S_W));
+      D.arrow(ctx, cam, wa, wb, { color: CW, width: 5 });
+      pW = mestoUKonca(ctx, cam, wa, wb, 'ω', { vec: true, color: CW, size: 26 });
+    }
+
+    /* буква O под центром, с той стороны, где дальше до обеих масс */
+    var pO = cam.project(O), pm = [cam.project(s.q[0]), cam.project(s.q[1])], xO = pO[0] + 16, best = -1;
+    [16, -16].forEach(function (sd) {
+      var d = Math.min(Math.hypot(pm[0][0] - pO[0] - sd, pm[0][1] - pO[1] - 18),
+                       Math.hypot(pm[1][0] - pO[0] - sd, pm[1][1] - pO[1] - 18));
+      if (d > best) { best = d; xO = pO[0] + sd; }
+    });
+    rasstavit(ctx, [pL, pW, pR[0], pR[1], pLz, pM, mesto(ctx, xO, pO[1] + 18, 'O', { color: inkc, size: 21 })]);
+
+    /* ── показания ── */
+    /* Слева момент импульса, угловая скорость и энергия, справа момент сил
+       тремя путями один под другим и реакция подшипника. */
+    var c1 = 790, c2 = 990, ROW = [48, 140, 232, 324];
+    C.readout(ctx, c1, ROW[0], 'МОДУЛЬ L, кг·м²/с', num(z.Lmod, 3), CL);
+    C.readout(ctx, c1, ROW[1], 'ПРОЕКЦИЯ Lz, кг·м²/с', num(z.L[2], 3), CL);
+    C.readout(ctx, c1, ROW[2], 'УГЛОВАЯ СКОРОСТЬ, рад/с', num(z.omMod, 2), CW);
+    C.readout(ctx, c1, ROW[3], 'ЭНЕРГИЯ K, Дж', num(z.K, 3), inkc);
+    C.readout(ctx, c2, ROW[0], 'МОМЕНТ ΔL/Δt, Н·м', num(D.len(z.Mfd), 3), CF);
+    C.readout(ctx, c2, ROW[1], 'МОМЕНТ ω × L, Н·м', num(D.len(z.Mf), 3), CF);
+    C.readout(ctx, c2, ROW[2], 'МОМЕНТ ПАРЫ R·b, Н·м', num(D.len(z.r.para), 3), CF);
+    C.readout(ctx, c2, ROW[3], 'РЕАКЦИЯ ОПОРЫ R, Н', num(D.len(z.r.R1), 2), CF);
+    C.label(ctx, c2, 420, s.otpushchen ? 'опор нет' : 'вес массы ' + num(M * G, 2) + ' Н, база ' + num(BAZA, 1) + ' м',
+            17, mut, 'right');
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+
+  /* Мышь и палец вращают сцену; двойной щелчок возвращает исходный вид. */
+  useEffect(function () {
+    var cnv = ref.current;
+    if (!cnv) return;
+    var snyat = D.dragCamera(cnv, S.cam);
+    function nazad() { S.cam.az = KAMERA.az; S.cam.el = KAMERA.el; }
+    cnv.addEventListener('dblclick', nazad);
+    return function () { snyat(); cnv.removeEventListener('dblclick', nazad); };
+  }, []);
+
+  if (!window.__demoState) pokazaniya();
+
+  function ugol(v) {
+    var u = Math.round(C.clamp(v, 0, 90) * 10) / 10;
+    S.s.ugol = u; S.s.alpha = u * RAD;
+    S.s.otpushchen = false;
+    naVal(S.s); proizvodnayaSnachala(S.s);
+    obnovit();
+  }
+  function otpustit() {
+    if (S.s.otpushchen) vernutSostoyanie(S.s); else otpustitSostoyanie(S.s);
+    obnovit();
+  }
+  function pauza() { S.idet = !S.idet; obnovit(); }
+  function medlenno() { S.medlenno = !S.medlenno; obnovit(); }
+
+  /* Ручки для автопроверки: те же действия, что у кнопок. */
+  window.__demoProgon = progon;
+  window.__demoUpravlenie = {
+    ugol: ugol,
+    otpustit: function () { if (!S.s.otpushchen) otpustit(); },
+    vernut: function () { if (S.s.otpushchen) otpustit(); },
+    faza: function (phi) { if (!S.s.otpushchen) { S.s.phi = phi; naVal(S.s); proizvodnayaSnachala(S.s); pokazaniya(); } },
+    pauza: function (f) { S.idet = !f; obnovit(); },
+    medlenno: function (f) { S.medlenno = !!f; obnovit(); },
+    kamera: S.cam
+  };
+
+  /* Строка под сценой. Вектор назван словами, без \vec: KaTeX кладёт букву
+     под стрелкой в span класса accent, а правило .status .accent из
+     demo.css красит его в цвет чисел и делает жирным. */
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var s = S.s, z = izmerit(s), u = s.ugol, Lz = kx('L_z');
+    if (s.otpushchen) {
+      if (z.Lmod < 1e-9)
+        return 'Вал отпущен. Массы лежали на оси и стояли, момента импульса не было, и движения нет и теперь.';
+      if (u > 89.95)
+        return 'Вал отпущен, а движение то же: момент импульса лежал на оси, и вращаться вокруг неё гантель может без опор. ' +
+          'Ось, на которой лежит момент импульса, называют главной.';
+      return 'Вал отпущен, опор нет, и момента сил тоже нет: момент импульса стоит, ' + A(num(z.Lmod, 3) + ' кг·м²/с') +
+        ' в прежнем направлении. Гантель вращается вокруг него с угловой скоростью ' + A(num(z.omMod, 2) + ' рад/с') +
+        ', штанга ходит в плоскости, перпендикулярной ему, энергия прежняя, ' + A(num(z.K, 2) + ' Дж') +
+        '. Так вращаются точечные массы; у гантели с толстой штангой угловая скорость ещё обходила бы момент импульса.';
+    }
+    if (u > 89.95)
+      return 'Штанга перпендикулярна валу. Момент импульса лежит на оси и идёт по угловой скорости, ' +
+        'как импульс точки идёт по её скорости: ' + Lz + ' = ' + kx('2mr^2\\omega') + ' = ' + A(num(z.L[2], 3) + ' кг·м²/с') +
+        '. Поворачивать его не нужно, и реакции подшипников равны нулю.';
+    if (u < 0.05)
+      return 'Штанга легла на вал, массы стоят на оси и не движутся. Момента импульса нет, и поперёк вала подшипники не нагружены.';
+    return 'Штанга наклонена к валу на ' + A(num(u, 1) + '°') + '. Момент импульса перпендикулярен штанге, ' +
+      'лежит в плоскости вала и штанги и вместе с ней обходит конус: модуль ' +
+      A(num(z.Lmod, 3)) + ', на ось приходится ' + Lz + ' = ' + A(num(z.L[2], 3) + ' кг·м²/с') +
+      '. Поворачивают его подшипники: силы по ' + A(num(D.len(z.r.R1), 1) + ' Н') + ' на базе 0,2 м дают момент ' +
+      A(num(D.len(z.r.para), 2) + ' Н·м') + '.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Slider} label="Наклон штанги:" min=${0} max=${90} step=${0.1} value=${ui.ugol}
+                     onChange=${ugol} display=${num(ui.ugol, 1) + '°'} />
+        <${C.Group}>
+          ${PRESETY.map(function (p) {
+            return html`<${C.Btn} key=${p} active=${Math.abs(ui.ugol - p) < 1e-9 && !ui.otpushchen}
+                                 onClick=${function () { ugol(p); }}>${num(p, p % 1 ? 1 : 0)}°<//>`;
+          })}
+        <//>
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${otpustit}>${ui.otpushchen ? 'Вернуть вал' : 'Отпустить вал'}<//>
+          <${C.Btn} onClick=${pauza}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} active=${ui.medlenno} onClick=${medlenno}>Медленно<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(GantelNaMotore);
+</script>
+</body>
+</html>

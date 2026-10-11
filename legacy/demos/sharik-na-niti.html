@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Шарик на нити через отверстие</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-05/">&larr; Неделя 05</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=sharik-na-niti"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `sharik-na-niti` (бриф briefs/demki_nedelya05.md, № 1; замечание
+   автора 25.09 № 5: «если демки нет — то нужна демка»). Шарик массы
+   m = 0,1 кг скользит по гладкому горизонтальному столу, нить уходит в
+   отверстие в центре, снизу её держит рука. В плоскости стола на шарик
+   действует одна сила, натяжение, и направлена она к отверстию. Числа
+   главы: старт на окружности r₁ = 0,5 м со скоростью v₁ = 1 м/с,
+   L = m v₁ r₁ = 0,05 кг·м²/с; втянули до r₂ = 0,25 м: v₂ = 2 м/с,
+   K от 0,05 до 0,20 Дж, работа руки 0,15 Дж; натяжение на окружности
+   m v²/r от 0,2 до 1,6 Н. Всё это демка обязана выдать счётом.
+
+   ЧТО СЧИТАЕТСЯ. Момент импульса не закладывается постоянным: он снимается
+   с состояния, L = m(x v_y − y v_x) или m r² φ̇, и стоит потому, что сила
+   центральная. Два режима руки.
+
+   «Рука держит длину»: длина нити ℓ(t) задана плавным профилем (полином
+   пятой степени, у которого скорость и ускорение нити на концах нулевые),
+   и шарик держится на радиусе r = ℓ(t). Угловое движение считается из
+   второго закона: сила радиальна, угловая составляющая ускорения ноль,
+   (1/r) d(r²φ̇)/dt = 0, то есть φ̈ = −2 ṙ φ̇ / r. Это уравнение
+   интегрируется методом Рунге — Кутты четвёртого порядка вместе с работой
+   руки. Натяжение берётся из радиальной части второго закона,
+   T = m(r φ̇² − r̈); его работа над шариком A = ∫ T·(−ṙ) dt. Профиль
+   короче 0,5 с не бывает: при таких числах натяжение остаётся
+   положительным, нить не провисает (это проверяется, флаг slack).
+
+   «Рука держит силу»: натяжение задано ползунком, радиус свободен.
+   Декартовы уравнения m r̈ = −T r/r, та же схема Рунге — Кутты, работа
+   A = ∫ −T (r·v)/r dt. При T = 0,2 Н шарик идёт по окружности 0,5 м, при
+   большем натяжении его затягивает внутрь, пока центробежный барьер не
+   развернёт, при меньшем выносит наружу; радиус качается, момент стоит.
+
+   «Перерезать нить»: сила ноль, шарик уходит по прямой, и момент
+   свободной точки относительно отверстия тоже стоит (раздел главы
+   «Проверим свободное движение»).
+
+   Баланс K − K₀ − A держится на ошибке счёта, 10⁻⁹ Дж и меньше. Площадь,
+   заметённая радиус-вектором за полсекунды, снимается по следу формулой
+   площади многоугольника, делится на полсекунды и сравнивается с
+   L/(2m) = 0,25 м²/с. */
+
+var M = 0.1;                       /* масса шарика, кг */
+var R1 = 0.5, V1 = 1.0;            /* начальная окружность и скорость */
+var R2 = 0.25;                     /* куда втягивают нить */
+var R_STOL = 0.78;                 /* край стола: дальше шарик падает */
+var H_SUB = 1 / 4000;              /* шаг интегрирования, с */
+var TAU_MIN = 0.5, TAU_MAX = 6, TAU_NACH = 3;
+var T_MAX = 2.0;                   /* предел ползунка натяжения, Н */
+var DT_SEK = 0.5;                  /* сектор закрывается каждые полсекунды: на 0,25 м
+                                      оборот длится 0,79 с, и секундные секторы
+                                      накладывались бы друг на друга */
+var TWO_PI = 2 * Math.PI;
+
+/* Профиль длины нити: s(u) = 10u³ − 15u⁴ + 6u⁵ и его производные. */
+function profil(p, t) {
+  var u = C.clamp((t - p.t0) / p.tau, 0, 1);
+  var s = u * u * u * (10 - 15 * u + 6 * u * u);
+  var ds = 30 * u * u * (1 - u) * (1 - u) / p.tau;
+  var dds = 60 * u * (1 - u) * (1 - 2 * u) / (p.tau * p.tau);
+  var d = p.l1 - p.l0;
+  return { l: p.l0 + d * s, dl: d * ds, ddl: d * dds, konec: u >= 1 };
+}
+
+/* Шаг Рунге — Кутты для режима «длина»: y = [φ, ω, A], r(t) из профиля. */
+function pravDlina(p, t, y) {
+  var q = profil(p, t);
+  var w = y[1];
+  var T = M * (q.l * w * w - q.ddl);
+  return [w, -2 * q.dl * w / q.l, T * (-q.dl)];
+}
+function rk4Dlina(p, t, y, h) {
+  var k1 = pravDlina(p, t, y);
+  var y2 = [y[0] + h / 2 * k1[0], y[1] + h / 2 * k1[1], y[2] + h / 2 * k1[2]];
+  var k2 = pravDlina(p, t + h / 2, y2);
+  var y3 = [y[0] + h / 2 * k2[0], y[1] + h / 2 * k2[1], y[2] + h / 2 * k2[2]];
+  var k3 = pravDlina(p, t + h / 2, y3);
+  var y4 = [y[0] + h * k3[0], y[1] + h * k3[1], y[2] + h * k3[2]];
+  var k4 = pravDlina(p, t + h, y4);
+  return [0, 1, 2].map(function (i) { return y[i] + h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]); });
+}
+
+/* Шаг Рунге — Кутты для режимов «сила» и «свободно»: y = [x, y, vx, vy, A]. */
+function pravSila(T, y) {
+  var r = Math.hypot(y[0], y[1]);
+  var ax = -T / M * y[0] / r, ay = -T / M * y[1] / r;
+  return [y[2], y[3], ax, ay, -T * (y[0] * y[2] + y[1] * y[3]) / r];
+}
+function rk4Sila(T, y, h) {
+  var k1 = pravSila(T, y);
+  var y2 = y.map(function (v, i) { return v + h / 2 * k1[i]; });
+  var k2 = pravSila(T, y2);
+  var y3 = y.map(function (v, i) { return v + h / 2 * k2[i]; });
+  var k3 = pravSila(T, y3);
+  var y4 = y.map(function (v, i) { return v + h * k3[i]; });
+  var k4 = pravSila(T, y4);
+  return y.map(function (v, i) { return v + h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]); });
+}
+
+function nachalo() {
+  return {
+    rezhim: 'dlina',                /* dlina | sila | svobodno */
+    t: 0, x: R1, y: 0, vx: 0, vy: V1, A: 0,
+    fi: 0, om: V1 / R1,             /* для режима «длина» */
+    prof: null, l: R1, dl: 0, ddl: 0,
+    T: M * V1 * V1 / R1,            /* натяжение, Н */
+    Tzad: M * V1 * V1 / R1,         /* натяжение ползунка в режиме «сила» */
+    slack: false, ushel: false,
+    K0: M * V1 * V1 / 2
+  };
+}
+
+/* Декартово состояние из полярного режима «длина». */
+function izPolyarnyh(s) {
+  var c = Math.cos(s.fi), sn = Math.sin(s.fi);
+  s.x = s.l * c; s.y = s.l * sn;
+  s.vx = s.dl * c - s.l * s.om * sn;
+  s.vy = s.dl * sn + s.l * s.om * c;
+}
+
+/* Один шаг модели на h секунд. */
+function shag(s, h) {
+  if (s.rezhim === 'dlina') {
+    var p = s.prof || { t0: s.t, tau: 1, l0: s.l, l1: s.l };
+    var y = rk4Dlina(p, s.t, [s.fi, s.om, s.A], h);
+    s.t += h; s.fi = y[0]; s.om = y[1]; s.A = y[2];
+    var q = profil(p, s.t);
+    s.l = q.l; s.dl = q.dl; s.ddl = q.ddl;
+    s.T = M * (s.l * s.om * s.om - s.ddl);
+    if (s.T < 0) s.slack = true;
+    izPolyarnyh(s);
+    if (s.prof && q.konec) s.prof = null;
+  } else {
+    var T = s.rezhim === 'sila' ? s.Tzad : 0;
+    var z = rk4Sila(T, [s.x, s.y, s.vx, s.vy, s.A], h);
+    s.t += h; s.x = z[0]; s.y = z[1]; s.vx = z[2]; s.vy = z[3]; s.A = z[4];
+    s.T = T;
+    s.l = Math.hypot(s.x, s.y);
+    if (s.l > R_STOL) s.ushel = true;
+  }
+}
+
+function velichiny(s) {
+  var r = Math.hypot(s.x, s.y);
+  var L = M * (s.x * s.vy - s.y * s.vx);
+  var K = M * (s.vx * s.vx + s.vy * s.vy) / 2;
+  return {
+    r: r, L: L, K: K, v: Math.hypot(s.vx, s.vy),
+    vr: (s.x * s.vx + s.y * s.vy) / r, vphi: L / (M * r),
+    sektor: L / (2 * M), balans: K - s.K0 - s.A
+  };
+}
+
+/* Прогон без анимации для автопроверки: втянуть до r₂ за tau секунд и
+   подержать секунду; либо держать силу T секунд t. */
+function progon(opt) {
+  var s = nachalo();
+  if (opt.rezhim === 'sila') {
+    s.rezhim = 'sila'; s.Tzad = opt.T;
+    var n = Math.round(opt.t / H_SUB);
+    for (var i = 0; i < n; i++) shag(s, H_SUB);
+  } else {
+    s.prof = { t0: 0, tau: opt.tau, l0: R1, l1: opt.r2 || R2 };
+    var m = Math.round((opt.tau + 1) / H_SUB);
+    var Tmin = Infinity;
+    for (var j = 0; j < m; j++) { shag(s, H_SUB); if (s.T < Tmin) Tmin = s.T; }
+    var v0 = velichiny(s);
+    return Object.assign({ Tmin: Tmin, slack: s.slack, A: s.A, T: s.T }, v0);
+  }
+  return Object.assign({ A: s.A, T: s.T }, velichiny(s));
+}
+
+/* Русская запятая и настоящий минус; крохи печатаются нулём. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+
+/* Площадь многоугольника с вершиной в отверстии по точкам следа. */
+function ploshchadSektora(tochki) {
+  var S = 0;
+  var pts = [[0, 0]].concat(tochki);
+  for (var i = 0; i < pts.length; i++) {
+    var a = pts[i], b = pts[(i + 1) % pts.length];
+    S += a[0] * b[1] - b[0] * a[1];
+  }
+  return Math.abs(S) / 2;
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева стол сверху: отверстие в центре, пунктиром окружности 0,5 и
+   0,25 м, след шарика за последние секунды и секторы, заметённые
+   радиус-вектором за каждые полсекунды: у них одна площадь. У шарика
+   стрелка скорости и стрелка натяжения к отверстию. Справа показания. */
+
+var W = 1000, HGT = 440;
+var CX = 225, CY = 220, SC = 250;  /* центр стола на канве и пикселей на метр */
+var SV = 70, SF = 70;              /* пикселей на 1 м/с и на 1 Н */
+var CV = '#4db6c6', CF = '#e08a52', CL = '#a6c35a';
+var SEKTORA = ['rgba(77,182,198,.20)', 'rgba(166,195,90,.20)'];
+
+function strelka(ctx, x0, y0, x1, y1, color, width) {
+  var dx = x1 - x0, dy = y1 - y0, Ln = Math.hypot(dx, dy);
+  if (Ln < 1) return;
+  var ux = dx / Ln, uy = dy / Ln;
+  var head = Math.min(12, Ln * 0.32);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * head - uy * head * 0.34, y1 - uy * head + ux * head * 0.34);
+  ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.lineTo(x1 - ux * head + uy * head * 0.34, y1 - uy * head - ux * head * 0.34);
+  ctx.closePath(); ctx.fill();
+}
+
+function SharikNaNiti() {
+  var st = useRef({
+    s: nachalo(), idet: true, tau: TAU_NACH,
+    sled: [], sekunda: [], sektory: [], plLast: null, tSek: DT_SEK
+  }).current;
+  var pair = useState({ rezhim: 'dlina', tau: TAU_NACH, Tzad: M * V1 * V1 / R1, idet: true, prof: false });
+  var ui = pair[0], setUi = pair[1];
+
+  function obnovit() {
+    setUi({ rezhim: st.s.rezhim, tau: st.tau, Tzad: st.s.Tzad, idet: st.idet, prof: !!st.s.prof });
+    pokazaniya();
+  }
+
+  function pokazaniya() {
+    var s = st.s, q = velichiny(s);
+    window.__demoState = {
+      mode: s.rezhim, t: s.t, r: q.r, vr: q.vr, vphi: q.vphi, v: q.v, L: q.L,
+      sectorial: q.sektor, sectorMeasured: st.plLast, K: q.K, W: s.A, T: s.T,
+      balanceError: q.balans, slack: s.slack, offTable: s.ushel
+    };
+  }
+
+  function sbrosSleda() { st.sled = []; st.sekunda = []; st.sektory = []; st.plLast = null; st.tSek = (Math.floor(st.s.t / DT_SEK) + 1) * DT_SEK; }
+
+  function nachat(rezhim) {
+    st.s = nachalo(); st.s.rezhim = rezhim || 'dlina';
+    st.idet = true; sbrosSleda(); obnovit();
+  }
+
+  function step(dt) {
+    if (!st.idet) return;
+    var s = st.s;
+    var n = Math.max(1, Math.round(dt / H_SUB));
+    for (var i = 0; i < n; i++) {
+      shag(s, dt / n);
+      /* секторы: точки следа за текущую секунду; на целой секунде сектор
+         закрывается, и его площадь снимается по следу */
+      if (i % 20 === 0) st.sekunda.push([s.x, s.y]);
+      if (s.t >= st.tSek) {
+        st.sekunda.push([s.x, s.y]);
+        var pl = ploshchadSektora(st.sekunda);
+        st.plLast = pl / DT_SEK;
+        st.sektory.push(st.sekunda.slice());
+        if (st.sektory.length > 4) st.sektory.shift();
+        st.sekunda = [[s.x, s.y]];
+        st.tSek += DT_SEK;
+      }
+      if (s.ushel) break;
+    }
+    st.sled.push([s.x, s.y]);
+    if (st.sled.length > 240) st.sled.shift();
+    if (s.ushel) { st.idet = false; obnovit(); }
+    else if (!s.prof && ui.prof) obnovit();
+    pokazaniya();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted, mut = 'rgb(' + muted + ')';
+    var s = st.s, q = velichiny(s), i, k;
+    function X(x) { return CX + x * SC; }
+    function Y(y) { return CY - y * SC; }
+
+    /* стол */
+    ctx.fillStyle = 'rgba(' + ink + ',.04)';
+    ctx.strokeStyle = 'rgba(' + muted + ',.35)'; ctx.lineWidth = 1.2;
+    C.roundRect(ctx, CX - R_STOL * SC, CY - R_STOL * SC, 2 * R_STOL * SC, 2 * R_STOL * SC, 10);
+    ctx.fill(); ctx.stroke();
+
+    /* окружности главы: 0,5 и 0,25 м */
+    ctx.save();
+    ctx.setLineDash([5, 6]); ctx.strokeStyle = 'rgba(' + muted + ',.55)'; ctx.lineWidth = 1.2;
+    [R1, R2].forEach(function (R) { ctx.beginPath(); ctx.arc(CX, CY, R * SC, 0, TWO_PI); ctx.stroke(); });
+    ctx.restore();
+    C.label(ctx, X(R1 * 0.72) + 6, Y(-R1 * 0.72) + 16, '0,5 м', 17, mut, 'left');
+    C.label(ctx, X(R2 * 0.72) + 4, Y(-R2 * 0.72) + 16, '0,25 м', 17, mut, 'left');
+
+    /* секторы, заметённые за целые секунды */
+    for (k = 0; k < st.sektory.length; k++) {
+      var sk = st.sektory[k];
+      ctx.fillStyle = SEKTORA[(Math.round(st.tSek / DT_SEK) - st.sektory.length + k) % 2];
+      ctx.beginPath(); ctx.moveTo(CX, CY);
+      for (i = 0; i < sk.length; i++) ctx.lineTo(X(sk[i][0]), Y(sk[i][1]));
+      ctx.closePath(); ctx.fill();
+    }
+
+    /* след */
+    if (st.sled.length > 1) {
+      ctx.strokeStyle = 'rgba(' + ink + ',.35)'; ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      for (i = 0; i < st.sled.length; i++) {
+        var px = X(st.sled[i][0]), py = Y(st.sled[i][1]);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+
+    /* нить и отверстие */
+    if (s.rezhim !== 'svobodno') {
+      ctx.strokeStyle = 'rgba(' + ink + ',.75)'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(X(s.x), Y(s.y)); ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(' + ink + ',.85)';
+    ctx.beginPath(); ctx.arc(CX, CY, 5, 0, TWO_PI); ctx.fill();
+
+    /* шарик, скорость, натяжение */
+    var bx = X(s.x), by = Y(s.y);
+    strelka(ctx, bx, by, bx + s.vx * SV, by - s.vy * SV, CV, 3);
+    if (s.T > 1e-9 && s.rezhim !== 'svobodno') {
+      strelka(ctx, bx, by, bx - s.x / q.r * s.T * SF, by + s.y / q.r * s.T * SF, CF, 3);
+    }
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(bx, by, 8, 0, TWO_PI); ctx.fill();
+
+    /* показания */
+    var c1 = 700, c2 = 960;
+    C.readout(ctx, c1, 40, 'МОМЕНТ L, кг·м²/с', num(q.L, 4), CL);
+    C.readout(ctx, c2, 40, 'ПЛОЩАДЬ В СЕКУНДУ, м²/с', st.plLast == null ? '—' : num(st.plLast, 3), CL);
+    C.readout(ctx, c1, 130, 'РАДИУС, м', num(q.r, 3), 'rgb(' + ink + ')');
+    C.readout(ctx, c2, 130, 'СКОРОСТЬ, м/с', num(q.v, 3), CV);
+    C.readout(ctx, c1, 220, 'ЭНЕРГИЯ K, Дж', num(q.K, 3), CV);
+    C.readout(ctx, c2, 220, 'РАБОТА РУКИ, Дж', num(s.A, 3), CF);
+    C.readout(ctx, c1, 310, 'НАТЯЖЕНИЕ, Н', num(s.rezhim === 'svobodno' ? 0 : s.T, 3), CF);
+    C.readout(ctx, c2, 310, 'K − K₀ − A, Дж', num(q.balans, 6), mut);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+  window.__demoProgon = progon;
+
+  function rezhimDlina() { nachat('dlina'); }
+  function rezhimSila() { nachat('sila'); st.s.Tzad = ui.Tzad; obnovit(); }
+  function tyanut(k) {
+    var s = st.s;
+    if (s.rezhim !== 'dlina' || s.prof) return;
+    var cel = k === 'vtyanut' ? R2 : R1;
+    if (Math.abs(s.l - cel) < 1e-6) return;
+    s.prof = { t0: s.t, tau: st.tau, l0: s.l, l1: cel };
+    st.idet = true; obnovit();
+  }
+  function tau(v) { st.tau = C.clamp(v, TAU_MIN, TAU_MAX); obnovit(); }
+  function sila(v) { st.s.Tzad = C.clamp(v, 0, T_MAX); obnovit(); }
+  function pererezat() {
+    var s = st.s;
+    if (s.rezhim === 'svobodno') return;
+    s.rezhim = 'svobodno'; s.prof = null; s.T = 0; st.idet = true; obnovit();
+  }
+  function pauza() { st.idet = !st.idet; obnovit(); }
+  function sbros() { nachat(st.s.rezhim === 'svobodno' ? 'dlina' : st.s.rezhim); }
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var s = st.s, q = velichiny(s);
+    if (s.ushel)
+      return 'Шарик ушёл со стола. Пока он летел, момент импульса относительно отверстия был ' +
+        A(num(q.L, 4) + ' кг·м²/с') + '. «Сброс» возвращает его на окружность 0,5 м.';
+    if (s.rezhim === 'svobodno')
+      return 'Нить перерезана, сил в плоскости стола нет, и шарик идёт по прямой со скоростью ' +
+        A(num(q.v, 2) + ' м/с') + '. Момент импульса относительно отверстия тот же, ' + A(num(q.L, 4)) +
+        ': плечо, расстояние от отверстия до прямой, не меняется.';
+    if (s.rezhim === 'sila')
+      return 'Рука тянет с силой ' + A(num(s.Tzad, 2) + ' Н') + '. При 0,2 Н шарик идёт по окружности 0,5 м; ' +
+        'сильнее тянешь, и его затягивает внутрь, пока скорость поперёк нити не вырастет и не развернёт его. ' +
+        'Радиус качается, энергия меняется на работу руки, а момент стоит на ' + A(num(q.L, 4) + ' кг·м²/с') + '.';
+    if (s.prof)
+      return 'Рука ' + (s.prof.l1 < s.prof.l0 ? 'втягивает' : 'отпускает') + ' нить за ' + A(num(s.prof.tau, 1) + ' с') +
+        '. Натяжение направлено к отверстию и момента относительно него не имеет: момент стоит на ' +
+        A(num(q.L, 4)) + ', а энергия меняется ровно на работу руки.';
+    if (Math.abs(q.r - R2) < 1e-4)
+      return 'Нить втянута до 0,25 м: скорость ' + A(num(q.v, 3) + ' м/с') + ', вдвое больше, энергия ' +
+        A(num(q.K, 3) + ' Дж') + ' вместо 0,05, рука совершила ' + A(num(s.A, 3) + ' Дж') +
+        '. Момент тот же, ' + A(num(q.L, 4) + ' кг·м²/с') + ', и площадь за секунду та же.';
+    return 'Шарик ходит по окружности 0,5 м со скоростью 1 м/с; нить уходит в отверстие, снизу её держит рука. ' +
+      'За каждые полсекунды радиус-вектор заметает одну и ту же площадь, ' + A('0,125 м²') + ', то есть 0,25 м² в секунду. «Втянуть» укорачивает нить до 0,25 м.';
+  }
+
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Рука:">
+          <${C.Btn} active=${ui.rezhim === 'dlina'} onClick=${rezhimDlina}>держит длину<//>
+          <${C.Btn} active=${ui.rezhim === 'sila'} onClick=${rezhimSila}>держит силу<//>
+        <//>
+        ${ui.rezhim === 'dlina' ? html`
+          <${C.Group}>
+            <${C.Btn} action=${true} disabled=${ui.prof} onClick=${function () { tyanut('vtyanut'); }}>Втянуть до 0,25 м<//>
+            <${C.Btn} disabled=${ui.prof} onClick=${function () { tyanut('otpustit'); }}>Отпустить до 0,5 м<//>
+          <//>
+          <${C.Slider} label="За время:" min=${TAU_MIN} max=${TAU_MAX} step=${0.1} value=${ui.tau}
+                       onChange=${tau} display=${num(ui.tau, 1) + ' с'} />` : null}
+        ${ui.rezhim === 'sila' ? html`
+          <${C.Slider} label="Натяжение:" min=${0} max=${T_MAX} step=${0.01} value=${ui.Tzad}
+                       onChange=${sila} display=${num(ui.Tzad, 2) + ' Н'} />` : null}
+        <${C.Group}>
+          <${C.Btn} disabled=${ui.rezhim === 'svobodno'} onClick=${pererezat}>Перерезать нить<//>
+          <${C.Btn} onClick=${pauza}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(SharikNaNiti);
+</script>
+</body>
+</html>

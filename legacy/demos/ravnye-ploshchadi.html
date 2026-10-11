@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Равные площади шагами</title>
+<link rel="stylesheet" href="../shared/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-05/">&larr; Неделя 05</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/vendor/katex/katex.min.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=ravnye-ploshchadi"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `sektorialnaya-skorost`, раздел «Пройдём площади шагами»
+   (бриф briefs/demki_nedelya05.md, № 2). Точку ведёт схема третьей недели
+   (`chislennoe-integrirovanie`) крупными шагами, от 12 до 40 на оборот, и
+   после каждого шага рисуется треугольник, который заметает радиус-вектор:
+   вершина в центре силы O, две другие в соседних положениях точки. Демка
+   утверждает две вещи: в полунеявной схеме площади треугольников равны
+   L Δt/2m при любой силе, направленной на O, а в явной момент за шаг
+   растёт на Δt² v_n × F_n. Обе снимаются со счёта, а не выписываются.
+
+   ЕДИНИЦЫ безразмерные, GM = 1, m = 1. Старт на r = 1 со скоростью 0,8 по
+   касательной, против часовой стрелки: L₀ = m r v = 0,8. Под обратным
+   квадратом это эллипс, энергия E = 0,8²/2 − 1 = −0,68, большая полуось
+   a = GM/2|E| = 0,7353, старт в апоцентре, перицентр на 2a − 1 = 0,4706,
+   период 2π a^{3/2} = 3,9616. Упругая сила F = −k r при k = 1 (коэффициент
+   подобран здесь, в главе его нет): эллипс с центром в O, полуоси 1 и 0,8,
+   период 2π. Шаг Δt = T/N, где T период точного движения при этом законе;
+   у толчков T тот же, что у обратного квадрата.
+
+   ТОЛЧКИ НЬЮТОНА («Начала», кн. I, предложение 1). Толчок к центру на
+   каждом шаге случайный по модулю: сила обратного квадрата в вершине,
+   умноженная на ξ, равномерно распределённое от 0 до 2. Среднее, стало
+   быть, тяготение на этом месте, а разброс от нуля до двойного (среднее
+   подобрано здесь, бриф его не называет). Случайные числа дают ГСЧ
+   mulberry32 с зерном: прогон повторяем, «Сброс» берёт следующее зерно.
+   Энергия под такими толчками блуждает, и орбита рано или поздно уходит
+   из окна; площади треугольников от этого не меняются, и об этом демка.
+
+   СХЕМЫ. Полунеявная, как в главе: сначала скорость по силе в старой
+   точке, v_{n+1} = v_n + F(r_n) Δt/m, потом положение по новой скорости,
+   r_{n+1} = r_n + v_{n+1} Δt. Картина Ньютона ровно она: в вершине r_n
+   толчок F Δt к центру, потом прямой полёт с новой скоростью. Момент
+   после шага m r_{n+1} × v_{n+1} = m r_n × v_{n+1} = L_n + Δt r_n × F_n,
+   а r_n × F_n = 0, потому что сила идёт вдоль r_n: момент стоит, и площадь
+   треугольника ½|r_n × r_{n+1}| = ½ Δt |r_n × v_{n+1}| = L Δt/2m при любом
+   законе силы, лишь бы сила смотрела на O. Проверка 29.09 и 30.09
+   прогоном __demoProgon при всех трёх законах и всех N от 12 до 40
+   (10N шагов, то есть десять периодов T по времени, или до ухода из
+   окна): отклонение площадей от L₀Δt/2m не больше 2,5·10⁻¹⁶, момент
+   отходит от 0,8 не больше чем на 2·10⁻¹⁵.
+
+   Явная: положение по старой скорости, r_{n+1} = r_n + v_n Δt, скорость
+   по силе в старой точке. Толчок F(r_n) Δt, посчитанный в старой вершине,
+   достаётся точке уже в новой, r_{n+1}, а смотрит он вдоль r_n: его прямая
+   проходит мимо O на плече Δt |v_n × r̂_n|. Отсюда приращение момента за
+   шаг r_{n+1} × F_n Δt = Δt² v_n × F_n, и оно положительно: сила к центру
+   даёт (v × F)_z = |F| L/(m r) > 0. Площадь шага ½ Δt |r_n × v_n| = L_n Δt/2m
+   растёт вместе с моментом. Демка печатает оба приращения, L_{n+1} − L_n
+   со счёта и Δt² (v_n × F_n)_z по формуле; при тех же прогонах они
+   расходятся не больше чем на 7,2·10⁻¹⁶, на ошибке округления.
+
+   Между толчками точка идёт по прямой с постоянной скоростью, и момент на
+   прямой не меняется ни в одной схеме: меняет его только толчок, у
+   которого есть плечо. Поэтому показание момента обновляется в вершинах.
+
+   Энергия полунеявной схемы колеблется и не уходит: при N = 16 под
+   обратным квадратом от −0,77 до −0,48 при точных −0,68, и многоугольник
+   медленно поворачивается. Глава говорит об этом прямо; демка не прячет:
+   пунктиром нарисован точный эллипс, и ломаная от него отходит. */
+
+var GM = 1, M = 1, K_UPR = 1;
+var R0 = 1, V0 = 0.8;                             /* старт: апоцентр и скорость */
+var L0 = M * R0 * V0;                             /* 0,8 */
+var E_KEPLER = V0 * V0 / 2 - GM / R0;             /* −0,68 */
+var A_KEPLER = -GM / (2 * E_KEPLER);              /* 0,73529 */
+var RP_KEPLER = 2 * A_KEPLER - R0;                /* перицентр 0,47059 */
+var T_KEPLER = 2 * Math.PI * Math.sqrt(Math.pow(A_KEPLER, 3) / GM);   /* 3,9616 */
+var T_UPR = 2 * Math.PI * Math.sqrt(M / K_UPR);   /* 6,2832 */
+var TAU = 2 * Math.PI;
+
+var ZAKONY = {
+  'obratnyj-kvadrat': { T: T_KEPLER, sluchaj: false },
+  'uprugaya':         { T: T_UPR,    sluchaj: false },
+  'tolchki':          { T: T_KEPLER, sluchaj: true }
+};
+
+var N_MIN = 12, N_MAX = 40, N_NACH = 16;
+/* Зерно по умолчанию подобрано прогоном зёрен 1…300 при N = 12, 16, 20,
+   24, 30 и 40. Отбор по времени: при каждом из этих N точка держится в
+   окне не меньше 1,25 N шагов, то есть 1,25 периода T. Таких зёрен пять,
+   и из них 283 дольше всех держит точку при N = 16: 54 шага, по времени
+   3,38 T, а заметает радиус-вектор за них 2,79 оборота. Слабое место
+   того же зерна N = 12: там точка уходит на 15-м шаге, пройдя 0,65
+   оборота. Зерно 280 держит не меньше 1,26 оборота при всех шести N,
+   но при N = 16 только 28 шагов, и показ вдвое короче.
+   Зёрна следующих «Сбросов» какие выпадут: при N = 16 медиана по зёрнам
+   1…300 равна 14 шагам и 0,83 оборота, и у 273 зёрен из 300 точка
+   уходит, не пройдя двух оборотов. Уход из окна не ошибка модели: под
+   случайными толчками энергия блуждает. Проверка 30.09. */
+var SEED_NACH = 283;
+
+/* Сила (при m = 1 она же ускорение) в точке (x, y); ξ множитель толчка. */
+function sila(zakon, x, y, xi) {
+  if (zakon === 'uprugaya') return [-K_UPR * x, -K_UPR * y];
+  var r = Math.hypot(x, y), f = xi * GM * M / (r * r * r);
+  return [-f * x, -f * y];
+}
+
+/* ГСЧ mulberry32: 32-битное зерно, равномерно на [0, 1). */
+function gsch(seed) {
+  var a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    var t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* Один шаг схемы из состояния s = {x, y, vx, vy}. Всё, что о шаге
+   утверждается, считается здесь: площадь по двум положениям, момент до
+   и после по положению и скорости, приращение по формуле главы. */
+function shag(zakon, shema, s, dt, xi) {
+  var F = sila(zakon, s.x, s.y, xi);
+  var n;
+  if (shema === 'poluneyavnaya') {
+    var vx = s.vx + F[0] * dt / M, vy = s.vy + F[1] * dt / M;
+    n = { x: s.x + vx * dt, y: s.y + vy * dt, vx: vx, vy: vy };
+  } else {
+    n = { x: s.x + s.vx * dt, y: s.y + s.vy * dt,
+          vx: s.vx + F[0] * dt / M, vy: s.vy + F[1] * dt / M };
+  }
+  var Ldo = M * (s.x * s.vy - s.y * s.vx);
+  var Lposle = M * (n.x * n.vy - n.y * n.vx);
+  return {
+    s: n, F: F, xi: xi,
+    ploshchad: Math.abs(s.x * n.y - s.y * n.x) / 2,
+    Ldo: Ldo, Lposle: Lposle, dLmodel: Lposle - Ldo,
+    /* у полунеявной толчок идёт вдоль r_n, и формула даёт ноль */
+    dLformula: shema === 'yavnaya' ? dt * dt * (s.vx * F[1] - s.vy * F[0]) : 0
+  };
+}
+
+function energiya(zakon, s) {
+  var v2 = s.vx * s.vx + s.vy * s.vy, r = Math.hypot(s.x, s.y);
+  return zakon === 'uprugaya' ? v2 / 2 + K_UPR * r * r / 2 : v2 / 2 - GM / r;
+}
+
+/* ══════════════════ сцена: геометрия ══════════════════
+
+   Слева окно орбиты: центр силы O, пунктиром точный эллипс (у толчков его
+   нет), треугольники последнего оборота через один двумя цветами, ломаная
+   счёта в цвете схемы. В вершине, где начался текущий полёт, построение
+   Ньютона: пунктир, куда точка ушла бы без толчка, стрелка толчка и его
+   прямая. У полунеявной прямая идёт через O, у явной мимо, и плечо
+   отмечено. Смещение от толчка, Δv Δt, есть пунктирный отрезок от точки
+   «без толчка» до новой вершины, он считается из модели. Стрелка толчка
+   показывает направление и сравнительный модуль, в своём масштабе:
+   длина пропорциональна √|F|, S_A пикселей при |F| = 1, то есть при силе
+   на старте. Корень сжимает большие силы у центра, где места мало, и
+   различие толчков остаётся видно: вдвое больший толчок даёт стрелку в
+   1,41 раза длиннее. Остриё не заходит дальше K_STR пути от вершины до
+   основания перпендикуляра из O на прямую толчка (у полунеявной это
+   сам центр), иначе стрелка у перицентра протыкала бы O. Под обратным
+   квадратом и упругой силой этот потолок не срабатывает ни разу (прогон
+   30.09, все N от 12 до 40, обе схемы, 10N шагов); у толчков Ньютона при
+   N = 16 срабатывает у 5 процентов вершин (зёрна 1…300), и урезанная
+   стрелка помечена надломом, двумя косыми чертами на древке.
+
+   Справа площади последних шестнадцати треугольников столбиками, в долях
+   S₀ = L₀Δt/2m; текущий столбик растёт вместе с заметаемым треугольником.
+   Под ними две строки схемы, ниже показания. Строки схемы стоят вне окна
+   орбиты: орбита толчков бродит по всему окну и перечёркивала их. Буквы
+   величин набирает KaTeX слоем поверх канвы. Кегль слоя на телефоне
+   упирается в 9 px, и в кадре буква тем крупнее, чем уже экран: 24 px
+   кадра при ширине 375, 28 при 320, против 17 на широком экране.
+   Расстановка подписей рассчитана на самый узкий телефон: строки схемы
+   через 46 px, их рамки при 320 px не сходятся. Формулы под показаниями
+   стоят по центру каждого числа; обе формулы явной схемы помещаются
+   рядом, пока кадр не уже 372 px, а в более узком их убирает vyrovnyatSloj,
+   и формулу приращения называет строка состояния. Замер 30.09 при
+   ширине 320, 360 и 375.
+
+   Счётчик оборотов в углу окна считает угол, заметённый радиус-вектором
+   от вершины к вершине, а не время n/N: в явной схеме под обратным
+   квадратом при N = 16 точка до ухода из окна проходит 0,50 оборота за
+   время 0,81 T.
+
+   Темп: N полётов, то есть период T точного движения, за T_EKR секунд
+   экрана при любом N. */
+
+var W = 1000, HGT = 460;
+/* Окно орбиты в единицах модели то же, что при высоте 440 (−1,59…1,59
+   по x, −1,156…1,156 по y): от него зависит, на каком шаге точка уходит,
+   и все числа ухода в комментариях сняты с этим окном. */
+var WIN = { x0: 14, y0: 22, x1: 586, y1: 438 };   /* окно орбиты на канве */
+var CX = 300, CY = 230, S = 180;                  /* центр силы и пикселей на единицу */
+var WIN_U = { x0: (WIN.x0 - CX) / S, x1: (WIN.x1 - CX) / S,
+              y0: (CY - WIN.y1) / S, y1: (CY - WIN.y0) / S };
+var CH = { x0: 660, x1: 960, y0: 48, y1: 168 };   /* поле столбиков */
+var NB = 16, Y_MAX = 2;                           /* столбиков и потолок в долях S₀ */
+var SHEMA_X = 620, SHEMA_Y = [221, 267];          /* строки схемы, левый край и середины */
+var ROW = [308, 374], COL = [800, 975];           /* показания */
+var POD = 64, POD_DX = 72;                        /* формула под числом: ниже на 64, середина числа */
+var T_EKR = 6;                                    /* секунд экрана на период T */
+var S_A = 32, K_STR = 0.8;                        /* стрелка толчка: px при |F| = 1 и потолок */
+
+var CSH = { poluneyavnaya: '#5ce0a0', yavnaya: '#ff7a66' };   /* цвета схем, как в shag-ejlera */
+var CF = '#e08a52';                                          /* толчок: охра силы */
+var CL = '#a6c35a', CS = '#4db6c6';                          /* момент и площадь */
+var ZALIVKA = ['rgba(77,182,198,.26)', 'rgba(166,195,90,.26)'];
+var STOLBY = ['rgba(77,182,198,.9)', 'rgba(166,195,90,.9)'];
+
+function vOkne(s) {
+  return s.x > WIN_U.x0 && s.x < WIN_U.x1 && s.y > WIN_U.y0 && s.y < WIN_U.y1;
+}
+
+/* ══════════════════ модель прогона ══════════════════
+
+   m.s состояние в последней пройденной вершине, m.tek шаг, который сейчас
+   пролетается (посчитан заранее целиком), m.gotovye пройденные шаги.
+   У явной схемы толчок, посчитанный на шаге n, ждёт в m.dolg и
+   достаётся вершине n + 1. m.ugol копит угол, заметённый радиус-вектором
+   от вершины к вершине, со знаком: против часовой плюс. */
+
+function novayaModel(zakon, shema, N, seed) {
+  var m = {
+    zakon: zakon, shema: shema, N: N, seed: seed,
+    dt: ZAKONY[zakon].T / N, rnd: gsch(seed),
+    s: { x: R0, y: 0, vx: 0, vy: V0 }, n: 0, ugol: 0,
+    tek: null, gotovye: [], dolg: null,
+    Smin: Infinity, Smax: -Infinity, devMax: 0, dLdiffMax: 0,
+    Sfirst: null, last: null, ushla: false, upala: false
+  };
+  plan(m);
+  return m;
+}
+
+function plan(m) {
+  var xi = ZAKONY[m.zakon].sluchaj ? 2 * m.rnd() : 1;
+  var sh = shag(m.zakon, m.shema, m.s, m.dt, xi);
+  var P = [m.s.x, m.s.y];
+  sh.P = P;
+  sh.Q = [sh.s.x, sh.s.y];
+  /* скорость полёта: у полунеявной новая, у явной старая */
+  sh.u = m.shema === 'poluneyavnaya' ? [sh.s.vx, sh.s.vy] : [m.s.vx, m.s.vy];
+  /* сила толчка, который точка получила в вершине P */
+  sh.tolchok = m.shema === 'poluneyavnaya' ? sh.F : m.dolg;
+  /* куда точка ушла бы из P без толчка: предыдущий полёт, продолженный */
+  var prev = m.gotovye.length ? m.gotovye[m.gotovye.length - 1] : null;
+  sh.c = prev ? [P[0] + prev.u[0] * m.dt, P[1] + prev.u[1] * m.dt] : null;
+  sh.k = m.n;
+  m.tek = sh;
+}
+
+function zavershit(m) {
+  var sh = m.tek, S0 = L0 * m.dt / (2 * M), a = m.s, b = sh.s;
+  /* угол между r_n и r_{n+1}: полёт прямой, из O отрезок виден под углом
+     меньше π, и atan2 даёт заметённый угол без неоднозначности */
+  m.ugol += Math.atan2(a.x * b.y - a.y * b.x, a.x * b.x + a.y * b.y);
+  m.s = sh.s; m.n++;
+  if (m.shema === 'yavnaya') m.dolg = sh.F;
+  var Sk = sh.ploshchad;
+  if (Sk < m.Smin) m.Smin = Sk;
+  if (Sk > m.Smax) m.Smax = Sk;
+  m.devMax = Math.max(m.devMax, Math.abs(Sk - S0));
+  m.dLdiffMax = Math.max(m.dLdiffMax, Math.abs(sh.dLmodel - sh.dLformula));
+  if (m.Sfirst == null) m.Sfirst = Sk;
+  m.last = sh;
+  m.gotovye.push(sh);
+  if (m.gotovye.length > 3 * N_MAX) m.gotovye.shift();
+  if (!vOkne(m.s)) m.ushla = true;
+  if (Math.hypot(m.s.x, m.s.y) < 1e-3) m.upala = true;
+  plan(m);
+}
+
+/* Показания модели: то, что демка утверждает, в одном месте. */
+function snyat(m) {
+  var s = m.s, l = m.last;
+  return {
+    law: m.zakon, scheme: m.shema, N: m.N, dt: m.dt, step: m.n, seed: m.seed,
+    /* обороты: заметённый угол; время в периодах T отдельно */
+    revolutions: m.ugol / TAU, periods: m.n / m.N,
+    x: s.x, y: s.y, vx: s.vx, vy: s.vy, r: Math.hypot(s.x, s.y),
+    E: energiya(m.zakon, s),
+    L: M * (s.x * s.vy - s.y * s.vx), L0: L0,
+    areaTheory: L0 * m.dt / (2 * M),
+    areaLast: l ? l.ploshchad : null,
+    areaSpread: m.n ? m.Smax - m.Smin : null,
+    areaDevMax: m.n ? m.devMax : null,
+    areaVsL: l ? Math.abs(l.ploshchad - l.Ldo * m.dt / (2 * M)) : null,
+    areaRatio: l ? l.ploshchad / m.Sfirst : null,
+    dLpredicted: l ? l.dLformula : null,
+    dLmodel: l ? l.dLmodel : null,
+    dLdiffMax: m.n ? m.dLdiffMax : null,
+    xi: l ? l.xi : null,
+    left: m.ushla, fell: m.upala
+  };
+}
+
+/* Прогон без анимации той же арифметикой: автопроверка зовёт его как
+   __demoProgon({ law, scheme, N, steps, seed }). Выход из окна не
+   останавливает счёт, а записывается шагом ushlaNa. */
+function progon(opt) {
+  var m = novayaModel(opt.law || 'obratnyj-kvadrat', opt.scheme || 'poluneyavnaya',
+                      opt.N || N_NACH, opt.seed || SEED_NACH);
+  var ushlaNa = null, Emin = Infinity, Emax = -Infinity;
+  for (var i = 0; i < (opt.steps || m.N); i++) {
+    zavershit(m);
+    var E = energiya(m.zakon, m.s);
+    if (E < Emin) Emin = E;
+    if (E > Emax) Emax = E;
+    if (m.ushla && ushlaNa == null) ushlaNa = m.n;
+  }
+  return Object.assign(snyat(m), { ushlaNa: ushlaNa, Emin: Emin, Emax: Emax });
+}
+
+/* ══════════════════ числа и формулы ══════════════════ */
+
+/* Русская запятая и настоящий минус; крохи печатаются нулём. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+/* То же для KaTeX: запятая в фигурных скобках, чтобы не было пробела. */
+function tnum(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', '{,}');
+}
+/* Кроха вида 1,4·10⁻¹⁶: мантисса с одним знаком и порядок. */
+function mantissa(v) {
+  var e = Math.floor(Math.log10(v)), m = v / Math.pow(10, e);
+  if (m >= 9.95) { m /= 10; e += 1; }
+  return { m: m, e: e };
+}
+var SUP = { '-': '⁻', '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+            '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' };
+function kroha(v) {
+  if (v === 0) return '0';
+  if (v >= 1e-3) return num(v, 5);
+  var p = mantissa(v);
+  return num(p.m, 1) + '·10' + String(p.e).split('').map(function (c) { return SUP[c]; }).join('');
+}
+function tkroha(v) {
+  if (v === 0) return '0';
+  if (v >= 1e-3) return tnum(v, 5);
+  var p = mantissa(v);
+  return tnum(p.m, 1) + '\\cdot 10^{' + p.e + '}';
+}
+
+function kx(tex) {
+  try { return katex.renderToString(tex, { throwOnError: false }); }
+  catch (e) { return tex; }
+}
+
+var TEX_ZAKON = {
+  'obratnyj-kvadrat': '\\vec F = -GMm\\,\\vec r/r^3',
+  'uprugaya': '\\vec F = -k\\vec r',
+  'tolchki': '\\vec F_n = -\\xi_n\\,GMm\\,\\vec r_n/r_n^3,\\quad 0 \\le \\xi_n \\le 2'
+};
+var TEX_SHEMA = {
+  poluneyavnaya: ['\\vec v_{n+1} = \\vec v_n + \\vec F_n\\,\\Delta t/m',
+                  '\\vec r_{n+1} = \\vec r_n + \\vec v_{n+1}\\,\\Delta t'],
+  yavnaya: ['\\vec r_{n+1} = \\vec r_n + \\vec v_n\\,\\Delta t',
+            '\\vec v_{n+1} = \\vec v_n + \\vec F_n\\,\\Delta t/m']
+};
+
+/* ══════════════════ рисование ══════════════════ */
+
+function strelka(ctx, x0, y0, x1, y1, color, width) {
+  var dx = x1 - x0, dy = y1 - y0, Ln = Math.hypot(dx, dy);
+  if (Ln < 1) return;
+  var ux = dx / Ln, uy = dy / Ln;
+  var head = Math.min(12, Ln * 0.32);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.stroke();
+  /* наконечник с выемкой, тот же силуэт, что в рисунках главы */
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * head - uy * head * 0.34, y1 - uy * head + ux * head * 0.34);
+  ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.lineTo(x1 - ux * head + uy * head * 0.34, y1 - uy * head - ux * head * 0.34);
+  ctx.closePath(); ctx.fill();
+}
+
+/* Надлом урезанной стрелки: две косые черты поперёк древка в точке
+   (x, y); (ux, uy) направление древка на экране. */
+function nadlom(ctx, x, y, ux, uy, color) {
+  var sx = 0.5 * ux - 0.87 * uy, sy = 0.5 * uy + 0.87 * ux;   /* под 60° к древку */
+  ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.beginPath();
+  [-4, 4].forEach(function (o) {
+    var qx = x + ux * o, qy = y + uy * o;
+    ctx.moveTo(qx - sx * 7, qy - sy * 7); ctx.lineTo(qx + sx * 7, qy + sy * 7);
+  });
+  ctx.stroke();
+}
+
+function X(x) { return CX + x * S; }
+function Y(y) { return CY - y * S; }
+
+/* положение подписи латех-слоя в процентах кадра */
+function poz(x, y) { return { left: (x / W * 100) + '%', top: (y / HGT * 100) + '%' }; }
+
+/* Слой подписей ложится ровно на кадр рисунка. Канва вписывает кадр
+   W×HGT с полями (см. paint в demo-core), а слой по умолчанию растянут
+   на всю обёртку: пока обёртка держит пропорцию, это одно и то же, но на
+   телефоне ширина упирается в экран, высота остаётся от flex, и буквы
+   разъезжались с рисунком по вертикали (замер 29.09: обёртка 375×545 при
+   кадре 375×165). Поэтому слою ставятся те же поля, что у кадра. */
+function vyrovnyatSloj(ax, canvas, shema) {
+  var cw = canvas.clientWidth, ch = canvas.clientHeight;
+  if (!ax || !cw || !ch) return;
+  var key = cw + 'x' + ch + shema;
+  if (ax.dataset.kadr === key) return;
+  ax.dataset.kadr = key;
+  var s = Math.min(cw / W, ch / HGT);
+  ax.style.left = ((cw - W * s) / 2 / cw * 100) + '%';
+  ax.style.width = (W * s / cw * 100) + '%';
+  ax.style.top = ((ch - HGT * s) / 2 / ch * 100) + '%';
+  ax.style.height = (HGT * s / ch * 100) + '%';
+  ax.style.right = 'auto'; ax.style.bottom = 'auto';
+  /* Две формулы явной схемы под показаниями в кадре уже 372 px сходятся
+     и вылезают за правый край (замер 30.09: при 360 px между ними 5 px,
+     при 320 они сливаются в одну строку и страница едет вбок). Там обе
+     убираются: подпись «ПРИРОСТ ЗА ШАГ» называет первую, строку
+     состояния вторую. Формула S₀ полунеявной схемы одна и помещается. */
+  var ubrat = W * s < 372 && shema === 'yavnaya';
+  ax.querySelectorAll('[data-pod]').forEach(function (el) { el.style.display = ubrat ? 'none' : ''; });
+}
+
+/* Закон силы стоит в левом верхнем углу окна орбиты, и бродящая орбита
+   толчков (а у явной схемы раскрученная спираль) может пройти через
+   него. Пока ломаная последних двух оборотов или точка задевают рамку
+   формулы, формула бледнеет, и линия счёта видна поверх. Рамка снимается
+   со слоя в единицах кадра, отрезки проверяются отсечением
+   Лианга–Барски. */
+function ramkaVKadre(el, ax, zapas) {
+  var a = ax.getBoundingClientRect(), r = el.getBoundingClientRect();
+  if (!a.width || !a.height || !r.width) return null;
+  return { x0: (r.left - a.left) / a.width * W - zapas, x1: (r.right - a.left) / a.width * W + zapas,
+           y0: (r.top - a.top) / a.height * HGT - zapas, y1: (r.bottom - a.top) / a.height * HGT + zapas };
+}
+function otrezokVRamke(x0, y0, x1, y1, b) {
+  var t0 = 0, t1 = 1, dx = x1 - x0, dy = y1 - y0;
+  var p = [-dx, dx, -dy, dy], q = [x0 - b.x0, b.x1 - x0, y0 - b.y0, b.y1 - y0];
+  for (var i = 0; i < 4; i++) {
+    if (p[i] === 0) { if (q[i] < 0) return false; continue; }
+    var t = q[i] / p[i];
+    if (p[i] < 0) { if (t > t1) return false; if (t > t0) t0 = t; }
+    else { if (t < t0) return false; if (t < t1) t1 = t; }
+  }
+  return true;
+}
+
+/* Буква O ставится поперёк прямой толчка, на расстоянии R_O от центра, по
+   часовой стрелке от радиуса. Прямая толчка лежит вдоль его направления d:
+   у полунеявной схемы она идёт через O и пунктиром продолжается за центр,
+   у явной проходит мимо, и плечо уходит от O против часовой. Сторона по
+   часовой от них свободна в обеих схемах; стрелка толчка идёт от вершины.
+   Прежнее место справа сверху перечёркивала прямая явной схемы и
+   стрелки полунеявной после поворота многоугольника (замер 30.09). До
+   первого толчка d берётся от вершины к центру. Расстояние R_O px кадра
+   плюс R_O_EM кегля буквы: на телефоне буква в кадре почти вдвое
+   крупнее, и отступ растёт вместе с ней (прогон 30.09 всех законов, схем
+   и N от 12 до 40 при ширине 320 и 1100: рамка буквы не ближе 15 px
+   кадра к прямой толчка, стрелке и плечу). */
+var R_O = 10, R_O_EM = 1.05;
+function mestoO(t) {
+  var F = t.tolchok, Fm = F ? Math.hypot(F[0], F[1]) : 0, d;
+  if (Fm > 1e-12) d = [F[0] / Fm, F[1] / Fm];
+  else { var r = Math.hypot(t.P[0], t.P[1]) || 1; d = [-t.P[0] / r, -t.P[1] / r]; }
+  var ex = -d[1], ey = -d[0];                     /* направление на экране */
+  var p = poz(CX + R_O * ex, CY + R_O * ey);
+  return { left: 'calc(' + p.left + ' + ' + (R_O_EM * ex).toFixed(3) + 'em)',
+           top: 'calc(' + p.top + ' + ' + (R_O_EM * ey).toFixed(3) + 'em)' };
+}
+
+function RavnyePloshchadi() {
+  var st = useRef({
+    zakon: 'obratnyj-kvadrat', shema: 'poluneyavnaya', N: N_NACH, seed: SEED_NACH,
+    m: null, faza: 0, rezhim: 'pusk'          /* pusk | shag | stop */
+  }).current;
+  if (!st.m) st.m = novayaModel(st.zakon, st.shema, st.N, st.seed);
+  var axRef = useRef(null);            /* слой латех-подписей */
+  var zakonRef = useRef(null);         /* подпись закона силы в окне орбиты */
+
+  /* одна пара useState: рейка и строка показаний перерисовываются вместе */
+  var pair = useState({ zakon: st.zakon, shema: st.shema, N: st.N, rezhim: st.rezhim, n: 0 });
+  var ui = pair[0], setUi = pair[1];
+
+  function obnovit() {
+    setUi({ zakon: st.zakon, shema: st.shema, N: st.N, rezhim: st.rezhim, n: st.m.n,
+            ushla: st.m.ushla });
+    pokazaniya();
+  }
+
+  /* Показания пишутся из шага, а не из рендера: автопроверка двигает модель
+     через __demoTick, и рендера при этом может не быть. */
+  function pokazaniya() {
+    window.__demoState = Object.assign(snyat(st.m), { running: st.rezhim, phase: st.faza });
+  }
+
+  function nachat() {
+    st.m = novayaModel(st.zakon, st.shema, st.N, st.seed);
+    st.faza = 0;
+  }
+
+  function step(dt) {
+    if (st.rezhim === 'stop') return;
+    var m = st.m, bylo = m.n;
+    st.faza += dt * m.N / T_EKR;
+    while (st.faza >= 1) {
+      zavershit(m);
+      if (m.ushla || m.upala || st.rezhim === 'shag') { st.faza = 0; st.rezhim = 'stop'; break; }
+      st.faza -= 1;
+    }
+    if (m.n !== bylo) obnovit(); else pokazaniya();
+  }
+
+  function draw(ctx) {
+    vyrovnyatSloj(axRef.current, ctx.canvas, st.m.shema);
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted, mut = 'rgb(' + muted + ')';
+    var m = st.m, t = m.tek, col = CSH[m.shema], i, g;
+    var S0 = L0 * m.dt / (2 * M);
+    /* текущее положение: вершина P плюс доля полёта */
+    var px = t.P[0] + st.faza * t.u[0] * m.dt, py = t.P[1] + st.faza * t.u[1] * m.dt;
+
+    /* ── окно орбиты ── */
+    ctx.strokeStyle = 'rgba(' + muted + ',.28)'; ctx.lineWidth = 1.2;
+    C.roundRect(ctx, WIN.x0, WIN.y0, WIN.x1 - WIN.x0, WIN.y1 - WIN.y0, 10);
+    ctx.stroke();
+    ctx.save();
+    ctx.beginPath(); ctx.rect(WIN.x0, WIN.y0, WIN.x1 - WIN.x0, WIN.y1 - WIN.y0); ctx.clip();
+
+    /* точная орбита пунктиром: эллипс с O в фокусе или в центре */
+    if (m.zakon !== 'tolchki') {
+      ctx.save();
+      ctx.setLineDash([5, 7]); ctx.strokeStyle = 'rgba(' + ink + ',.3)'; ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      if (m.zakon === 'uprugaya') ctx.ellipse(X(0), Y(0), R0 * S, V0 * S, 0, 0, TAU);
+      else ctx.ellipse(X(R0 - A_KEPLER), Y(0), A_KEPLER * S, Math.sqrt(RP_KEPLER * R0) * S, 0, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    /* треугольники последнего оборота и текущий, недометённый */
+    var gt = m.gotovye, ot = Math.max(0, gt.length - m.N);
+    for (i = ot; i < gt.length; i++) {
+      g = gt[i];
+      ctx.fillStyle = ZALIVKA[g.k % 2];
+      ctx.beginPath(); ctx.moveTo(CX, CY);
+      ctx.lineTo(X(g.P[0]), Y(g.P[1])); ctx.lineTo(X(g.Q[0]), Y(g.Q[1]));
+      ctx.closePath(); ctx.fill();
+    }
+    if (st.faza > 0) {
+      ctx.fillStyle = ZALIVKA[t.k % 2];
+      ctx.beginPath(); ctx.moveTo(CX, CY);
+      ctx.lineTo(X(t.P[0]), Y(t.P[1])); ctx.lineTo(X(px), Y(py));
+      ctx.closePath(); ctx.fill();
+    }
+    /* радиусы к вершинам: стороны треугольников */
+    ctx.strokeStyle = 'rgba(' + ink + ',.16)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (i = ot; i < gt.length; i++) { ctx.moveTo(CX, CY); ctx.lineTo(X(gt[i].P[0]), Y(gt[i].P[1])); }
+    ctx.moveTo(CX, CY); ctx.lineTo(X(t.P[0]), Y(t.P[1]));
+    ctx.stroke();
+
+    /* ломаная счёта: предыдущий оборот бледно (по нему видно, как
+       многоугольник поворачивается), последний ярко, с вершинами */
+    var ot2 = Math.max(0, gt.length - 2 * m.N);
+    ctx.lineWidth = 2.2; ctx.lineJoin = 'round';
+    if (ot > ot2) {
+      ctx.globalAlpha = 0.3; ctx.strokeStyle = col;
+      ctx.beginPath(); ctx.moveTo(X(gt[ot2].P[0]), Y(gt[ot2].P[1]));
+      for (i = ot2 + 1; i <= ot; i++) ctx.lineTo(X(gt[i].P[0]), Y(gt[i].P[1]));
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.strokeStyle = col;
+    ctx.beginPath(); ctx.moveTo(X(t.P[0]), Y(t.P[1]));
+    for (i = ot; i < gt.length; i++) {
+      if (i === ot) ctx.moveTo(X(gt[i].P[0]), Y(gt[i].P[1])); else ctx.lineTo(X(gt[i].P[0]), Y(gt[i].P[1]));
+    }
+    ctx.lineTo(X(t.P[0]), Y(t.P[1])); ctx.lineTo(X(px), Y(py));
+    ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    for (i = ot; i < gt.length; i++) {
+      ctx.moveTo(X(gt[i].P[0]) + 2.5, Y(gt[i].P[1])); ctx.arc(X(gt[i].P[0]), Y(gt[i].P[1]), 2.5, 0, TAU);
+    }
+    ctx.moveTo(X(t.P[0]) + 2.5, Y(t.P[1])); ctx.arc(X(t.P[0]), Y(t.P[1]), 2.5, 0, TAU);
+    ctx.fill();
+
+    /* построение Ньютона в вершине текущего полёта */
+    var Px = X(t.P[0]), Py = Y(t.P[1]);
+    if (t.c) {
+      ctx.save();
+      ctx.setLineDash([4, 5]); ctx.lineWidth = 1.6;
+      ctx.strokeStyle = 'rgba(' + ink + ',.55)';
+      ctx.beginPath(); ctx.moveTo(Px, Py); ctx.lineTo(X(t.c[0]), Y(t.c[1])); ctx.stroke();
+      ctx.strokeStyle = CF;
+      ctx.beginPath(); ctx.moveTo(X(t.c[0]), Y(t.c[1])); ctx.lineTo(X(t.Q[0]), Y(t.Q[1])); ctx.stroke();
+      ctx.restore();
+      ctx.strokeStyle = 'rgba(' + ink + ',.7)'; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(X(t.c[0]), Y(t.c[1]), 3.5, 0, TAU); ctx.stroke();
+    }
+    if (t.tolchok) {
+      var F = t.tolchok, Fm = Math.hypot(F[0], F[1]);
+      if (Fm > 1e-12) {
+        var d = [F[0] / Fm, F[1] / Fm];
+        /* основание перпендикуляра из O на прямую толчка */
+        var sO = -(t.P[0] * d[0] + t.P[1] * d[1]);
+        var osn = [t.P[0] + sO * d[0], t.P[1] + sO * d[1]];
+        var plecho = Math.abs(t.P[0] * d[1] - t.P[1] * d[0]);
+        ctx.save();
+        ctx.setLineDash([3, 5]); ctx.strokeStyle = 'rgba(224,138,82,.6)'; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(Px, Py);
+        ctx.lineTo(X(osn[0] + 0.14 * d[0]), Y(osn[1] + 0.14 * d[1])); ctx.stroke();
+        ctx.restore();
+        if (plecho * S > 3) {
+          ctx.strokeStyle = CF; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(X(osn[0]), Y(osn[1])); ctx.stroke();
+          /* подпись за концом плеча, по его продолжению от O: там она не
+             ложится ни на букву O, ни на прямую толчка */
+          var ex = osn[0] / plecho, ey = osn[1] / plecho;
+          C.label(ctx, X(osn[0]) + ex * (14 + 30 * Math.abs(ex)),
+                  Y(osn[1]) - ey * (12 + 10 * Math.abs(ey)) + 6, 'плечо', 17, CF);
+        }
+        /* длина ∝ √|F| с потолком перед основанием перпендикуляра (sO) */
+        var dlF = S_A * Math.sqrt(Fm), dlMax = K_STR * Math.max(sO, 0) * S;
+        var urezana = dlF > dlMax, dl = urezana ? dlMax : dlF;
+        strelka(ctx, Px, Py, Px + d[0] * dl, Py - d[1] * dl, CF, 3);
+        if (urezana) nadlom(ctx, Px + d[0] * dl * 0.42, Py - d[1] * dl * 0.42, d[0], -d[1], CF);
+      }
+    }
+
+    /* центр силы и точка */
+    ctx.fillStyle = 'rgba(' + ink + ',.9)';
+    ctx.beginPath(); ctx.arc(CX, CY, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgb(' + ink + ')';
+    ctx.beginPath(); ctx.arc(X(px), Y(py), 6.5, 0, TAU); ctx.fill();
+    ctx.restore();
+
+    /* закон силы бледнеет, пока его задевает ломаная или точка */
+    var zk = zakonRef.current;
+    if (zk && axRef.current) {
+      var ramka = ramkaVKadre(zk, axRef.current, 7), zadeta = false;
+      if (ramka) {
+        var ver = [];
+        for (i = ot2; i < gt.length; i++) ver.push([X(gt[i].P[0]), Y(gt[i].P[1])]);
+        ver.push([Px, Py], [X(px), Y(py)]);
+        for (i = 1; i < ver.length && !zadeta; i++)
+          zadeta = otrezokVRamke(ver[i - 1][0], ver[i - 1][1], ver[i][0], ver[i][1], ramka);
+      }
+      zk.style.opacity = zadeta ? '0.22' : '';
+    }
+
+    C.label(ctx, WIN.x1 - 14, WIN.y1 - 14,
+            'шагов ' + m.n + ' · оборотов ' + num(m.ugol / TAU, 2), 17, 'rgba(' + muted + ',.95)', 'right');
+
+    /* ── столбики площадей ── */
+    function gy(v) { return CH.y1 - Math.min(v, Y_MAX) / Y_MAX * (CH.y1 - CH.y0); }
+    ctx.strokeStyle = 'rgba(' + muted + ',.5)'; ctx.lineWidth = 1.4; ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(CH.x0, CH.y0 - 8); ctx.lineTo(CH.x0, CH.y1); ctx.lineTo(CH.x1 + 4, CH.y1);
+    ctx.stroke();
+    for (i = 0; i <= Y_MAX; i++) {
+      ctx.beginPath(); ctx.moveTo(CH.x0 - 5, gy(i)); ctx.lineTo(CH.x0, gy(i)); ctx.stroke();
+      C.label(ctx, CH.x0 - 10, gy(i) + 6, String(i), 17, mut, 'right');
+    }
+    ctx.save();
+    ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(' + ink + ',.45)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(CH.x0, gy(1)); ctx.lineTo(CH.x1, gy(1)); ctx.stroke();
+    ctx.restore();
+
+    var bars = gt.slice(-(NB - 1)).map(function (b) { return { v: b.ploshchad / S0, k: b.k }; });
+    bars.push({ v: st.faza * t.ploshchad / S0, k: t.k });
+    var slot = (CH.x1 - CH.x0) / NB, bw = slot * 0.66;
+    for (i = 0; i < bars.length; i++) {
+      var bx = CH.x0 + slot * i + (slot - bw) / 2, top = gy(bars[i].v);
+      ctx.fillStyle = STOLBY[bars[i].k % 2];
+      ctx.fillRect(bx, top, bw, CH.y1 - top);
+      if (bars[i].v > Y_MAX) {
+        /* выше потолка: столбик срезан, над срезом риска-уголок */
+        ctx.beginPath();
+        ctx.moveTo(bx, CH.y0 - 3); ctx.lineTo(bx + bw / 2, CH.y0 - 11); ctx.lineTo(bx + bw, CH.y0 - 3);
+        ctx.closePath(); ctx.fill();
+      }
+    }
+    C.label(ctx, (CH.x0 + CH.x1) / 2, CH.y1 + 26, 'площади последних треугольников', 17, mut);
+
+    /* ── показания ── */
+    var sn = snyat(m), est = m.n > 0;
+    C.readout(ctx, COL[0], ROW[0], 'ПЛОЩАДЬ ШАГА', est ? num(sn.areaLast, 5) : '—', est ? CS : mut);
+    C.readout(ctx, COL[1], ROW[0], 'МОМЕНТ ИМПУЛЬСА', num(sn.L, 6), CL);
+    if (m.shema === 'yavnaya') {
+      C.readout(ctx, COL[0], ROW[1], 'ПРИРОСТ ЗА ШАГ', est ? num(sn.dLmodel, 6) : '—', est ? CF : mut);
+      C.readout(ctx, COL[1], ROW[1], 'ПО ФОРМУЛЕ', est ? num(sn.dLpredicted, 6) : '—', est ? CF : mut);
+    } else {
+      C.readout(ctx, COL[0], ROW[1], 'ПО ФОРМУЛЕ', num(S0, 5), 'rgb(' + ink + ')');
+      C.readout(ctx, COL[1], ROW[1], 'РАЗБРОС ПЛОЩАДЕЙ', est ? kroha(sn.areaSpread) : '—', est ? col : mut);
+    }
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+  window.__demoProgon = progon;
+
+  function zakon(z) { st.zakon = z; st.seed = SEED_NACH; nachat(); obnovit(); }
+  function shema(sh) { st.shema = sh; nachat(); obnovit(); }
+  function vesti(v) {
+    var N = C.clamp(Math.round(v), N_MIN, N_MAX);
+    if (N === st.N) return;
+    st.N = N; nachat(); obnovit();
+  }
+  function odinShag() {
+    if (st.m.ushla || st.m.upala) nachat();
+    st.rezhim = 'shag'; obnovit();
+  }
+  function pusk() {
+    if (st.rezhim === 'pusk') st.rezhim = 'stop';
+    else { if (st.m.ushla || st.m.upala) nachat(); st.rezhim = 'pusk'; }
+    obnovit();
+  }
+  /* «Сброс» возвращает точку на старт; у толчков берёт следующее зерно,
+     то есть новые толчки */
+  function sbros() {
+    if (st.zakon === 'tolchki') st.seed += 1;
+    nachat(); obnovit();
+  }
+
+  /* Строка показаний пересказывает кадр; числа в ней те же, что на сцене. */
+  function slova() {
+    var A = function (s) { return '<span class="accent">' + s + '</span>'; };
+    var m = st.m, sn = snyat(m), n = m.n;
+    var S0 = L0 * m.dt / (2 * M);
+    var tolchki = m.zakon === 'tolchki';
+    var posleN = A(n) + ' ' + C.plural(n, 'шага', 'шагов', 'шагов');
+    if (m.ushla || m.upala) {
+      if (m.shema === 'yavnaya')
+        return 'Точка ушла из окна после ' + posleN + '. Момент вырос с ' + kx('0{,}8') + ' до ' +
+          kx(tnum(sn.L, 3)) + ', и последний треугольник в ' + A(num(sn.areaRatio, 1)) +
+          ' раза больше первого. Полунеявная схема при тех же шагах держит площади равными.';
+      return 'Точка ушла из окна после ' + posleN + (tolchki ? ': случайные толчки раскачали орбиту' : '') +
+        '. Все треугольники до последнего одной площади, разброс ' + kx(tkroha(sn.areaSpread)) +
+        '. «Сброс» ' + (tolchki ? 'даёт новые толчки.' : 'возвращает точку на старт.');
+    }
+    if (m.shema === 'yavnaya') {
+      if (!n)
+        return 'Явная схема ведёт точку по старой скорости, а толчок, посчитанный в старой вершине, ' +
+          'точка получает уже в новой, и смотрит он туда, где центр был виден из старой. Прямая такого толчка ' +
+          'проходит мимо ' + kx('O') + ', у толчка появляется плечо, и он меняет момент.';
+      return 'За последний шаг момент вырос на ' + kx(tnum(sn.dLmodel, 6)) + ', формула ' +
+        kx('\\Delta t^2\\,(\\vec v_n\\times\\vec F_n)_z') + ' даёт ' + kx(tnum(sn.dLpredicted, 6)) +
+        '. Площадь шага равна ' + kx('L_n\\,\\Delta t/2m') + ' и растёт вместе с моментом' +
+        (n >= 2 ? ': последний треугольник в ' + A(num(sn.areaRatio, 2)) + ' раза больше первого.'
+                : '; сравнить треугольники можно со второго шага.');
+    }
+    if (!n) {
+      if (tolchki)
+        return 'Толчки Ньютона: в каждой вершине точку толкают к ' + kx('O') + ', а модуль толчка ' +
+          'случайный, от нуля до удвоенной силы тяготения в этой точке. «Шаг» проводит один полёт, ' +
+          '«Пуск» ведёт подряд.';
+      return 'Полунеявная схема: в вершине толчок к центру ' + kx('O') + ', потом прямой полёт уже ' +
+        'с новой скоростью. За полёт радиус-вектор заметает треугольник. «Шаг» проводит один ' +
+        'полёт, «Пуск» ведёт подряд.';
+    }
+    /* Сравнивать площади можно со второго шага, как и в явной схеме;
+       нулевой разброс печатается без слов об округлении. */
+    var ploshchadS0 = kx('L_0\\,\\Delta t/2m = ' + tnum(S0, 5));
+    var razbros = sn.areaSpread === 0 ? kx('0') + ', площади совпали во всех знаках' :
+      kx(tkroha(sn.areaSpread)) + ', это ошибка округления';
+    if (tolchki) {
+      if (n === 1)
+        return 'Модуль первого толчка случайный, площадь первого треугольника ' + ploshchadS0 +
+          '; сравнить её с другими можно со второго шага. Для равных площадей нужен один центр, ' +
+          'модуль толчка не важен.';
+      return 'Толчки случайные, и ломаная идёт неровно. Площади при этом одинаковы, ' + ploshchadS0 +
+        ', разброс за ' + A(n) + ' ' + C.plural(n, 'шаг', 'шага', 'шагов') + ' ' + razbros +
+        '. Для равных площадей нужен один центр, модуль толчка не важен.';
+    }
+    var moment = 'Прямая ' + (n === 1 ? 'толчка' : 'каждого толчка') + ' проходит через ' + kx('O') + ', и момент стоит на ' +
+      kx(tnum(sn.L, 6)) + '.';
+    if (n === 1)
+      return 'Позади ' + A(1) + ' шаг. Площадь первого треугольника ' + ploshchadS0 +
+        ', сравнить её с другими можно со второго шага. ' + moment;
+    return 'Позади ' + A(n) + ' ' + C.plural(n, 'шаг', 'шага', 'шагов') + ', и у всех треугольников ' +
+      'одна площадь, ' + ploshchadS0 + '; разброс ' + razbros + '. ' + moment;
+  }
+
+  var shemaTex = TEX_SHEMA[ui.shema];
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Сила:">
+          <${C.Btn} active=${ui.zakon === 'obratnyj-kvadrat'}
+                    onClick=${function () { zakon('obratnyj-kvadrat'); }}>обратный квадрат<//>
+          <${C.Btn} active=${ui.zakon === 'uprugaya'}
+                    onClick=${function () { zakon('uprugaya'); }}>упругая<//>
+          <${C.Btn} active=${ui.zakon === 'tolchki'}
+                    onClick=${function () { zakon('tolchki'); }}>толчки Ньютона<//>
+        <//>
+        <${C.Group} label="Схема:">
+          <${C.Btn} active=${ui.shema === 'poluneyavnaya'}
+                    onClick=${function () { shema('poluneyavnaya'); }}>полунеявная<//>
+          <${C.Btn} active=${ui.shema === 'yavnaya'}
+                    onClick=${function () { shema('yavnaya'); }}>явная<//>
+        <//>
+        <${C.Slider} label="Шагов на оборот:" min=${N_MIN} max=${N_MAX} step=${1}
+                     value=${ui.N} onChange=${vesti} display=${String(ui.N)} />
+        <${C.Group}>
+          <${C.Btn} action=${true} onClick=${odinShag}>Шаг<//>
+          <${C.Btn} action=${true} onClick=${pusk}>${ui.rezhim === 'pusk' ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      ${/* Сцена держит пропорцию, и ведёт высота, как у «ускорения в
+            повороте». Потолок высоты по ширине экрана нужен телефону: там
+            ширина упирается в край, и без потолка обёртка вытягивалась в
+            столб с пустыми полосами над кадром и под ним. */''}
+      <div class="stage-wrap"
+           style=${{ aspectRatio: W + ' / ' + HGT, flex: '0 1 auto', minHeight: 0,
+                     height: '100%', width: 'auto', maxWidth: '100%', alignSelf: 'center',
+                     maxHeight: 'calc(100vw * ' + HGT + ' / ' + W + ')' }}>
+        <canvas class="stage" ref=${ref}></canvas>
+        <div class="ax is-on" ref=${axRef}>
+          ${/* O поперёк прямой текущего толчка, см. mestoO */''}
+          <span style=${mestoO(st.m.tek)} dangerouslySetInnerHTML=${{ __html: kx('O') }}></span>
+          <span class="ax-left" style=${poz(WIN.x0 + 16, WIN.y0 + 26)} ref=${zakonRef}
+                dangerouslySetInnerHTML=${{ __html: kx(TEX_ZAKON[ui.zakon]) }}></span>
+          <span class="ax-left" style=${poz(CH.x0 - 40, CH.y0 - 26)}
+                dangerouslySetInnerHTML=${{ __html: kx('S/S_0') }}></span>
+          <span class="ax-left" style=${poz(SHEMA_X, SHEMA_Y[0])}
+                dangerouslySetInnerHTML=${{ __html: kx(shemaTex[0]) }}></span>
+          <span class="ax-left" style=${poz(SHEMA_X, SHEMA_Y[1])}
+                dangerouslySetInnerHTML=${{ __html: kx(shemaTex[1]) }}></span>
+          <span style=${poz(COL[0] - POD_DX, ROW[1] + POD)} data-pod="1"
+                dangerouslySetInnerHTML=${{ __html: kx(ui.shema === 'yavnaya' ? 'L_{n+1}-L_n' : 'S_0 = L_0\\,\\Delta t/2m') }}></span>
+          <span style=${poz(COL[1] - POD_DX, ROW[1] + POD)} data-pod="1" hidden=${ui.shema !== 'yavnaya'}
+                dangerouslySetInnerHTML=${{ __html: kx('\\Delta t^2\\,(\\vec v_n\\times\\vec F_n)_z') }}></span>
+        </div>
+      </div>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(RavnyePloshchadi);
+</script>
+</body>
+</html>

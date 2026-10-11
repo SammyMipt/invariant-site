@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Катушка с порогом трения</title>
+<link rel="stylesheet" href="../shared/demo.css">
+</head>
+<body>
+<div id="root"></div>
+<!-- возврат к неделе: виден только вне iframe колоды -->
+<a class="demo-back" href="/week-06/">&larr; Неделя 06</a>
+<script>if (window.self !== window.top) document.querySelector('.demo-back').hidden = true;</script>
+
+<script src="../shared/vendor/react.production.min.js"></script>
+<script src="../shared/vendor/react-dom.production.min.js"></script>
+<script src="../shared/vendor/htm.js"></script>
+<script src="../shared/demo-core.js"></script>
+<script src="../shared/analytics.js?demo=katushka"></script>
+<script>
+'use strict';
+var C = window.DemoCore, html = C.html;
+var useState = React.useState, useRef = React.useRef;
+
+/* ══════════════════ физика ══════════════════
+
+   Блок главы `primer-katushka` (бриф briefs/demki_nedelya06.md, № 5; рамка
+   лекции 6, шаг «движущийся полюс»). Катушка на горизонтальном столе: обод
+   радиуса R, вал радиуса r = R/2, нить намотана на вал и сходит с него
+   снизу под углом α к горизонту (рука справа, нить идёт вправо и вверх).
+   Однородный диск, I_C = ½ m R², коэффициент трения μ = 0,3 (покоя и
+   скольжения одинаков). Масса и радиус главой не заданы: взяты m = 1 кг и
+   R = 0,2 м, на доли mg и g они не влияют, на угловое ускорение в рад/с²
+   влияет R.
+
+   ЧТО СЧИТАЕТСЯ. Центр масс и поворот вокруг него, без моментов относительно
+   точки касания. Ось x к руке, угловые величины против часовой стрелки.
+   Точка схода нити T = C + r(sin α, −cos α), сила F(cos α, sin α), момент
+   нити относительно C равен +F r (против часовой). Нормальная реакция
+   N = mg − F sin α (нить приподнимает катушку), центр по вертикали не
+   движется. Трение f на точке касания, скорость материальной точки
+   касания s = v + ωR.
+
+        m a = F cos α + f,            I_C ε = F r + R f.
+
+   КАЧЕНИЕ без проскальзывания, s = 0 и a + εR = 0:
+
+        a = F (cos α − r/R) / (m (1 + k)),   ε = −a/R,   k = I_C/(mR²) = ½,
+        f = −F (k cos α + r/R) / (1 + k)     (от руки при любом α).
+
+   Условие качения |f| ≤ μN. Знак a меняет cos α − r/R: меньше критического
+   угла (cos α_кр = r/R, при r/R = ½ это 60°) центр едет к руке, больше от
+   руки, на нём ускорение нулевое, и покоившаяся катушка стоит, а катящаяся
+   катится равномерно. Порог тяги по условию |f| ≤ μN:
+
+        F_пор = μ mg / ((k cos α + r/R)/(1 + k) + μ sin α).
+
+   СКОЛЬЖЕНИЕ, когда качению не хватает трения покоя: f = −μN знак s (точка
+   касания всегда идёт к руке, f от руки), a = (F cos α + f)/m,
+   ε = (F r + R f)/I_C. Ускорения в каждом режиме постоянны, поэтому счёт
+   точный, без шага интегрирования: на отрезке постоянных ускорений
+   x, v, θ, ω берутся формулами равноускоренного движения. Режим меняется в
+   двух случаях. Тяга выше порога (смена ползунка): качение превращается в
+   скольжение с s = 0. Скольжение гаснет, когда s доходит до нуля при
+   a + εR < 0 (тяга опустилась ниже порога): шаг делится в момент s = 0
+   (t* = s/|a + εR|), дальше качение с ω = −v/R. Из s > 0 скольжение
+   гаснет только в качение, назад в s < 0 оно не идёт.
+
+   ЧИСЛА БРИФА, пересчитаны python-расчётом до кода (briefs/demki_nedelya06_katushka_REPORT.md):
+   α_кр = arccos(r/R) = 60°. При 60° порог F_пор = 0,394837 mg (в рамке 0,395:
+   округление, ровно 0,395 уже даёт скольжение с a = 0,00012 g). При
+   F = 0,6 mg: N = 0,4804 mg, μN = 0,1441 mg, a = (F cos α − μN)/m =
+   0,1559 g = 1,529 м/с², ε = 0,3118 g/R = 15,29 рад/с², εR = 2a (при r/R = ½ и
+   α = α_кр общая формула даёт εR = a/k). Порог по всем углам от 0,3837 mg
+   при 42° до 0,4737 mg при 90° (0,450 при 0°).
+
+   ЧТО СОХРАНЯЕТСЯ И КАК ПРОВЕРЯЕТСЯ (по второму маршруту, не тем же счётом).
+   1. Энергия: K = ½mv² + ½I_Cω² против работы нити ∫F(v cos α + ωr)dt и
+      работы трения ∫f s dt (в качении ноль, в скольжении −тепло). Мощности
+      линейны по времени на отрезке, трапеция точна. Невязка выдаётся в
+      __demoState.balance.
+   2. Момент импульса относительно точки стола L = I_Cω − mRv: его скорость
+      −F(R cos α − r) от трения не зависит (трение лежит на линии стола).
+      Сумма моментов за время идёт отдельно (__demoState.LObalance); на
+      критическом угле L нулевой при любой силе и любом режиме.
+   3. Сглаженное трение f = −μN tanh(s/δ), жёсткий решатель Radau, который
+      ничего не знает о режимах: ускорения совпали с точной моделью до шести
+      знаков, а четыре последовательности со сменой режимов (скольжение
+      гаснет внутри шага, тяга выше порога посреди качения) дали те же x, v,
+      θ, ω на 10⁻⁵ (предел точности самого сглаживания).
+   Измеренные точности (прогон 04.10: 300 случайных последовательностей из
+   сорока смен угла и тяги, 77 863 шага, 902 смены режима): невязка энергии
+   не больше 3·10⁻¹² Дж при энергиях до 855 Дж (относительно 2·10⁻¹⁴),
+   невязка момента импульса не больше 3·10⁻¹⁴ кг·м²/с, связь качения
+   v + ωR = 0 держится до 5·10⁻¹⁶ м/с, тепло трения не убывает ни на шаге.
+   Результат не зависит от разбиения времени на шаги (от одного шага до
+   тысячи): x, v, θ, ω совпадают до 10⁻¹².
+
+   МГНОВЕННАЯ ОСЬ. Точка с нулевой скоростью лежит на вертикали через центр
+   на высоте v/ω над центром. При качении это −R, точка касания. При
+   скольжении она выше (на критическом угле и F = 0,6 mg ровно на R/2, у
+   верха вала), и уравнение I_A ε = M_A, I_A = (1 + k) m R², здесь не
+   выполняется: демка печатает обе стороны, M_A = −F(R cos α − r) и I_A ε.
+   Условие законности движущегося полюса в главе: ускорение материальной
+   точки касания смотрит на центр, а при скольжении у неё есть горизонтальная
+   составляющая a + εR. */
+
+var M = 1.0;                       /* масса катушки, кг */
+var R = 0.2;                       /* радиус обода, м */
+var RV = R / 2;                    /* радиус вала r, м */
+var KI = 0.5;                      /* I_C = KI m R², однородный диск */
+var MU = 0.3;                      /* коэффициент трения */
+var G = 9.81;                      /* м/с² */
+var IC = KI * M * R * R;           /* момент инерции относительно центра, кг·м² */
+var IA = IC + M * R * R;           /* относительно точки касания, законен только в качении */
+var ALFA_KR = Math.acos(RV / R);   /* критический угол, рад */
+var F_MAX = 1.0;                   /* предел ползунка в долях mg; при F sin α = mg катушка оторвалась бы */
+var ALFA0 = 60, F0 = 0.3;          /* что стоит на экране при открытии: критический угол, ниже порога */
+
+function rad(d) { return d * Math.PI / 180; }
+
+function nach() {
+  return { t: 0, x: 0, v: 0, th: 0, om: 0, skol: false, A: 0, Q: 0, Lint: 0 };
+}
+
+/* Силы и ускорения сейчас: al угол нити, рад; F тяга в долях mg; s состояние. */
+function sily(al, F, s) {
+  var ca = Math.cos(al), sa = Math.sin(al);
+  var Fn = F * M * G;
+  var N = Math.max(0, M * G - Fn * sa);
+  var fMax = MU * N;
+  var d = ca - RV / R;
+  if (Math.abs(d) < 1e-12) d = 0;                          /* критический угол: cos 60° в двойной точности на 1e-16 мимо r/R */
+  var fNuzhno = Fn * (KI * ca + RV / R) / (1 + KI);      /* трение, которого требует качение */
+  var aK = Fn * d / (M * (1 + KI));
+  var kach = fNuzhno <= fMax * (1 + 1e-12);
+  var q = { Fn: Fn, N: N, fMax: fMax, fNuzhno: fNuzhno, aK: aK, kach: kach, skol: s.skol || !kach };
+  if (q.skol) {
+    var vs = s.v + s.om * R;
+    /* Трение гасит скольжение точки касания. Начинается скольжение с s = 0 (в
+       двойной точности это ±1e-16), а точка касания тянется к руке всегда,
+       поэтому знак s берётся с допуском: иначе первый шаг скольжения при
+       s = −1e-16 получил бы трение не в ту сторону. */
+    q.f = vs < -1e-9 ? fMax : -fMax;
+    q.a = (Fn * ca + q.f) / M;
+    q.eps = (Fn * RV + R * q.f) / IC;
+  } else {
+    q.f = -fNuzhno; q.a = aK; q.eps = -aK / R;
+  }
+  q.MA = -Fn * (R * ca - RV);                             /* момент нити относительно A, против часовой + */
+  return q;
+}
+
+/* Отрезок постоянных ускорений длиной tau. Мощности нити и трения линейны по
+   времени, поэтому трапеция даёт работы точно. */
+function uchastok(s, q, tau, al, F) {
+  if (tau <= 0) return;
+  var ca = Math.cos(al);
+  var v0 = s.v, w0 = s.om, v1 = v0 + q.a * tau, w1 = w0 + q.eps * tau;
+  s.A += 0.5 * q.Fn * ((v0 + v1) * ca + (w0 + w1) * RV) * tau;
+  s.Q -= 0.5 * q.f * ((v0 + w0 * R) + (v1 + w1 * R)) * tau;      /* тепло трения: −∫ f s dt */
+  s.Lint += q.MA * tau;                                           /* ∫ M dt относительно точки стола, он же M_A */
+  s.x += v0 * tau + 0.5 * q.a * tau * tau;
+  s.th += w0 * tau + 0.5 * q.eps * tau * tau;
+  s.v = v1; s.om = w1; s.t += tau;
+  if (!q.skol) s.om = -s.v / R;                                   /* связь качения держится точно */
+}
+
+/* Продвинуть модель на dt секунд при данных α и F. */
+function prodvinut(s, al, F, dt) {
+  for (var n = 0; n < 16 && dt > 0; n++) {
+    var q = sily(al, F, s);
+    if (q.skol && !s.skol) s.skol = true;                         /* тяга выше порога: скольжение начинается с s = 0 */
+    if (s.skol) {
+      var vs = s.v + s.om * R, as = q.a + q.eps * R;
+      if (as < 0 && vs + as * dt <= 0) {                          /* скольжение гаснет внутри шага */
+        var ts = vs > 0 ? -vs / as : 0;
+        uchastok(s, q, ts, al, F);
+        s.skol = false; s.om = -s.v / R;
+        dt -= ts;
+        continue;
+      }
+    }
+    uchastok(s, q, dt, al, F);
+    return;
+  }
+  if (dt > 0) uchastok(s, sily(al, F, s), dt, al, F);              /* защита на границе режимов */
+}
+
+/* Если ползунок поставил тягу выше порога, скольжение начинается сразу, а не
+   в следующем шаге: показания в этот момент уже скользящие. */
+function razreshit(s, al, F) {
+  var q = sily(al, F, s);
+  if (q.skol && !s.skol) s.skol = true;
+}
+
+/* Всё, что демка утверждает. СИ, кроме тяги (доля mg, как на ползунке) и
+   углов альфа (градусы). Знаки: a_C к руке +, ε и ω против часовой +,
+   friction к руке + (в этой геометрии он всегда от руки, то есть отрицателен). */
+function izmereniya(s, alfaDeg, F) {
+  var al = rad(alfaDeg);
+  var q = sily(al, F, s), ca = Math.cos(al), sa = Math.sin(al);
+  var vs = s.v + s.om * R;
+  var d = ca - RV / R;
+  var fc = (KI * ca + RV / R) / (1 + KI);
+  var K = 0.5 * M * s.v * s.v + 0.5 * IC * s.om * s.om;
+  var LO = IC * s.om - M * R * s.v;
+  var ose = Math.abs(s.om) > 1e-9 ? s.v / s.om : null;           /* высота мгновенной оси над центром */
+  return {
+    alpha: alfaDeg, alphaCrit: Math.round(ALFA_KR * 180 / Math.PI * 1e9) / 1e9,
+    F: F, FN: q.Fn,
+    regime: Math.abs(d) < 1e-9 ? 'critical' : d > 0 ? 'toward' : 'away',
+    slipping: q.skol,
+    motion: q.skol ? 'slipping' : (Math.abs(s.v) < 1e-12 && Math.abs(s.om) < 1e-12 ? 'rest' : 'rolling'),
+    aC: q.a, eps: q.eps,
+    friction: q.f, frictionMax: q.fMax, frictionNeeded: q.fNuzhno, normal: q.N,
+    Fthreshold: MU / (fc + MU * sa),
+    vC: s.v, omega: s.om, slipV: vs, x: s.x, theta: s.th, t: s.t,
+    MA: q.MA, IAeps: IA * q.eps,
+    LO: LO, LObalance: LO - s.Lint,
+    axisY: ose,
+    K: K, workThread: s.A, heat: s.Q, balance: K - s.A + s.Q,
+    q: q
+  };
+}
+
+/* Русская запятая и настоящий минус; крохи печатаются нулём. */
+function num(v, d) {
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) v = 0;
+  return v.toFixed(d).replace('.', ',').replace('-', '−');
+}
+
+/* ══════════════════ сцена ══════════════════
+
+   Слева катушка сбоку на столе: обод, вал, нить с касанием на валу снизу,
+   продолжение линии нити штрихом до стола и плечо от точки касания A до
+   этой линии. Стрелки сил в одном масштабе: тяжесть mg от центра, реакция N
+   и трение f у точки касания, тяга F вдоль нити от точки схода. Камера идёт
+   за катушкой, стол показывает ход рисками через 0,25 м. Внизу полоса
+   «нужное для качения трение против предела μN»: когда нужное длиннее
+   предела, трения покоя не хватает. Справа показания. */
+
+var W = 1000, HGT = 460;
+var PX = 500;                          /* пикселей на метр: обод R = 0,2 м это 100 px */
+var FY = 365;                          /* линия стола */
+var CY = FY - R * PX;                  /* высота центра катушки */
+var CAM0 = 255, LO_X = 200, HI_X = 330;/* где стоит центр; пока он в зоне, камера не едет */
+var NITKA = 230;                       /* длина нити на рисунке до руки, px */
+var SF = 100;                          /* пикселей на mg у стрелок сил */
+var TICK = 0.25;                       /* шаг рисок на столе, м */
+var PANEL_X = 660;                     /* справа от этой черты показания */
+var GS = 700, GX0 = 30, GY = 432, GH = 12;  /* полоса трения: пикселей на mg, место */
+var TAU = 2 * Math.PI;
+var CF = '#e08a52', CN = '#4db6c6', CT = '#e0699a', CR = '#ff7a66', CG = '#a6c35a';
+
+function strelka(ctx, x0, y0, x1, y1, color, width) {
+  var dx = x1 - x0, dy = y1 - y0, Ln = Math.hypot(dx, dy);
+  if (Ln < 1) return;
+  var ux = dx / Ln, uy = dy / Ln;
+  var head = Math.min(13, Ln * 0.5);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1 - ux * head - uy * head * 0.38, y1 - uy * head + ux * head * 0.38);
+  ctx.lineTo(x1 - ux * head * 0.72, y1 - uy * head * 0.72);
+  ctx.lineTo(x1 - ux * head + uy * head * 0.38, y1 - uy * head - ux * head * 0.38);
+  ctx.closePath(); ctx.fill();
+}
+
+/* Какая из картин показана: от неё зависят подпись и пересборка текста. */
+function kartina(m, s) {
+  if (m.slipping) return s.skol && m.q.kach ? 'gasnet' : 'skolzit';
+  if (m.F === 0) return 'netyagi';
+  if (m.regime === 'critical') return Math.abs(s.v) < 1e-9 ? 'stoit' : 'ravnomerno';
+  return m.regime;
+}
+
+function Katushka() {
+  var st = useRef({ s: nach(), alfa: ALFA0, F: F0, cam: 0, idet: true, key: '' }).current;
+  var pair = useState({ alfa: ALFA0, F: F0, idet: true, key: '' });
+  var ui = pair[0], setUi = pair[1];
+
+  function pokazaniya() {
+    var m = izmereniya(st.s, st.alfa, st.F);
+    delete m.q;
+    window.__demoState = m;
+  }
+  function obnovit() {
+    var m = izmereniya(st.s, st.alfa, st.F);
+    st.key = kartina(m, st.s);
+    setUi({ alfa: st.alfa, F: st.F, idet: st.idet, key: st.key });
+    pokazaniya();
+  }
+
+  function step(dt) {
+    if (!st.idet) return;
+    prodvinut(st.s, rad(st.alfa), st.F, dt);
+    var m = izmereniya(st.s, st.alfa, st.F);
+    if (kartina(m, st.s) !== st.key) obnovit(); else pokazaniya();
+  }
+
+  function draw(ctx) {
+    var tone = C.tones(ctx), ink = tone.ink, muted = tone.muted;
+    var INK = 'rgb(' + ink + ')', MUT = 'rgb(' + muted + ')';
+    function ia(a) { return 'rgba(' + ink + ',' + a + ')'; }
+    function ma(a) { return 'rgba(' + muted + ',' + a + ')'; }
+    var s = st.s, al = rad(st.alfa), F = st.F;
+    var m = izmereniya(s, st.alfa, F), q = m.q;
+    var ca = Math.cos(al), sa = Math.sin(al);
+
+    /* камера идёт за катушкой, когда та выходит из рабочей зоны канвы */
+    var cx = CAM0 + (s.x - st.cam) * PX;
+    if (cx > HI_X) { st.cam = s.x - (HI_X - CAM0) / PX; cx = HI_X; }
+    else if (cx < LO_X) { st.cam = s.x - (LO_X - CAM0) / PX; cx = LO_X; }
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, PANEL_X - 8, HGT); ctx.clip();
+
+    /* стол: поверхность, полоса и риски через 0,25 м, длинная каждый метр */
+    var XS0 = 12, XS1 = PANEL_X - 14;
+    ctx.fillStyle = ia(0.05); ctx.fillRect(XS0, FY, XS1 - XS0, 18);
+    ctx.strokeStyle = ma(0.85); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(XS0, FY); ctx.lineTo(XS1, FY); ctx.stroke();
+    var k0 = Math.ceil((st.cam + (XS0 - CAM0) / PX) / TICK), k1 = Math.floor((st.cam + (XS1 - CAM0) / PX) / TICK);
+    ctx.strokeStyle = ma(0.7); ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (var k = k0; k <= k1; k++) {
+      var tx = CAM0 + (k * TICK - st.cam) * PX;
+      ctx.moveTo(tx, FY); ctx.lineTo(tx, FY + (k % 4 === 0 ? 17 : 8));
+    }
+    ctx.stroke();
+    var x0px = CAM0 - st.cam * PX;                             /* где на канве стоит старт: длинная светлая риска */
+    if (x0px > XS0 && x0px < XS1) {
+      ctx.strokeStyle = 'rgb(' + tone.accent + ')'; ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.moveTo(x0px, FY - 14); ctx.lineTo(x0px, FY + 22); ctx.stroke();
+    }
+
+    /* катушка: обод, вал, отметка поворота (одна, чтобы сторону вращения не спутать) */
+    var rp = R * PX, rv = RV * PX;
+    ctx.beginPath(); ctx.arc(cx, CY, rp, 0, TAU);
+    ctx.fillStyle = ia(0.06); ctx.fill();
+    ctx.strokeStyle = ia(0.85); ctx.lineWidth = 2.6; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, CY, rv, 0, TAU);
+    ctx.fillStyle = ia(0.13); ctx.fill();
+    ctx.strokeStyle = ia(0.7); ctx.lineWidth = 2; ctx.stroke();
+    var fi = 2.2 + s.th;                                        /* против часовой: на канве y вниз */
+    var mx = cx + 0.80 * rp * Math.cos(fi), my = CY - 0.80 * rp * Math.sin(fi);
+    ctx.strokeStyle = ia(0.45); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx, CY); ctx.lineTo(mx, my); ctx.stroke();
+    ctx.fillStyle = INK;
+    ctx.beginPath(); ctx.arc(mx, my, 7, 0, TAU); ctx.fill();
+
+    /* нить: точка схода T на валу снизу, линия действия, продолжение до стола */
+    var Tx = cx + rv * sa, Ty = CY + rv * ca;
+    var ux = ca, uy = -sa;
+    var Ex = Tx + NITKA * ux, Ey = Ty + NITKA * uy;
+    if (sa > 0.02) {
+      var tf = (Ty - FY) / sa;                                  /* параметр, при котором продолжение нити садится на стол */
+      var Xx = Tx + ux * tf;
+      ctx.save();
+      ctx.setLineDash([6, 6]); ctx.strokeStyle = ma(0.8); ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(Tx, Ty); ctx.lineTo(Xx, FY); ctx.stroke();
+      ctx.restore();
+      ctx.strokeStyle = ma(0.9); ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.arc(Xx, FY, 6, 0, TAU); ctx.stroke();
+    }
+    /* плечо силы относительно A: перпендикуляр от A к линии действия */
+    var dd = (cx - Tx) * ux + (FY - Ty) * uy;
+    var Px = Tx + dd * ux, Py = Ty + dd * uy;
+    if (Math.hypot(Px - cx, Py - FY) > 7) {
+      ctx.save();
+      ctx.setLineDash([2, 4]); ctx.strokeStyle = ia(0.6); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx, FY); ctx.lineTo(Px, Py); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.strokeStyle = ia(0.9); ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(Tx, Ty); ctx.lineTo(Ex, Ey); ctx.stroke();
+    ctx.fillStyle = INK;
+    ctx.beginPath(); ctx.arc(Tx, Ty, 4, 0, TAU); ctx.fill();
+    /* рука */
+    ctx.beginPath(); ctx.arc(Ex, Ey, 9, 0, TAU);
+    ctx.fillStyle = ia(0.12); ctx.fill();
+    ctx.strokeStyle = ia(0.9); ctx.lineWidth = 2.2; ctx.stroke();
+    C.label(ctx, Ex + 16, Ey - 6, 'рука', 17, MUT, 'left');
+    /* угол нити с горизонтом */
+    if (st.alfa >= 8) {
+      var qx = Tx + 150 * ux, qy = Ty + 150 * uy;
+      ctx.save();
+      ctx.setLineDash([3, 4]); ctx.strokeStyle = ma(0.8); ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(qx, qy); ctx.lineTo(qx + 76, qy); ctx.stroke();
+      ctx.restore();
+      ctx.strokeStyle = ma(0.95); ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.arc(qx, qy, 52, -al, 0, false); ctx.stroke();
+      C.label(ctx, qx + 70 * Math.cos(al / 2) + 4, qy - 70 * Math.sin(al / 2) + 6, 'α', 19, MUT, 'left');
+    }
+
+    /* силы, один масштаб */
+    var lF = F * SF;
+    if (lF > 1) {
+      strelka(ctx, Tx, Ty, Tx + lF * ux, Ty + lF * uy, CF, 4);
+      C.label(ctx, Tx + (lF + 18) * ux + 2, Ty + (lF + 18) * uy + 6, 'F', 19, CF, 'center');
+    }
+    strelka(ctx, cx + 8, CY, cx + 8, CY + SF, ma(0.95), 3.4);            /* тяжесть mg */
+    C.label(ctx, cx + 20, FY - 30, 'mg', 17, MUT, 'left');
+    var lN = q.N / (M * G) * SF;
+    if (lN > 1) {
+      strelka(ctx, cx - 8, FY, cx - 8, FY - lN, CN, 3.4);               /* реакция стола */
+      C.label(ctx, cx - 20, FY - lN + 12, 'N', 19, CN, 'right');
+    }
+    var lf = Math.abs(q.f) / (M * G) * SF;
+    if (lf > 0.5) {
+      var dir = q.f > 0 ? 1 : -1;
+      strelka(ctx, cx, FY - 4, cx + dir * lf, FY - 4, CT, 4);
+      C.label(ctx, cx + dir * (lf + 8), FY - 12, 'f', 19, CT, dir > 0 ? 'left' : 'right');
+    }
+
+    /* точки C, A и мгновенная ось при скольжении */
+    ctx.fillStyle = INK;
+    ctx.beginPath(); ctx.arc(cx, CY, 4.5, 0, TAU); ctx.fill();
+    C.label(ctx, cx + 9, CY - 9, 'C', 17, MUT, 'left');
+    ctx.beginPath(); ctx.arc(cx, FY, 5, 0, TAU); ctx.fill();
+    C.label(ctx, cx + 9, FY + 36, 'A', 17, MUT, 'left');
+    if (q.skol && m.axisY != null && Math.abs(m.axisY) < 3 * R && (Math.abs(s.v) > 1e-6 || Math.abs(s.om) > 1e-6)) {
+      var ay = CY - m.axisY * PX;
+      ctx.strokeStyle = CG; ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.arc(cx, ay, 8, 0, TAU); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx - 5, ay - 5); ctx.lineTo(cx + 5, ay + 5); ctx.moveTo(cx - 5, ay + 5); ctx.lineTo(cx + 5, ay - 5); ctx.stroke();
+      C.label(ctx, cx - 16, ay + 6, 'мгновенная ось', 17, CG, 'right');
+    }
+
+    /* уголок: α, время, знак вращения */
+    C.label(ctx, 16, 28, 'α = ' + num(st.alfa, st.alfa % 1 ? 1 : 0) + '°', 19, INK, 'left');
+    C.label(ctx, 16, 52, 'критический ' + num(m.alphaCrit, 0) + '°', 17, MUT, 'left');
+    C.label(ctx, 16, 76, 't = ' + num(s.t, 2) + ' с', 17, MUT, 'left');
+    C.label(ctx, 16, 100, 'x = ' + num(s.x, 2) + ' м', 17, MUT, 'left');
+    C.label(ctx, 16, 124, 'ε и M: против часовой +', 17, MUT, 'left');
+
+    /* полоса трения: нужное для качения и предел μN */
+    var need = q.fNuzhno / (M * G), lim = q.fMax / (M * G);
+    ctx.fillStyle = ia(0.08);
+    C.roundRect(ctx, GX0, GY, 0.7 * GS, GH, 4); ctx.fill();
+    var wNeed = Math.min(need, 0.7) * GS, wLim = Math.min(lim, 0.7) * GS;
+    ctx.fillStyle = CT; ctx.fillRect(GX0, GY, Math.min(wNeed, wLim), GH);
+    if (wNeed > wLim) { ctx.fillStyle = CR; ctx.fillRect(GX0 + wLim, GY, wNeed - wLim, GH); }
+    ctx.strokeStyle = INK; ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.moveTo(GX0 + wLim, GY - 6); ctx.lineTo(GX0 + wLim, GY + GH + 6); ctx.stroke();
+    C.label(ctx, GX0, GY - 10, 'трение для качения ' + num(need, 3) + ' mg, предел μN ' + num(lim, 3) + ' mg' +
+            (need > lim * (1 + 1e-12) ? ', не хватает' : ''), 17, need > lim * (1 + 1e-12) ? CR : MUT, 'left');
+    ctx.restore();
+
+    /* показания */
+    var c1 = 830, c2 = 995, mgR = M * G * R;
+    var rozn = Math.abs(m.IAeps - m.MA) > 1e-6 * mgR;
+    C.readout(ctx, c1, 40, 'a ЦЕНТРА, м/с²', num(m.aC, 3), CN);
+    C.readout(ctx, c2, 40, 'ε, рад/с²', num(m.eps, 2), CN);
+    C.readout(ctx, c1, 130, 'ТРЕНИЕ f, mg', num(m.friction / (M * G), 3), CT);
+    C.readout(ctx, c2, 130, 'ПРЕДЕЛ μN, mg', num(m.frictionMax / (M * G), 3), MUT);
+    C.readout(ctx, c1, 220, 'M_A, mgR', num(m.MA / mgR, 3), CF);
+    C.readout(ctx, c2, 220, 'I_Aε, mgR', num(m.IAeps / mgR, 3), rozn ? CR : CF);
+    C.readout(ctx, c1, 310, 'СКОЛЬЖЕНИЕ, м/с', num(m.slipV, 3), INK);
+    C.readout(ctx, c2, 310, 'ПОРОГ ТЯГИ, mg', num(m.Fthreshold, 4), CG);
+  }
+
+  var ref = C.useStage(W, HGT, step, draw);
+  if (!window.__demoState) pokazaniya();
+
+  /* ручки для автопроверки: модель без интерфейса и установка параметров */
+  window.__demoModel = { sily: sily, nach: nach, prodvinut: prodvinut, izmereniya: izmereniya, razreshit: razreshit,
+                         par: { M: M, R: R, r: RV, k: KI, mu: MU, g: G, IC: IC, IA: IA } };
+  window.__demoSet = function (alfaDeg, F) { ustanovit(alfaDeg, F); return window.__demoState; };
+  window.__demoReset = function () { sbros(); return window.__demoState; };
+  window.__demoPause = function (p) { st.idet = !p; obnovit(); return window.__demoState; };
+
+  function ustanovit(alfaDeg, F) {
+    if (alfaDeg != null) st.alfa = C.clamp(alfaDeg, 0, 90);
+    if (F != null) st.F = C.clamp(F, 0, F_MAX);
+    razreshit(st.s, rad(st.alfa), st.F);
+    obnovit();
+  }
+  function setAlfa(v) { ustanovit(v, null); }
+  function setF(v) { ustanovit(null, v); }
+  function sbros() {
+    st.s = nach(); st.cam = 0; st.idet = true;
+    razreshit(st.s, rad(st.alfa), st.F);
+    obnovit();
+  }
+  function pauza() { st.idet = !st.idet; obnovit(); }
+
+  function slova() {
+    var A = function (t) { return '<span class="accent">' + t + '</span>'; };
+    var s = st.s, m = izmereniya(s, st.alfa, st.F), q = m.q;
+    var mg = function (v) { return num(v / (M * G), 3) + ' mg'; };
+    var mgR = M * G * R;
+    var kr = A(num(m.alphaCrit, 0) + '°');
+    var porog = ' Порог тяги на этом угле ' + A(num(m.Fthreshold, 4) + ' mg') + '.';
+    switch (kartina(m, s)) {
+      case 'netyagi':
+        return 'Нить не тянет, трения нет. Катушка ' + (m.motion === 'rest' ? 'стоит' : 'катится равномерно') +
+          '. Тяга и угол нити задаются ползунками.';
+      case 'stoit':
+        return 'Нить идёт под критическим углом ' + kr + ': её линия действия проходит через точку касания A, и момент силы ' +
+          'относительно A равен нулю. Покоившаяся катушка стоит: трение покоя ' + A(mg(q.fNuzhno)) +
+          ' держит всю горизонтальную тягу, предел μN равен ' + mg(q.fMax) + '.' + porog;
+      case 'ravnomerno':
+        return 'Критический угол ' + kr + ': момент относительно A равен нулю, ускорение нулевое. Катящаяся катушка катится равномерно, трение покоя ' +
+          A(mg(q.fNuzhno)) + ' при пределе ' + mg(q.fMax) + '.' + porog;
+      case 'toward':
+        return 'Угол меньше критического: ' + (st.alfa < 0.5 ? 'линия силы идёт параллельно столу выше точки касания A' :
+          'линия силы пересекает стол левее точки касания A') + ', и момент относительно A катит катушку к руке. Качение без проскальзывания, a = ' +
+          A(num(m.aC, 2) + ' м/с²') + '. Трение покоя ' + A(mg(q.fNuzhno)) + ' не больше предела ' + mg(q.fMax) + '.' + porog;
+      case 'away':
+        return 'Угол больше критического: линия силы пересекает стол правее точки касания A, момент относительно A поменял знак, и катушка катится от руки, a = ' +
+          A(num(m.aC, 2) + ' м/с²') + '. Качение без проскальзывания, трение покоя ' + A(mg(q.fNuzhno)) + ' не больше предела ' + mg(q.fMax) + '.' + porog;
+      case 'gasnet':
+        return 'Тяга уже ниже порога, но точка касания ещё скользит, скорость скольжения справа. Трение скольжения ' +
+          A(mg(q.fMax)) + ' гасит скольжение, и когда оно кончится, катушка покатится без проскальзывания.' +
+          (m.regime === 'critical' ? ' На критическом угле она при этом остановится: момент импульса относительно стола нулевой.' : '');
+      default: {
+        var t1 = 'Тяга выше порога ' + A(num(m.Fthreshold, 4) + ' mg') + ': качению нужно трение ' + A(mg(q.fNuzhno)) +
+          ', а предел μN всего ' + A(mg(q.fMax)) + ', и точка касания проскальзывает. ';
+        var t2 = Math.abs(m.aC) < 1e-6 ? 'Центр почти не движется, ' :
+          'Центр едет ' + (m.aC > 0 ? 'к руке' : 'от руки') + ' с ' + A(num(Math.abs(m.aC), 2) + ' м/с²') +
+          ' (' + num(Math.abs(m.aC) / G, 3) + ' g), ';
+        var t3 = 'обод крутится ' + (m.eps > 0 ? 'против' : 'по') + ' часовой стрелки с ' + A(num(Math.abs(m.eps), 1) + ' рад/с²') +
+          (m.aC * m.eps > 0 ? ', то есть против хода' : '') + '. ';
+        var t4 = 'Момент нити относительно A ' + A(num(m.MA / mgR, 3) + ' mgR') + ', а I_Aε даёт ' + A(num(m.IAeps / mgR, 3) + ' mgR') +
+          ': A не мгновенная ось.';
+        var t5 = m.regime === 'critical' ? ' Момент импульса относительно стола нулевой, поэтому обод вдвое быстрее центра.' : '';
+        var t6 = q.N < 0.05 * M * G ? ' Реакция стола почти нулевая: при большей тяге катушка оторвалась бы от стола.' : '';
+        return t1 + t2 + t3 + t4 + t5 + t6;
+      }
+    }
+  }
+
+  function near(a, b) { return Math.abs(a - b) < 1e-9; }
+  return html`
+    <div class="demo">
+      <div class="controls">
+        <${C.Group} label="Угол нити:">
+          <input type="range" class="slider" min=${0} max=${90} step=${1} value=${ui.alfa}
+                 onInput=${function (e) { setAlfa(parseFloat(e.target.value)); }} />
+          <span class="control-value">${num(ui.alfa, ui.alfa % 1 ? 1 : 0) + '°'}</span>
+          <${C.Btn} active=${near(ui.alfa, 30)} onClick=${function () { setAlfa(30); }}>к руке 30°<//>
+          <${C.Btn} active=${near(ui.alfa, 60)} onClick=${function () { setAlfa(60); }}>стоит 60°<//>
+          <${C.Btn} active=${near(ui.alfa, 75)} onClick=${function () { setAlfa(75); }}>от руки 75°<//>
+        <//>
+        <${C.Group} label="Тяга F:">
+          <input type="range" class="slider" min=${0} max=${F_MAX} step=${0.005} value=${ui.F}
+                 onInput=${function (e) { setF(parseFloat(e.target.value)); }} />
+          <span class="control-value">${num(ui.F, 3) + ' mg'}</span>
+          <${C.Btn} active=${near(ui.F, 0.3)} onClick=${function () { setF(0.3); }}>ниже порога 0,3<//>
+          <${C.Btn} active=${near(ui.F, 0.6)} onClick=${function () { setF(0.6); }}>выше порога 0,6<//>
+        <//>
+        <${C.Group}>
+          <${C.Btn} onClick=${pauza}>${ui.idet ? 'Пауза' : 'Пуск'}<//>
+          <${C.Btn} action=${true} onClick=${sbros}>Сброс<//>
+        <//>
+      </div>
+      <canvas class="stage" ref=${ref}></canvas>
+      <${C.Status} html=${slova()} />
+    </div>`;
+}
+
+C.mount(Katushka);
+</script>
+</body>
+</html>
